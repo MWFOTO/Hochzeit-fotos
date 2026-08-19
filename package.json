@@ -1,0 +1,14 @@
+{
+  "name": "event-photo-share",
+  "version": "1.0.0",
+  "description": "Minimalistische Foto-Sharing-App für Events (Upload ohne Login + Live-Diashow)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "archiver": "^7.0.1",
+    "express": "^4.19.2",
+    "multer": "^2.0.0"
+  }
+}
