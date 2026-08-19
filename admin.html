@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Fotos verwalten</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <main class="upload-page">
+    <div class="logo">📦</div>
+    <h1 class="event-title">Fotos verwalten</h1>
+    <p class="event-subtitle">
+      Lade hier alle bisher hochgeladenen Fotos dieses Events als
+      ZIP-Datei herunter, z.B. bevor du den Server nach dem Event abschaltest.
+    </p>
+
+    <button class="upload-btn" id="download-btn" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+        <polyline points="7 10 12 15 17 10"></polyline>
+        <line x1="12" y1="15" x2="12" y2="3"></line>
+      </svg>
+      Alle Fotos als ZIP herunterladen
+    </button>
+
+    <p class="status" id="status"></p>
+  </main>
+
+  <script>
+    // Event-ID aus der URL lesen: /event/123/admin -> "123"
+    const pathParts = window.location.pathname.split('/').filter(Boolean);
+    const eventId = pathParts[1] || 'default';
+
+    const btn = document.getElementById('download-btn');
+    const statusEl = document.getElementById('status');
+
+    btn.addEventListener('click', async () => {
+      statusEl.textContent = 'ZIP wird vorbereitet …';
+      statusEl.className = 'status loading';
+
+      try {
+        const res = await fetch(`/api/event/${encodeURIComponent(eventId)}/download`);
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          statusEl.textContent = '✗ ' + (data.error || 'Download fehlgeschlagen.');
+          statusEl.className = 'status error';
+          return;
+        }
+
+        // Antwort als Datei-Download auslösen
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `event-${eventId}-fotos.zip`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+
+        statusEl.textContent = '✓ Download gestartet.';
+        statusEl.className = 'status success';
+      } catch (err) {
+        statusEl.textContent = '✗ Verbindung fehlgeschlagen.';
+        statusEl.className = 'status error';
+      }
+    });
+  </script>
+</body>
+</html>

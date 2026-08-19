@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+  <title>Fotos teilen</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <main class="upload-page">
+
+    <!-- Platzhalter-Logo. Einfach durch <img src="..."> ersetzen, falls ihr ein echtes Logo habt -->
+    <div class="logo">💍</div>
+
+    <h1 class="event-title">Unsere Hochzeit</h1>
+    <p class="event-subtitle">
+      Schön, dass du dabei bist! Teile deine schönsten Momente –
+      sie erscheinen direkt in unserer Live-Diashow.
+    </p>
+
+    <!-- Sichtbarer Button, öffnet auf dem Smartphone Kamera oder Galerie -->
+    <button class="upload-btn" id="upload-trigger" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+        <circle cx="12" cy="13" r="4"></circle>
+      </svg>
+      Fotos hochladen
+    </button>
+
+    <!-- Verstecktes Datei-Input-Feld.
+         accept="image/*" + capture="environment" -> öffnet auf Mobilgeräten bevorzugt die Kamera,
+         Nutzer können aber trotzdem in die Galerie wechseln.
+         multiple -> mehrere Fotos auf einmal auswählbar. -->
+    <input
+      type="file"
+      id="file-input"
+      accept="image/*"
+      capture="environment"
+      multiple
+    />
+
+    <div class="progress-wrap" id="progress-wrap">
+      <div class="progress-bar" id="progress-bar"></div>
+    </div>
+
+    <p class="status" id="status"></p>
+
+    <!-- Kleine Vorschau der Fotos, die dieser Gast selbst gerade hochgeladen hat -->
+    <div class="thumbs" id="thumbs"></div>
+  </main>
+
+  <script src="/upload.js"></script>
+</body>
+</html>
