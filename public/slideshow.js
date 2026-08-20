@@ -15,7 +15,7 @@
 
 (function () {
   const POLL_INTERVAL_MS = 4000;   // wie oft nach neuen Fotos gefragt wird
-  const SLIDE_INTERVAL_MS = 5000;  // wie lange jedes Foto angezeigt wird
+  const SLIDE_INTERVAL_MS = 5000;  // wie lange jedes Foto angezeigt wird (im Autoplay)
 
   // Event-ID aus der URL extrahieren: /event/123/slideshow -> "123"
   const pathParts = window.location.pathname.split('/').filter(Boolean);
@@ -25,10 +25,16 @@
   const placeholder = document.getElementById('placeholder');
   const counterEl = document.getElementById('counter');
   const newBadge = document.getElementById('new-badge');
+  const pauseBadge = document.getElementById('pause-badge');
+  const controlsHint = document.getElementById('controls-hint');
+  const navPrev = document.getElementById('nav-prev');
+  const navNext = document.getElementById('nav-next');
 
   let photos = [];        // alle bekannten Fotos { url, timestamp }
   let currentIndex = -1;
   let lastSeen = 0;       // Zeitstempel des zuletzt bekannten Fotos (für ?since=)
+  let isPaused = false;
+  let autoplayTimer = null;
 
   // Zwei übereinanderliegende Layer für die Überblendung
   const layerA = createSlideLayer();
@@ -39,7 +45,7 @@
   function createSlideLayer() {
     const div = document.createElement('div');
     div.className = 'slide';
-    container.appendChild(div);
+    container.insertBefore(div, controlsHint); // hinter den Steuerelementen einfügen
     return div;
   }
 
@@ -102,10 +108,56 @@
     showSlide(currentIndex + 1);
   }
 
+  function prevSlide() {
+    if (photos.length === 0) return;
+    showSlide(currentIndex - 1);
+  }
+
+  // ---------------------------------------------------------
+  // Autoplay: läuft automatisch weiter, außer bei Pause
+  // ---------------------------------------------------------
+  function startAutoplay() {
+    stopAutoplayTimer();
+    autoplayTimer = setInterval(() => {
+      if (!isPaused) nextSlide();
+    }, SLIDE_INTERVAL_MS);
+  }
+
+  function stopAutoplayTimer() {
+    if (autoplayTimer) clearInterval(autoplayTimer);
+  }
+
+  // Manuelles Blättern setzt den Autoplay-Timer zurück, damit nach einem Klick
+  // nicht sofort wieder automatisch weitergesprungen wird.
+  function manualNav(direction) {
+    if (direction === 'next') nextSlide(); else prevSlide();
+    startAutoplay();
+  }
+
+  function togglePause() {
+    isPaused = !isPaused;
+    pauseBadge.classList.toggle('show', isPaused);
+  }
+
+  // ---------------------------------------------------------
+  // Steuerung: Tastatur (← → Leertaste) und Klick-Zonen
+  // ---------------------------------------------------------
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight') manualNav('next');
+    else if (e.key === 'ArrowLeft') manualNav('prev');
+    else if (e.code === 'Space') { e.preventDefault(); togglePause(); }
+  });
+
+  navPrev.addEventListener('click', () => manualNav('prev'));
+  navNext.addEventListener('click', () => manualNav('next'));
+
+  // Steuerungshinweis nach ein paar Sekunden ausblenden, damit er nicht dauerhaft stört
+  setTimeout(() => controlsHint.classList.add('fade-out'), 6000);
+
   // ---------------------------------------------------------
   // Intervalle starten
   // ---------------------------------------------------------
   fetchNewPhotos(); // sofort beim Laden einmal prüfen
   setInterval(fetchNewPhotos, POLL_INTERVAL_MS);
-  setInterval(nextSlide, SLIDE_INTERVAL_MS);
+  startAutoplay();
 })();

@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Fotogalerie</title>
+  <link rel="stylesheet" href="/style.css" />
+  <style>
+    /* Nur für die Galerie: eigenes Grid-Layout, hier direkt im Dokument statt in style.css,
+       damit es die anderen Seiten nicht beeinflusst. */
+    .gallery-page {
+      min-height: 100vh;
+      padding: 28px 16px 60px;
+      max-width: 720px;
+      margin: 0 auto;
+    }
+    .gallery-header {
+      text-align: center;
+      margin-bottom: 24px;
+    }
+    .gallery-header h1 {
+      font-size: 1.4rem;
+      margin: 0 0 6px;
+    }
+    .gallery-header p {
+      color: var(--color-muted);
+      font-size: 0.9rem;
+      margin: 0 0 18px;
+    }
+    .gallery-download-all {
+      appearance: none;
+      border: none;
+      background: var(--color-accent);
+      color: white;
+      font-size: 0.9rem;
+      font-weight: 600;
+      padding: 12px 24px;
+      border-radius: 999px;
+      cursor: pointer;
+    }
+    .gallery-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+    }
+    .gallery-grid img {
+      width: 100%;
+      aspect-ratio: 1 / 1;
+      object-fit: cover;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    .gallery-empty {
+      text-align: center;
+      color: var(--color-muted);
+      margin-top: 60px;
+    }
+    /* Vollbild-Vorschau bei Klick auf ein Foto */
+    .lightbox {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.92);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 20px;
+      padding: 20px;
+    }
+    .lightbox.open { display: flex; }
+    .lightbox img {
+      max-width: 100%;
+      max-height: 75vh;
+      border-radius: 8px;
+    }
+    .lightbox-actions {
+      display: flex;
+      gap: 12px;
+    }
+    .lightbox-actions a, .lightbox-actions button {
+      appearance: none;
+      border: none;
+      background: var(--color-accent);
+      color: white;
+      padding: 10px 20px;
+      border-radius: 999px;
+      font-size: 0.9rem;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .lightbox-actions button.secondary {
+      background: rgba(255,255,255,0.15);
+    }
+  </style>
+</head>
+<body>
+  <main class="gallery-page">
+    <div class="gallery-header">
+      <h1>📷 Fotogalerie</h1>
+      <p>Alle bisher geteilten Fotos. Zum Speichern einfach antippen.</p>
+      <button class="gallery-download-all" id="download-all-btn">Alle als ZIP herunterladen</button>
+    </div>
+
+    <div class="gallery-empty" id="empty-msg">Noch keine Fotos vorhanden.</div>
+    <div class="gallery-grid" id="grid"></div>
+  </main>
+
+  <!-- Vollbild-Vorschau eines einzelnen Fotos mit Download-Button -->
+  <div class="lightbox" id="lightbox">
+    <img id="lightbox-img" src="" alt="Foto" />
+    <div class="lightbox-actions">
+      <a id="lightbox-download" href="" download>⬇ Speichern</a>
+      <button class="secondary" id="lightbox-close">Schließen</button>
+    </div>
+  </div>
+
+  <script>
+    // Event-ID aus der URL lesen: /event/123/gallery -> "123"
+    const pathParts = window.location.pathname.split('/').filter(Boolean);
+    const eventId = pathParts[1] || 'default';
+
+    const grid = document.getElementById('grid');
+    const emptyMsg = document.getElementById('empty-msg');
+    const downloadAllBtn = document.getElementById('download-all-btn');
+    const lightbox = document.getElementById('lightbox');
+    const lightboxImg = document.getElementById('lightbox-img');
+    const lightboxDownload = document.getElementById('lightbox-download');
+    const lightboxClose = document.getElementById('lightbox-close');
+
+    async function loadPhotos() {
+      try {
+        const res = await fetch(`/api/event/${encodeURIComponent(eventId)}/photos`);
+        const data = await res.json();
+        renderPhotos(data.photos || []);
+      } catch (err) {
+        console.warn('Fotos konnten nicht geladen werden', err);
+      }
+    }
+
+    function renderPhotos(photos) {
+      grid.innerHTML = '';
+      emptyMsg.style.display = photos.length === 0 ? 'block' : 'none';
+
+      // neueste zuerst anzeigen
+      [...photos].reverse().forEach((photo) => {
+        const img = document.createElement('img');
+        img.src = photo.url;
+        img.loading = 'lazy';
+        img.addEventListener('click', () => openLightbox(photo.url));
+        grid.appendChild(img);
+      });
+    }
+
+    function openLightbox(url) {
+      lightboxImg.src = url;
+      lightboxDownload.href = url;
+      // Dateinamen fürs Download-Attribut aus der URL ableiten
+      lightboxDownload.download = url.split('/').pop();
+      lightbox.classList.add('open');
+    }
+
+    lightboxClose.addEventListener('click', () => lightbox.classList.remove('open'));
+    lightbox.addEventListener('click', (e) => {
+      if (e.target === lightbox) lightbox.classList.remove('open');
+    });
+
+    downloadAllBtn.addEventListener('click', () => {
+      window.location.href = `/api/event/${encodeURIComponent(eventId)}/download`;
+    });
+
+    loadPhotos();
+    setInterval(loadPhotos, 5000); // Galerie hält sich ebenfalls automatisch aktuell
+  </script>
+</body>
+</html>

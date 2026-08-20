@@ -49,7 +49,6 @@ body {
 }
 
 .logo {
-   object-fit:cover;
   width: 96px;
   height: 96px;
   border-radius: 50%;
@@ -237,4 +236,54 @@ body {
 .new-photo-badge.show {
   opacity: 1;
   transform: translateY(0);
+}
+
+/* Klick-Zonen für manuelle Navigation (unsichtbar, je halbe Bildschirmbreite) */
+.nav-zone {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 50%;
+  z-index: 8;
+  cursor: pointer;
+}
+
+.nav-zone-left { left: 0; }
+.nav-zone-right { right: 0; }
+
+.pause-badge {
+  position: absolute;
+  top: 20px;
+  left: 24px;
+  background: rgba(224, 98, 90, 0.9);
+  color: white;
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  opacity: 0;
+  transform: translateY(-8px);
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  z-index: 10;
+}
+
+.pause-badge.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.controls-hint {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: rgba(255,255,255,0.5);
+  font-size: 0.8rem;
+  letter-spacing: 0.3px;
+  z-index: 10;
+  transition: opacity 0.6s ease;
+  pointer-events: none;
+}
+
+.controls-hint.fade-out {
+  opacity: 0;
 }
