@@ -38,6 +38,12 @@ Der Server läuft danach auf **http://localhost:3000**.
   `http://localhost:3000/event/123/admin`
   Diese Seite hat kein Passwort, also den Link nicht an Gäste weitergeben.
 
+- **Galerie (für Gäste – alle Fotos ansehen & einzeln speichern):**
+  `http://localhost:3000/event/123/gallery`
+  Zeigt alle Fotos als Raster. Antippen öffnet eine Vollbild-Vorschau mit
+  Speichern-Button. Oben gibt es außerdem "Alle als ZIP herunterladen" –
+  auch Gäste können sich so alle Fotos auf einmal sichern.
+
 Die `123` ist die Event-ID und frei wählbar — jede beliebige ID erzeugt
 automatisch ihren eigenen, getrennten Fotoordner. So könnt ihr mehrere
 Events parallel betreiben, z. B. `/event/hochzeit-anna-tom`.
@@ -53,6 +59,8 @@ Events parallel betreiben, z. B. `/event/hochzeit-anna-tom`.
 - **Diashow:** Fragt alle 4 Sekunden `GET /api/event/:id/photos?since=...`
   ab, um nur neu hinzugekommene Fotos zu holen, und blendet alle 5 Sekunden
   sanft zum nächsten Bild über. Kein Neuladen der Seite nötig.
+  **Steuerung:** Pfeiltasten ← → zum manuellen Blättern, Leertaste zum
+  Pausieren/Fortsetzen, oder auf die linke/rechte Bildschirmhälfte klicken.
 
 ## Deployment auf Render.com (öffentlich erreichbar)
 

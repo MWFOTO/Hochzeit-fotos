@@ -66,10 +66,12 @@ const upload = multer({
   }
 });
 
-// Verhindert simple Path-Traversal-Angriffe über die Event-ID in der URL
+// Verhindert simple Path-Traversal-Angriffe über die Event-ID in der URL.
+// Zusätzlich wird die ID klein geschrieben, damit z.B. "Johanna-Bastian" und
+// "johanna-bastian" garantiert im selben Ordner landen (Gäste vertippen sich
+// bei Groß-/Kleinschreibung erfahrungsgemäß leicht).
 function sanitizeEventId(id) {
   return String(id).replace(/[^a-zA-Z0-9_-]/g, '').toLowerCase();
-}
 }
 
 // ---------------------------------------------------------
@@ -97,6 +99,11 @@ app.get('/event/:eventId/slideshow', (req, res) => {
 // nicht an die Gäste weitergeben.
 app.get('/event/:eventId/admin', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+});
+
+// Galerie für Gäste: alle Fotos ansehen und einzeln oder als ZIP herunterladen
+app.get('/event/:eventId/gallery', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'gallery.html'));
 });
 
 // ---------------------------------------------------------
