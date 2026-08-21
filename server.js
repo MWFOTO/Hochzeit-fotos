@@ -68,7 +68,8 @@ const upload = multer({
 
 // Verhindert simple Path-Traversal-Angriffe über die Event-ID in der URL
 function sanitizeEventId(id) {
-  return String(id).replace(/[^a-zA-Z0-9_-]/g, '');
+  return String(id).replace(/[^a-zA-Z0-9_-]/g, '').toLowerCase();
+}
 }
 
 // ---------------------------------------------------------
