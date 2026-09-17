@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Zahlung erfolgreich</title>
+  <link rel="stylesheet" href="/style.css" />
+  <style>
+    .success-page {
+      max-width: 440px;
+      margin: 0 auto;
+      padding: 48px 20px;
+      text-align: center;
+    }
+    .success-icon {
+      font-size: 3rem;
+      margin-bottom: 12px;
+    }
+    .link-list {
+      text-align: left;
+      margin-top: 28px;
+    }
+    .link-card {
+      background: white;
+      border: 1px solid #eee;
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 12px;
+    }
+    .link-card .link-title {
+      font-weight: 600;
+      font-size: 0.9rem;
+      margin-bottom: 4px;
+    }
+    .link-card .link-desc {
+      font-size: 0.8rem;
+      color: var(--color-muted);
+      margin-bottom: 8px;
+    }
+    .link-card .link-url {
+      display: block;
+      word-break: break-all;
+      font-size: 0.85rem;
+      color: var(--color-accent-dark);
+      background: #faf5ec;
+      padding: 8px 10px;
+      border-radius: 8px;
+      text-decoration: none;
+    }
+    .pending-msg {
+      color: var(--color-muted);
+      font-size: 0.9rem;
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+  <main class="success-page">
+    <div class="success-icon">🎉</div>
+    <h1>Danke für deine Zahlung!</h1>
+    <p id="status-text">Wird geprüft …</p>
+
+    <div class="link-list" id="link-list" style="display:none;"></div>
+    <p class="pending-msg" id="pending-msg" style="display:none;">
+      Die Zahlungsbestätigung kann ein paar Sekunden dauern. Diese Seite aktualisiert
+      sich automatisch, sobald alles bereit ist.
+    </p>
+  </main>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const sessionId = params.get('session_id');
+    const statusText = document.getElementById('status-text');
+    const linkList = document.getElementById('link-list');
+    const pendingMsg = document.getElementById('pending-msg');
+
+    async function checkStatus() {
+      if (!sessionId) {
+        statusText.textContent = 'Keine Bestellung gefunden.';
+        return;
+      }
+      try {
+        const res = await fetch(`/api/checkout/${encodeURIComponent(sessionId)}`);
+        const data = await res.json();
+
+        if (!res.ok) {
+          statusText.textContent = 'Bestellung nicht gefunden.';
+          return;
+        }
+
+        if (data.status === 'paid') {
+          const base = window.location.origin;
+          const eventId = data.eventId;
+          statusText.textContent = `Euer Event "${eventId}" ist aktiv!`;
+          pendingMsg.style.display = 'none';
+          linkList.style.display = 'block';
+          linkList.innerHTML = `
+            ${linkCard('📸 Für eure Gäste', 'Diesen Link per QR-Code oder WhatsApp teilen – hier laden Gäste Fotos hoch.', `${base}/event/${eventId}`)}
+            ${linkCard('🖥️ Für den Beamer', 'Auf dem Laptop am Beamer öffnen, Vollbild (F11) – zeigt die Live-Diashow.', `${base}/event/${eventId}/slideshow`)}
+            ${linkCard('🖼️ Galerie für Gäste', 'Optional an Gäste weitergeben – hier können sie alle Fotos ansehen & speichern.', `${base}/event/${eventId}/gallery`)}
+            ${linkCard('⚙️ Nur für euch', 'Zum Herunterladen aller Fotos als ZIP. Nicht an Gäste weitergeben!', `${base}/event/${eventId}/admin`)}
+          `;
+        } else {
+          pendingMsg.style.display = 'block';
+          setTimeout(checkStatus, 2000); // in 2 Sekunden erneut prüfen
+        }
+      } catch (err) {
+        statusText.textContent = 'Verbindung fehlgeschlagen.';
+      }
+    }
+
+    function linkCard(title, desc, url) {
+      return `
+        <div class="link-card">
+          <div class="link-title">${title}</div>
+          <div class="link-desc">${desc}</div>
+          <a class="link-url" href="${url}" target="_blank">${url}</a>
+        </div>
+      `;
+    }
+
+    checkStatus();
+  </script>
+</body>
+</html>

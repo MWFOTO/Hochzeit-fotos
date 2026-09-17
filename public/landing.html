@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Event-Fotos — Eigene Foto-Diashow für dein Event</title>
+  <link rel="stylesheet" href="/style.css" />
+  <style>
+    .landing-page {
+      max-width: 480px;
+      margin: 0 auto;
+      padding: 40px 20px 60px;
+    }
+    .landing-hero {
+      text-align: center;
+      margin-bottom: 32px;
+    }
+    .landing-hero h1 {
+      font-size: 1.6rem;
+      margin: 0 0 10px;
+    }
+    .landing-hero p {
+      color: var(--color-muted);
+      font-size: 0.95rem;
+      line-height: 1.5;
+    }
+    .plan-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 28px;
+    }
+    .plan-card {
+      border: 2px solid #eee;
+      border-radius: 14px;
+      padding: 16px;
+      text-align: center;
+      cursor: pointer;
+      background: white;
+      transition: border-color 0.15s ease, transform 0.15s ease;
+    }
+    .plan-card.selected {
+      border-color: var(--color-accent);
+      transform: translateY(-2px);
+    }
+    .plan-card .plan-label {
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .plan-card .plan-price {
+      font-size: 1.3rem;
+      font-weight: 700;
+      color: var(--color-accent-dark);
+    }
+    .form-group {
+      margin-bottom: 16px;
+    }
+    .form-group label {
+      display: block;
+      font-size: 0.85rem;
+      color: var(--color-muted);
+      margin-bottom: 6px;
+    }
+    .form-group input {
+      width: 100%;
+      padding: 14px;
+      border-radius: 10px;
+      border: 1px solid #ddd;
+      font-size: 1rem;
+    }
+    .form-group input:focus {
+      outline: none;
+      border-color: var(--color-accent);
+    }
+    .availability-msg {
+      font-size: 0.8rem;
+      margin-top: 6px;
+      min-height: 18px;
+    }
+    .availability-msg.ok { color: var(--color-success); }
+    .availability-msg.taken { color: var(--color-error); }
+    .checkout-btn {
+      width: 100%;
+      appearance: none;
+      border: none;
+      background: var(--color-accent);
+      color: white;
+      font-size: 1.05rem;
+      font-weight: 600;
+      padding: 18px;
+      border-radius: 999px;
+      cursor: pointer;
+      margin-top: 8px;
+    }
+    .checkout-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .checkout-error {
+      color: var(--color-error);
+      font-size: 0.9rem;
+      margin-top: 10px;
+      text-align: center;
+      min-height: 20px;
+    }
+  </style>
+</head>
+<body>
+  <main class="landing-page">
+    <div class="landing-hero">
+      <div class="logo" style="margin: 0 auto 16px;">📸</div>
+      <h1>Eure Hochzeit, live geteilt</h1>
+      <p>Gäste laden Fotos direkt vom Handy hoch – ganz ohne App oder Registrierung.
+         Sie erscheinen sofort in eurer Live-Diashow für den Beamer.</p>
+    </div>
+
+    <div class="plan-grid" id="plan-grid">
+      <!-- wird per JS aus /api/plans befüllt -->
+    </div>
+
+    <div class="form-group">
+      <label for="event-id">Eure Event-ID (Teil des Links, den ihr an Gäste schickt)</label>
+      <input type="text" id="event-id" placeholder="z.B. johanna-bastian" autocomplete="off" />
+      <div class="availability-msg" id="availability-msg"></div>
+    </div>
+
+    <div class="form-group">
+      <label for="email">E-Mail-Adresse (für die Zahlungsbestätigung)</label>
+      <input type="email" id="email" placeholder="du@beispiel.de" autocomplete="email" />
+    </div>
+
+    <button class="checkout-btn" id="checkout-btn">Jetzt bezahlen</button>
+    <div class="checkout-error" id="checkout-error"></div>
+  </main>
+
+  <script>
+    const planGrid = document.getElementById('plan-grid');
+    const eventIdInput = document.getElementById('event-id');
+    const availabilityMsg = document.getElementById('availability-msg');
+    const emailInput = document.getElementById('email');
+    const checkoutBtn = document.getElementById('checkout-btn');
+    const checkoutError = document.getElementById('checkout-error');
+
+    let plans = {};
+    let selectedPlan = null;
+    let isEventIdAvailable = false;
+
+    // Preise vom Server laden (statt sie doppelt im Frontend zu pflegen)
+    async function loadPlans() {
+      const res = await fetch('/api/plans');
+      plans = await res.json();
+      renderPlans();
+    }
+
+    function renderPlans() {
+      planGrid.innerHTML = '';
+      Object.entries(plans).forEach(([key, plan]) => {
+        const card = document.createElement('div');
+        card.className = 'plan-card';
+        card.dataset.key = key;
+        card.innerHTML = `
+          <div class="plan-label">${plan.label}</div>
+          <div class="plan-price">${(plan.priceCents / 100).toFixed(0)} €</div>
+        `;
+        card.addEventListener('click', () => selectPlan(key));
+        planGrid.appendChild(card);
+      });
+      // Standardmäßig die zweite Option (meist "3 Monate") vorauswählen, falls vorhanden
+      const keys = Object.keys(plans);
+      selectPlan(keys[1] || keys[0]);
+    }
+
+    function selectPlan(key) {
+      selectedPlan = key;
+      document.querySelectorAll('.plan-card').forEach((el) => {
+        el.classList.toggle('selected', el.dataset.key === key);
+      });
+    }
+
+    // Live-Prüfung, ob die eingegebene Event-ID noch frei ist
+    let availabilityTimer;
+    eventIdInput.addEventListener('input', () => {
+      clearTimeout(availabilityTimer);
+      const raw = eventIdInput.value.trim();
+      if (raw.length < 3) {
+        availabilityMsg.textContent = raw.length > 0 ? 'Mindestens 3 Zeichen' : '';
+        availabilityMsg.className = 'availability-msg';
+        isEventIdAvailable = false;
+        return;
+      }
+      availabilityTimer = setTimeout(async () => {
+        const res = await fetch(`/api/event/${encodeURIComponent(raw)}/availability`);
+        const data = await res.json();
+        isEventIdAvailable = data.available;
+        if (data.available) {
+          availabilityMsg.textContent = '✓ Verfügbar';
+          availabilityMsg.className = 'availability-msg ok';
+        } else {
+          availabilityMsg.textContent = '✗ Leider schon vergeben';
+          availabilityMsg.className = 'availability-msg taken';
+        }
+      }, 400);
+    });
+
+    checkoutBtn.addEventListener('click', async () => {
+      checkoutError.textContent = '';
+
+      const eventId = eventIdInput.value.trim();
+      const email = emailInput.value.trim();
+
+      if (eventId.length < 3) {
+        checkoutError.textContent = 'Bitte eine Event-ID mit mindestens 3 Zeichen eingeben.';
+        return;
+      }
+      if (!email.includes('@')) {
+        checkoutError.textContent = 'Bitte eine gültige E-Mail-Adresse eingeben.';
+        return;
+      }
+      if (!selectedPlan) {
+        checkoutError.textContent = 'Bitte eine Laufzeit auswählen.';
+        return;
+      }
+
+      checkoutBtn.disabled = true;
+      checkoutBtn.textContent = 'Einen Moment …';
+
+      try {
+        const res = await fetch('/api/checkout', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ eventId, email, plan: selectedPlan })
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+          checkoutError.textContent = data.error || 'Etwas ist schiefgelaufen.';
+          checkoutBtn.disabled = false;
+          checkoutBtn.textContent = 'Jetzt bezahlen';
+          return;
+        }
+
+        // Weiterleitung zur Stripe-Bezahlseite
+        window.location.href = data.url;
+      } catch (err) {
+        checkoutError.textContent = 'Verbindung fehlgeschlagen. Bitte erneut versuchen.';
+        checkoutBtn.disabled = false;
+        checkoutBtn.textContent = 'Jetzt bezahlen';
+      }
+    });
+
+    loadPlans();
+  </script>
+</body>
+</html>
