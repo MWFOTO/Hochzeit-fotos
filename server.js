@@ -249,9 +249,9 @@ function createApp(options = {}) {
   app.get('/dashboard',(req,res)=>req.user?res.sendFile(path.join(pub,'dashboard.html')):res.redirect('/login'));
   app.get('/success',(req,res)=>req.user?res.sendFile(path.join(pub,'success.html')):res.redirect('/login'));
   app.get('/event/:eventId/admin',loginRequired,owner,(req,res)=>res.redirect('/dashboard'));
-  for(const [suffix,file] of [['','upload.html'],['/gallery','gallery.html'],['/slideshow','slideshow.html']]) app.get(`/event/:eventId${suffix}`,access,(req,res)=>res.sendFile(path.join(pub,file)));
+  for(const [suffix,file] of [['','gallery.html'],['/upload','upload.html'],['/gallery','gallery.html'],['/slideshow','slideshow.html']]) app.get(`/event/:eventId${suffix}`,access,(req,res)=>res.sendFile(path.join(pub,file)));
   // Only intended public assets; source code and generic HTML routes cannot bypass guards.
-  for(const file of ['style.css','upload.js','slideshow.js','guest-access.js','account.js','johanna-bastian.png']) app.get(`/${file}`,(req,res)=>res.sendFile(path.join(pub,file)));
+  for(const file of ['style.css','upload.js','slideshow.js','guest-access.js','account.js','johanna-bastian.png','photographer.webp']) app.get(`/${file}`,(req,res)=>res.sendFile(path.join(pub,file)));
   app.get('/health',(req,res)=>res.json({ok:true}));
   app.use((req,res)=>fail(res,404,'Nicht gefunden.'));
   app.use((err,req,res,next)=>{console.error(err.message);if(!res.headersSent) fail(res,500,'Interner Fehler.');});

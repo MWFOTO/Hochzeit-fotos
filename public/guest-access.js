@@ -33,6 +33,8 @@
   if (eventId) window.fetch(`/api/event/${encodeURIComponent(eventId)}/info`).then(res => res.json()).then(info => {
     const title = document.querySelector('.event-title');
     if (title && info.title) title.textContent = info.title;
+    const subtitle = document.querySelector('.event-subtitle');
+    if (subtitle) subtitle.textContent = info.moderation ? 'Teile deine schönsten Momente. Nach Freigabe sind sie für die Gäste in Galerie und Diashow sichtbar.' : 'Teile deine schönsten Momente. Deine Fotos sind direkt für die Gäste in Galerie und Diashow sichtbar.';
     const hint = document.getElementById('retention-hint');
     if (hint && info.expiresAt) hint.textContent = `Diese Veranstaltung läuft bis ${new Date(info.expiresAt).toLocaleString('de-DE')}. Danach sind die Bilder nicht mehr erreichbar und werden im nächsten Löschlauf entfernt.`;
     const link = document.getElementById('gallery-link');

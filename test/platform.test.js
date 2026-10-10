@@ -62,7 +62,13 @@ test('Checkout idempotency, signature, unpaid/amount/live rejection and delayed 
   assert.equal((await request(`/api/checkout/${paid.id}`,{user:other})).status,404);
   token=app.locals.db.prepare('SELECT guest_token FROM events WHERE id=?').get('birthday').guest_token;
   assert.equal((await request('/event/birthday')).status,403);
-  assert.equal((await request(`/event/birthday?token=${token}`)).status,200);
+  const guestLanding=await request(`/event/birthday?token=${token}`);
+  assert.equal(guestLanding.status,200);
+  assert.match(Buffer.from(guestLanding.data).toString(),/id="upload-link"/);
+  const uploadPage=await request(`/event/birthday/upload?token=${token}`);
+  assert.equal(uploadPage.status,200);
+  assert.match(Buffer.from(uploadPage.data).toString(),/id="file-input"/);
+  assert.equal((await request('/photographer.webp')).status,200);
   assert.equal((await request('/public/server.js')).status,404);assert.equal((await request('/server.js')).status,404);
   assert.equal((await request('/upload.html')).status,404);
 });

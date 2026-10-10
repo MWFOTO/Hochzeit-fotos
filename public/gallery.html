@@ -5,105 +5,18 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Fotogalerie</title>
   <link rel="stylesheet" href="/style.css" />
-  <style>
-    /* Nur für die Galerie: eigenes Grid-Layout, hier direkt im Dokument statt in style.css,
-       damit es die anderen Seiten nicht beeinflusst. */
-    .gallery-page {
-      min-height: 100vh;
-      padding: 28px 16px 60px;
-      max-width: 720px;
-      margin: 0 auto;
-    }
-    .gallery-header {
-      text-align: center;
-      margin-bottom: 24px;
-    }
-    .gallery-header h1 {
-      font-size: 1.4rem;
-      margin: 0 0 6px;
-    }
-    .gallery-header p {
-      color: var(--color-muted);
-      font-size: 0.9rem;
-      margin: 0 0 18px;
-    }
-    .gallery-download-all {
-      appearance: none;
-      border: none;
-      background: var(--color-accent);
-      color: white;
-      font-size: 0.9rem;
-      font-weight: 600;
-      padding: 12px 24px;
-      border-radius: 999px;
-      cursor: pointer;
-    }
-    .gallery-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 6px;
-    }
-    .gallery-grid img {
-      width: 100%;
-      aspect-ratio: 1 / 1;
-      object-fit: cover;
-      border-radius: 8px;
-      cursor: pointer;
-    }
-    .gallery-empty {
-      text-align: center;
-      color: var(--color-muted);
-      margin-top: 60px;
-    }
-    /* Vollbild-Vorschau bei Klick auf ein Foto */
-    .lightbox {
-      display: none;
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,0.92);
-      z-index: 100;
-      align-items: center;
-      justify-content: center;
-      flex-direction: column;
-      gap: 20px;
-      padding: 20px;
-    }
-    .lightbox.open { display: flex; }
-    .lightbox img {
-      max-width: 100%;
-      max-height: 75vh;
-      border-radius: 8px;
-    }
-    .lightbox-actions {
-      display: flex;
-      gap: 12px;
-    }
-    .lightbox-actions a, .lightbox-actions button {
-      appearance: none;
-      border: none;
-      background: var(--color-accent);
-      color: white;
-      padding: 10px 20px;
-      border-radius: 999px;
-      font-size: 0.9rem;
-      text-decoration: none;
-      cursor: pointer;
-    }
-    .lightbox-actions button.secondary {
-      background: rgba(255,255,255,0.15);
-    }
-  </style>
+
 <script src="/guest-access.js"></script>
 </head>
 <body>
   <main class="gallery-page">
     <div class="gallery-header">
-      <h1>📷 Fotogalerie</h1>
-      <p>Alle bisher geteilten Fotos. Zum Speichern einfach antippen.</p>
+      <span class="eyebrow">MOMENTE VON EUCH ALLEN</span><h1 class="event-title">Unsere Fotogalerie</h1>
+      <p>Alle Perspektiven eurer Feier. Tippe auf ein Foto, um es groß anzusehen.</p><div class="actions"><a class="button primary" id="upload-link">＋ Fotos hochladen</a><a class="button secondary" id="slideshow-link">Live-Diashow</a></div><p id="photo-count" class="small" aria-live="polite"></p>
       <button class="gallery-download-all" id="download-all-btn">Alle als ZIP herunterladen</button>
     </div>
 
-    <div class="gallery-empty" id="empty-msg">Noch keine Fotos vorhanden.</div>
+    <div class="gallery-empty" id="empty-msg">Hier beginnt euer gemeinsames Album. Lade das erste Foto hoch!</div>
     <div class="gallery-grid" id="grid"></div>
   </main>
 
@@ -121,6 +34,8 @@
     const pathParts = window.location.pathname.split('/').filter(Boolean);
     const eventId = pathParts[1] || 'default';
 
+    document.getElementById('upload-link').href = guestUrl(`/event/${encodeURIComponent(eventId)}/upload`);
+    document.getElementById('slideshow-link').href = guestUrl(`/event/${encodeURIComponent(eventId)}/slideshow`);
     const grid = document.getElementById('grid');
     const emptyMsg = document.getElementById('empty-msg');
     const downloadAllBtn = document.getElementById('download-all-btn');
@@ -133,24 +48,26 @@
       try {
         const res = await fetch(`/api/event/${encodeURIComponent(eventId)}/photos`);
         const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Galerie konnte nicht geladen werden.');
         const photos = data.photos || [];
         if (lightbox.classList.contains('open') && !photos.some(p => new URL(p.url, location.origin).href === lightboxImg.src)) {
           lightbox.classList.remove('open'); lightboxImg.src = ''; lightboxDownload.href = '';
         }
         renderPhotos(photos);
       } catch (err) {
-        console.warn('Fotos konnten nicht geladen werden', err);
+        emptyMsg.textContent = err.message; emptyMsg.style.display = 'block';
       }
     }
 
     function renderPhotos(photos) {
+      document.getElementById('photo-count').textContent = `${photos.length} ${photos.length === 1 ? 'Foto' : 'Fotos'} · Wird automatisch aktualisiert`;
       grid.innerHTML = '';
       emptyMsg.style.display = photos.length === 0 ? 'block' : 'none';
 
       // neueste zuerst anzeigen
       [...photos].reverse().forEach((photo) => {
         const img = document.createElement('img');
-        img.src = photo.url;
+        img.src = photo.url; img.alt = 'Geteiltes Veranstaltungsfoto'; img.tabIndex = 0; img.setAttribute('role','button'); img.setAttribute('aria-label','Foto groß ansehen'); img.onkeydown = e => {if(e.key==='Enter' || e.key===' '){e.preventDefault();openLightbox(photo.url);}};
         img.loading = 'lazy';
         img.addEventListener('click', () => openLightbox(photo.url));
         grid.appendChild(img);
@@ -174,6 +91,7 @@
       window.location.href = guestUrl(`/api/event/${encodeURIComponent(eventId)}/download`);
     });
 
+    document.addEventListener('keydown', e => { if(e.key==='Escape') lightbox.classList.remove('open'); });
     loadPhotos();
     setInterval(loadPhotos, 5000); // Galerie hält sich ebenfalls automatisch aktuell
   </script>
