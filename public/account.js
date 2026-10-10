@@ -11,12 +11,27 @@
   }
   const login=document.getElementById('login-form');
   if(login) {
-    const submit=async mode=>{
-      try{await api(`/api/auth/${mode}`,'POST',{email:document.getElementById('email').value,password:document.getElementById('password').value});location.href='/dashboard';}catch(err){report(err);}
-    };
-    login.onsubmit=e=>{e.preventDefault();submit('login');};
-    document.getElementById('register').onclick=()=>submit('register');return;
+    const registering=location.pathname==='/register';
+    const password=document.getElementById('password');
+    const confirmation=document.getElementById('password-confirm');
+    if(registering){
+      document.getElementById('auth-eyebrow').textContent='DEIN ERSTES GEMEINSAMES ALBUM';
+      document.getElementById('auth-title').textContent='Konto erstellen';
+      document.getElementById('auth-description').textContent='Mit deinem Konto legst du Veranstaltungen an, erhältst den QR-Code und verwaltest alle Fotos.';
+      document.getElementById('password-hint').hidden=false;
+      document.getElementById('confirm-label').hidden=false;confirmation.required=true;
+      password.autocomplete='new-password';
+      document.getElementById('auth-submit').textContent='Konto erstellen & Event anlegen';
+      const switcher=document.getElementById('auth-switch');switcher.replaceChildren(document.createTextNode('Schon ein Konto? '));const a=document.createElement('a');a.href='/login';a.textContent='Anmelden';switcher.append(a);
+    }
+    login.onsubmit=async e=>{
+      e.preventDefault();
+      if(registering && password.value!==confirmation.value){report(new Error('Die Passwörter stimmen nicht überein.'));confirmation.focus();return;}
+      const button=document.getElementById('auth-submit');button.disabled=true;
+      try{await api(`/api/auth/${registering?'register':'login'}`,'POST',{email:document.getElementById('email').value,password:password.value});location.href='/dashboard';}catch(err){report(err);button.disabled=false;}
+    };return;
   }
+
   const element=(tag,text)=>{const el=document.createElement(tag);if(text)el.textContent=text;return el;};
   const button=(parent,label,action)=>{const el=element('button',label);el.onclick=()=>Promise.resolve(action()).catch(report);parent.append(el);return el;};
   const link=(parent,label,url)=>{const el=element('a',label);el.href=url;el.className='button secondary';parent.append(el);};

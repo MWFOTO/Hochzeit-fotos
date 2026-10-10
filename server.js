@@ -245,6 +245,7 @@ function createApp(options = {}) {
   }
   const pub=path.join(__dirname,'public');
   app.get('/',(req,res)=>res.sendFile(path.join(pub,'landing.html')));
+  app.get('/register',(req,res)=>req.user?res.redirect('/dashboard'):res.sendFile(path.join(pub,'login.html')));
   app.get('/login',(req,res)=>res.sendFile(path.join(pub,'login.html')));
   app.get('/dashboard',(req,res)=>req.user?res.sendFile(path.join(pub,'dashboard.html')):res.redirect('/login'));
   app.get('/success',(req,res)=>req.user?res.sendFile(path.join(pub,'success.html')):res.redirect('/login'));
