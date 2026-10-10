@@ -57,7 +57,8 @@
     xhr.onload = () => {
       showProgress(false);
       if (xhr.status >= 200 && xhr.status < 300) {
-        setStatus('✓ Danke! Deine Fotos wurden hochgeladen.', 'success');
+        const result = JSON.parse(xhr.responseText);
+        setStatus(result.pending ? '✓ Danke! Deine Fotos warten auf Freigabe.' : '✓ Danke! Deine Fotos wurden hochgeladen.', 'success');
         showLocalPreview(files);
         // Datei-Input zurücksetzen, damit dieselbe Datei erneut gewählt werden kann
         fileInput.value = '';

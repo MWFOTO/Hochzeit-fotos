@@ -4,11 +4,22 @@
   "description": "Minimalistische Foto-Sharing-App für Events (Upload ohne Login + Live-Diashow)",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test --test-concurrency=1",
+    "import:legacy": "node scripts/import-legacy.js"
   },
   "dependencies": {
     "archiver": "^7.0.1",
+    "better-sqlite3": "^12.4.1",
     "express": "^4.19.2",
-    "multer": "^2.0.0"
+    "express-rate-limit": "^8.1.0",
+    "helmet": "^8.1.0",
+    "multer": "^2.0.0",
+    "qrcode": "^1.5.4",
+    "sharp": "^0.35.5",
+    "stripe": "^19.1.0"
+  },
+  "engines": {
+    "node": ">=22.13.0"
   }
 }

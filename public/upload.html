@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
   <title>Fotos teilen</title>
   <link rel="stylesheet" href="/style.css" />
+<script src="/guest-access.js"></script>
 </head>
 <body>
   <main class="upload-page">
@@ -12,10 +13,10 @@
     <!-- Platzhalter-Logo. Einfach durch <img src="..."> ersetzen, falls ihr ein echtes Logo habt -->
     <div class="logo">💍</div>
 
-    <h1 class="event-title">Unsere Hochzeit</h1>
+    <h1 class="event-title">Unsere Veranstaltung</h1>
     <p class="event-subtitle">
       Schön, dass du dabei bist! Teile deine schönsten Momente –
-      sie erscheinen direkt in unserer Live-Diashow.
+      nach Freigabe erscheinen sie in der Galerie und Live-Diashow.
     </p>
 
     <!-- Sichtbarer Button, öffnet auf dem Smartphone Kamera oder Galerie -->
@@ -31,6 +32,7 @@
          accept="image/*" + capture="environment" -> öffnet auf Mobilgeräten bevorzugt die Kamera,
          Nutzer können aber trotzdem in die Galerie wechseln.
          multiple -> mehrere Fotos auf einmal auswählbar. -->
+    <p>Bitte lade nur Fotos hoch, die du teilen darfst. Die Gäste mit Veranstaltungslink können freigegebene Bilder ansehen und herunterladen. Bilder werden nach Ablauf der gebuchten Laufzeit automatisch gelöscht. Fragen oder Löschwünsche bitte an den Veranstalter richten.</p>
     <input
       type="file"
       id="file-input"
@@ -44,6 +46,8 @@
     </div>
 
     <p class="status" id="status"></p>
+    <a id="gallery-link">Zur Fotogalerie</a>
+    <p id="retention-hint"></p>
 
     <!-- Kleine Vorschau der Fotos, die dieser Gast selbst gerade hochgeladen hat -->
     <div class="thumbs" id="thumbs"></div>

@@ -54,20 +54,26 @@
   // ---------------------------------------------------------
   async function fetchNewPhotos() {
     try {
-      const res = await fetch(`/api/event/${encodeURIComponent(eventId)}/photos?since=${lastSeen}`);
+      const res = await fetch(`/api/event/${encodeURIComponent(eventId)}/photos`);
       if (!res.ok) return;
       const data = await res.json();
 
-      if (data.photos && data.photos.length > 0) {
-        photos = photos.concat(data.photos);
-        lastSeen = data.photos[data.photos.length - 1].timestamp;
-        flashNewBadge();
-
-        // Falls noch nichts angezeigt wurde, sofort mit dem ersten Bild starten
-        if (currentIndex === -1) {
-          placeholder.style.display = 'none';
-          showSlide(0);
-        }
+      const previous = photos[currentIndex]?.url;
+      const known = new Set(photos.map(photo => photo.url));
+      const updated = data.photos || [];
+      if (updated.some(photo => !known.has(photo.url))) flashNewBadge();
+      photos = updated;
+      if (!photos.length) {
+        currentIndex = -1;
+        layerA.style.backgroundImage = '';
+        layerB.style.backgroundImage = '';
+        placeholder.style.display = 'flex';
+        counterEl.textContent = '';
+      } else {
+        placeholder.style.display = 'none';
+        const index = photos.findIndex(photo => photo.url === previous);
+        if (index < 0) showSlide(0);
+        else {currentIndex = index; counterEl.textContent = `${currentIndex + 1} / ${photos.length}`;}
       }
     } catch (err) {
       // Netzwerkfehler beim Polling einfach ignorieren und beim nächsten Intervall erneut versuchen

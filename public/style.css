@@ -287,3 +287,8 @@ body {
 .controls-hint.fade-out {
   opacity: 0;
 }
+
+.account-page { max-width: 900px; margin: auto; padding: 24px; }
+.account-page article { border: 1px solid #ddd; padding: 16px; margin: 16px 0; border-radius: 12px; }
+.account-page button { margin: 6px; padding: 10px; cursor: pointer; }
+input, select { padding: 8px; max-width: 100%; }

@@ -1,130 +1,33 @@
-/**
- * db.js
- * ---------------------------------------------------------
- * Kleine SQLite-Datenbank, die verwaltet:
- * - welche Event-IDs es gibt
- * - ob sie bezahlt sind
- * - bis wann sie laufen (expires_at)
- *
- * SQLite speichert alles in einer einzigen Datei (events.db).
- * Für den Produktivbetrieb auf Render sollte diese Datei auf dem
- * Persistent Disk liegen (siehe DB_PATH unten), damit sie Neustarts
- * übersteht – genau wie der uploads-Ordner.
- * ---------------------------------------------------------
- */
-
+// Additive migration: existing events and their IDs remain intact.
 const Database = require('better-sqlite3');
-const path = require('path');
-const fs = require('fs');
-
-// DB_PATH kann per Umgebungsvariable überschrieben werden, z.B.
-// DB_PATH=/data/events.db, damit sie auf demselben Persistent Disk
-// liegt wie die Fotos (UPLOAD_DIR=/data/uploads).
-const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'events.db');
-
-// Sicherstellen, dass der Ordner existiert, in dem die DB-Datei liegen soll
-const dbDir = path.dirname(DB_PATH);
-if (!fs.existsSync(dbDir)) {
-  fs.mkdirSync(dbDir, { recursive: true });
-}
-
-const db = new Database(DB_PATH);
-
-// Tabelle einmalig anlegen, falls sie noch nicht existiert
-db.exec(`
-  CREATE TABLE IF NOT EXISTS events (
-    id TEXT PRIMARY KEY,
-    email TEXT,
-    plan TEXT,
-    amount_cents INTEGER,
-    stripe_session_id TEXT,
-    status TEXT NOT NULL DEFAULT 'pending', -- 'pending' oder 'paid'
-    created_at INTEGER NOT NULL,
-    expires_at INTEGER
-  )
-`);
-
-/**
- * Legt einen "pending" (noch nicht bezahlten) Event-Eintrag an,
- * bevor der Nutzer zu Stripe weitergeleitet wird.
- * Falls die ID schon existiert und "pending" ist, wird sie überschrieben
- * (z.B. wenn jemand den Bezahlvorgang abbricht und es erneut versucht).
- */
-function createPendingEvent({ eventId, email, plan, amountCents, sessionId }) {
-  db.prepare(`
-    INSERT INTO events (id, email, plan, amount_cents, stripe_session_id, status, created_at)
-    VALUES (@id, @email, @plan, @amountCents, @sessionId, 'pending', @createdAt)
-    ON CONFLICT(id) DO UPDATE SET
-      email = excluded.email,
-      plan = excluded.plan,
-      amount_cents = excluded.amount_cents,
-      stripe_session_id = excluded.stripe_session_id,
-      status = 'pending',
-      created_at = excluded.created_at,
-      expires_at = NULL
-    WHERE events.status != 'paid' OR events.expires_at < @createdAt
-  `).run({
-    id: eventId,
-    email,
-    plan,
-    amountCents,
-    sessionId,
-    createdAt: Date.now()
-  });
-}
-
-/**
- * Markiert ein Event als bezahlt und setzt das Ablaufdatum,
- * basierend auf der Anzahl gebuchter Monate.
- * Wird vom Stripe-Webhook aufgerufen, sobald die Zahlung bestätigt ist.
- */
-function markEventPaid(sessionId, months) {
-  const now = Date.now();
-  const expiresAt = now + months * 30 * 24 * 60 * 60 * 1000; // ca. 30 Tage pro Monat
-
-  const result = db.prepare(`
-    UPDATE events
-    SET status = 'paid', expires_at = @expiresAt
-    WHERE stripe_session_id = @sessionId
-  `).run({ sessionId, expiresAt });
-
-  return result.changes > 0;
-}
-
-/** Liefert den Event-Datensatz oder undefined, falls es ihn nicht gibt */
-function getEvent(eventId) {
-  return db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
-}
-
-/** Liefert den Event-Datensatz anhand der Stripe-Session-ID (für die Erfolgsseite) */
-function getEventBySessionId(sessionId) {
-  return db.prepare('SELECT * FROM events WHERE stripe_session_id = ?').get(sessionId);
-}
-
-/** true, wenn das Event existiert, bezahlt ist und noch nicht abgelaufen ist */
-function isEventActive(eventId) {
-  const event = getEvent(eventId);
-  if (!event) return false;
-  if (event.status !== 'paid') return false;
-  if (!event.expires_at || event.expires_at < Date.now()) return false;
-  return true;
-}
-
-/** true, wenn diese ID noch frei ist (kein aktives, bezahltes Event) */
-function isEventIdAvailable(eventId) {
-  const event = getEvent(eventId);
-  if (!event) return true;
-  if (event.status === 'paid' && event.expires_at && event.expires_at > Date.now()) {
-    return false; // aktiv bezahlt -> vergeben
+const fs = require('node:fs');
+const path = require('node:path');
+function openDatabase(filename) {
+  fs.mkdirSync(path.dirname(filename), { recursive: true });
+  const db = new Database(filename);
+  db.pragma('journal_mode = WAL');
+  db.pragma('foreign_keys = ON');
+  db.exec(`CREATE TABLE IF NOT EXISTS events (
+    id TEXT PRIMARY KEY, email TEXT, plan TEXT, amount_cents INTEGER,
+    stripe_session_id TEXT, status TEXT NOT NULL DEFAULT 'pending',
+    created_at INTEGER NOT NULL, expires_at INTEGER);
+    CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL, created_at INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id), csrf TEXT NOT NULL, expires_at INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS photos (id TEXT PRIMARY KEY,
+      event_id TEXT NOT NULL REFERENCES events(id), filename TEXT NOT NULL,
+      bytes INTEGER NOT NULL, approved INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL, UNIQUE(event_id, filename));
+    CREATE TABLE IF NOT EXISTS payments (id TEXT PRIMARY KEY,
+      event_id TEXT NOT NULL REFERENCES events(id), stripe_session_id TEXT UNIQUE,
+      amount_cents INTEGER NOT NULL, months INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'pending');
+    CREATE TABLE IF NOT EXISTS webhook_receipts (id TEXT PRIMARY KEY, created_at INTEGER NOT NULL);`);
+  const columns = new Set(db.prepare('PRAGMA table_info(events)').all().map(x => x.name));
+  for (const [name, type] of Object.entries({owner_id:'TEXT REFERENCES users(id)', title:"TEXT NOT NULL DEFAULT 'Veranstaltung'", guest_token:'TEXT', moderation:'INTEGER NOT NULL DEFAULT 1', deleted_at:'INTEGER'})) {
+    if (!columns.has(name)) db.exec(`ALTER TABLE events ADD COLUMN ${name} ${type}`);
   }
-  return true; // pending oder abgelaufen -> darf neu vergeben/überschrieben werden
+  db.exec('CREATE INDEX IF NOT EXISTS photos_event ON photos(event_id); CREATE INDEX IF NOT EXISTS events_owner ON events(owner_id); CREATE UNIQUE INDEX IF NOT EXISTS payments_event ON payments(event_id);');
+  return db;
 }
-
-module.exports = {
-  createPendingEvent,
-  markEventPaid,
-  getEvent,
-  getEventBySessionId,
-  isEventActive,
-  isEventIdAvailable
-};
+module.exports = { openDatabase };

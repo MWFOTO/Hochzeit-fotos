@@ -93,6 +93,7 @@
       background: rgba(255,255,255,0.15);
     }
   </style>
+<script src="/guest-access.js"></script>
 </head>
 <body>
   <main class="gallery-page">
@@ -132,7 +133,11 @@
       try {
         const res = await fetch(`/api/event/${encodeURIComponent(eventId)}/photos`);
         const data = await res.json();
-        renderPhotos(data.photos || []);
+        const photos = data.photos || [];
+        if (lightbox.classList.contains('open') && !photos.some(p => new URL(p.url, location.origin).href === lightboxImg.src)) {
+          lightbox.classList.remove('open'); lightboxImg.src = ''; lightboxDownload.href = '';
+        }
+        renderPhotos(photos);
       } catch (err) {
         console.warn('Fotos konnten nicht geladen werden', err);
       }
@@ -166,7 +171,7 @@
     });
 
     downloadAllBtn.addEventListener('click', () => {
-      window.location.href = `/api/event/${encodeURIComponent(eventId)}/download`;
+      window.location.href = guestUrl(`/api/event/${encodeURIComponent(eventId)}/download`);
     });
 
     loadPhotos();

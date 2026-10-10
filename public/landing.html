@@ -109,7 +109,7 @@
   <main class="landing-page">
     <div class="landing-hero">
       <div class="logo" style="margin: 0 auto 16px;">📸</div>
-      <h1>Eure Hochzeit, live geteilt</h1>
+      <h1>Eure Veranstaltung, live geteilt</h1>
       <p>Gäste laden Fotos direkt vom Handy hoch – ganz ohne App oder Registrierung.
          Sie erscheinen sofort in eurer Live-Diashow für den Beamer.</p>
     </div>
@@ -118,137 +118,19 @@
       <!-- wird per JS aus /api/plans befüllt -->
     </div>
 
-    <div class="form-group">
-      <label for="event-id">Eure Event-ID (Teil des Links, den ihr an Gäste schickt)</label>
-      <input type="text" id="event-id" placeholder="z.B. johanna-bastian" autocomplete="off" />
-      <div class="availability-msg" id="availability-msg"></div>
-    </div>
-
-    <div class="form-group">
-      <label for="email">E-Mail-Adresse (für die Zahlungsbestätigung)</label>
-      <input type="email" id="email" placeholder="du@beispiel.de" autocomplete="email" />
-    </div>
-
-    <button class="checkout-btn" id="checkout-btn">Jetzt bezahlen</button>
-    <div class="checkout-error" id="checkout-error"></div>
+    <p>Für Hochzeiten, Geburtstage, Firmenfeiern und andere Veranstaltungen.</p>
+    <a class="checkout-btn" href="/dashboard">Veranstaltung erstellen / Anmelden</a>
+    <p>Entwicklungsstand: Stripe-Testmodus.</p>
   </main>
 
   <script>
-    const planGrid = document.getElementById('plan-grid');
-    const eventIdInput = document.getElementById('event-id');
-    const availabilityMsg = document.getElementById('availability-msg');
-    const emailInput = document.getElementById('email');
-    const checkoutBtn = document.getElementById('checkout-btn');
-    const checkoutError = document.getElementById('checkout-error');
-
-    let plans = {};
-    let selectedPlan = null;
-    let isEventIdAvailable = false;
-
-    // Preise vom Server laden (statt sie doppelt im Frontend zu pflegen)
-    async function loadPlans() {
-      const res = await fetch('/api/plans');
-      plans = await res.json();
-      renderPlans();
-    }
-
-    function renderPlans() {
-      planGrid.innerHTML = '';
-      Object.entries(plans).forEach(([key, plan]) => {
-        const card = document.createElement('div');
-        card.className = 'plan-card';
-        card.dataset.key = key;
-        card.innerHTML = `
-          <div class="plan-label">${plan.label}</div>
-          <div class="plan-price">${(plan.priceCents / 100).toFixed(0)} €</div>
-        `;
-        card.addEventListener('click', () => selectPlan(key));
-        planGrid.appendChild(card);
-      });
-      // Standardmäßig die zweite Option (meist "3 Monate") vorauswählen, falls vorhanden
-      const keys = Object.keys(plans);
-      selectPlan(keys[1] || keys[0]);
-    }
-
-    function selectPlan(key) {
-      selectedPlan = key;
-      document.querySelectorAll('.plan-card').forEach((el) => {
-        el.classList.toggle('selected', el.dataset.key === key);
-      });
-    }
-
-    // Live-Prüfung, ob die eingegebene Event-ID noch frei ist
-    let availabilityTimer;
-    eventIdInput.addEventListener('input', () => {
-      clearTimeout(availabilityTimer);
-      const raw = eventIdInput.value.trim();
-      if (raw.length < 3) {
-        availabilityMsg.textContent = raw.length > 0 ? 'Mindestens 3 Zeichen' : '';
-        availabilityMsg.className = 'availability-msg';
-        isEventIdAvailable = false;
-        return;
-      }
-      availabilityTimer = setTimeout(async () => {
-        const res = await fetch(`/api/event/${encodeURIComponent(raw)}/availability`);
-        const data = await res.json();
-        isEventIdAvailable = data.available;
-        if (data.available) {
-          availabilityMsg.textContent = '✓ Verfügbar';
-          availabilityMsg.className = 'availability-msg ok';
-        } else {
-          availabilityMsg.textContent = '✗ Leider schon vergeben';
-          availabilityMsg.className = 'availability-msg taken';
-        }
-      }, 400);
-    });
-
-    checkoutBtn.addEventListener('click', async () => {
-      checkoutError.textContent = '';
-
-      const eventId = eventIdInput.value.trim();
-      const email = emailInput.value.trim();
-
-      if (eventId.length < 3) {
-        checkoutError.textContent = 'Bitte eine Event-ID mit mindestens 3 Zeichen eingeben.';
-        return;
-      }
-      if (!email.includes('@')) {
-        checkoutError.textContent = 'Bitte eine gültige E-Mail-Adresse eingeben.';
-        return;
-      }
-      if (!selectedPlan) {
-        checkoutError.textContent = 'Bitte eine Laufzeit auswählen.';
-        return;
-      }
-
-      checkoutBtn.disabled = true;
-      checkoutBtn.textContent = 'Einen Moment …';
-
-      try {
-        const res = await fetch('/api/checkout', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ eventId, email, plan: selectedPlan })
-        });
-        const data = await res.json();
-
-        if (!res.ok) {
-          checkoutError.textContent = data.error || 'Etwas ist schiefgelaufen.';
-          checkoutBtn.disabled = false;
-          checkoutBtn.textContent = 'Jetzt bezahlen';
-          return;
-        }
-
-        // Weiterleitung zur Stripe-Bezahlseite
-        window.location.href = data.url;
-      } catch (err) {
-        checkoutError.textContent = 'Verbindung fehlgeschlagen. Bitte erneut versuchen.';
-        checkoutBtn.disabled = false;
-        checkoutBtn.textContent = 'Jetzt bezahlen';
+    fetch('/api/plans').then(r=>r.json()).then(plans=>{
+      for(const plan of Object.values(plans)){
+        const el=document.createElement('div');el.className='plan-card';
+        el.textContent=`${plan.label} · ${(plan.priceCents/100).toFixed(2)} €`;
+        document.getElementById('plan-grid').append(el);
       }
     });
-
-    loadPlans();
   </script>
 </body>
 </html>

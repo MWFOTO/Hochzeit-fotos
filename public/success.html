@@ -57,7 +57,7 @@
 <body>
   <main class="success-page">
     <div class="success-icon">🎉</div>
-    <h1>Danke für deine Zahlung!</h1>
+    <h1>Zahlungsstatus prüfen</h1>
     <p id="status-text">Wird geprüft …</p>
 
     <div class="link-list" id="link-list" style="display:none;"></div>
@@ -94,12 +94,10 @@
           statusText.textContent = `Euer Event "${eventId}" ist aktiv!`;
           pendingMsg.style.display = 'none';
           linkList.style.display = 'block';
-          linkList.innerHTML = `
-            ${linkCard('📸 Für eure Gäste', 'Diesen Link per QR-Code oder WhatsApp teilen – hier laden Gäste Fotos hoch.', `${base}/event/${eventId}`)}
-            ${linkCard('🖥️ Für den Beamer', 'Auf dem Laptop am Beamer öffnen, Vollbild (F11) – zeigt die Live-Diashow.', `${base}/event/${eventId}/slideshow`)}
-            ${linkCard('🖼️ Galerie für Gäste', 'Optional an Gäste weitergeben – hier können sie alle Fotos ansehen & speichern.', `${base}/event/${eventId}/gallery`)}
-            ${linkCard('⚙️ Nur für euch', 'Zum Herunterladen aller Fotos als ZIP. Nicht an Gäste weitergeben!', `${base}/event/${eventId}/admin`)}
-          `;
+          linkList.replaceChildren();
+          const dashboard = document.createElement('a');
+          dashboard.href = '/dashboard'; dashboard.textContent = 'Zum Dashboard: Gästelinks, QR-Code und Fotos verwalten';
+          linkList.append(dashboard);
         } else {
           pendingMsg.style.display = 'block';
           setTimeout(checkStatus, 2000); // in 2 Sekunden erneut prüfen
