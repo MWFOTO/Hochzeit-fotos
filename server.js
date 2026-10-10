@@ -113,7 +113,7 @@ function createApp(options = {}) {
     const id=String(req.body.eventId||''); const plan=PLANS[req.body.plan]; const title=String(req.body.title||'').trim();
     if(!/^[a-z0-9][a-z0-9_-]{2,63}$/.test(id) || !plan || !title || title.length>120) return fail(res,400,'Event-ID (3–64 Zeichen, klein), Titel und Laufzeit prüfen.');
     if(lookup(id) || fs.existsSync(path.join(root,id))) return fail(res,409,'Event-ID bereits vergeben, auch für Bestandsdaten.');
-    db.prepare('INSERT INTO events (id,email,plan,amount_cents,status,created_at,owner_id,title,guest_token,moderation) VALUES (?,?,?,?,?,?,?,?,?,?)').run(id,req.user.email,req.body.plan,plan.priceCents,'pending',Date.now(),req.user.id,title,random(),req.body.moderation===false?0:1);
+    db.prepare('INSERT INTO events (id,email,plan,amount_cents,status,created_at,owner_id,title,guest_token,moderation) VALUES (?,?,?,?,?,?,?,?,?,?)').run(id,req.user.email,req.body.plan,plan.priceCents,'pending',Date.now(),req.user.id,title,random(),req.body.moderation===true?1:0);
     res.status(201).json({eventId:id});
   });
   app.get('/api/event/:eventId/availability',(req,res)=>res.json({available:/^[a-z0-9][a-z0-9_-]{2,63}$/.test(req.params.eventId)&&!lookup(req.params.eventId)&&!fs.existsSync(path.join(root,req.params.eventId))}));

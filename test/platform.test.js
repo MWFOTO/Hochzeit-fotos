@@ -40,7 +40,7 @@ test('Registration, login, session, CSRF and protected dashboard',async()=>{
   assert.equal((await request('/dashboard',{user})).status,200);
 });
 test('Multiple events, ownership and pending payment gate',async()=>{
-  for(const eventId of ['birthday','company'])assert.equal((await request('/api/events',{method:'POST',user,body:{eventId,title:'Test Event',plan:'1m'}})).status,201);
+  for(const eventId of ['birthday','company'])assert.equal((await request('/api/events',{method:'POST',user,body:{eventId,title:'Test Event',plan:'1m',...(eventId==='birthday'?{moderation:true}:{})}})).status,201);
   assert.equal((await request('/api/events',{user})).data.events.length,2);
   assert.equal((await request('/api/events',{method:'POST',user:other,body:{eventId:'birthday',title:'Collision',plan:'1m'}})).status,409);
   assert.equal((await request('/event/birthday')).status,402);
@@ -81,7 +81,11 @@ test('Content validation, guest upload, moderation, protected files, QR, quota a
   const meta=await sharp(Buffer.from((await request(photo.url,{user})).data)).metadata();assert.equal(meta.exif,undefined);
   assert.equal((await request(`/api/event/birthday/download?token=${token}`)).status,200);
   const qr=await request('/api/event/birthday/qr',{user});assert.equal(qr.status,200);assert.equal((await sharp(Buffer.from(qr.data)).metadata()).width,1200);
-  assert.equal((await upload(image)).status,200);assert.equal((await upload(image)).status,400);
+  assert.equal(app.locals.db.prepare('SELECT moderation FROM events WHERE id=?').get('company').moderation,0);
+  assert.equal((await request('/api/event/birthday',{method:'PATCH',user,body:{moderation:false}})).status,200);
+  assert.equal((await upload(image)).status,200);
+  assert.equal((await request(`/api/event/birthday/photos?token=${token}`)).data.photos.length,2);
+  assert.equal((await upload(image)).status,400);
   assert.equal(fs.readdirSync(path.join(tmp,'uploads','.tmp')).length,0);
   assert.equal((await request(`/api/event/birthday/photos/${photo.id}`,{method:'DELETE',user})).status,200);
   assert.equal((await request(photo.url,{user})).status,404);

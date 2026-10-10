@@ -116,3 +116,6 @@ Unzugeordnete Alt-Events werden niemals automatisch entfernt.
 - https://render.com/docs/free
 
 Diese Hinweise dokumentieren den Entwicklungsstand, keine rechtliche Freigabe.
+
+## Automatische Veröffentlichung
+Neue Veranstaltungen veröffentlichen Gäste-Uploads standardmäßig sofort in Galerie und Diashow. Manuelle Freigabe ist optional. Bestehende Veranstaltungen behalten ihre Einstellung; im Dashboard lässt sich automatische Freigabe aktivieren. Bereits wartende Bilder müssen einzeln freigegeben werden.
