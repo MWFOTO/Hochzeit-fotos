@@ -20,6 +20,7 @@ const wrap = fn => (req,res,next) => Promise.resolve(fn(req,res,next)).catch(nex
 const active = e => e && ['paid','trial'].includes(e.status) && e.expires_at > Date.now() && !e.deleted_at;
 function createApp(options = {}) {
   const cfg = {...process.env, ...options};
+  const mailer=options.mailer||require('./mailer').createMailer(cfg);
   if (cfg.STRIPE_SECRET_KEY && !cfg.STRIPE_SECRET_KEY.startsWith('sk_test_')) throw new Error('Phase 1 erlaubt ausschließlich Stripe-Testschlüssel.');
   const base = cfg.BASE_URL || 'http://localhost:3000';
   const baseUrl = new URL(base);
@@ -94,6 +95,9 @@ function createApp(options = {}) {
     const user={id:crypto.randomUUID(),email};
     try {db.prepare('INSERT INTO users (id,email,password_hash,created_at) VALUES (?,?,?,?)').run(user.id,email,encoded,Date.now());}
     catch(err) {if(err.code==='SQLITE_CONSTRAINT_UNIQUE') return fail(res,409,'Registrierung nicht möglich. Bitte anmelden.'); throw err;}
+    if(mailer){const token=random();db.prepare('INSERT INTO email_verifications VALUES (?,?,?)').run(hash(token),user.id,Date.now()+86400000);
+      try{await mailer({to:email,subject:'Willkommen bei Event-Fotos – bestätige deine E-Mail',text:`Dein Konto ist erstellt.\nBestätige deine E-Mail-Adresse: ${baseUrl.origin}/verify-email#${token}\nDer Link gilt 24 Stunden.\nDein Veranstalterkonto: ${baseUrl.origin}/dashboard\nFalls du kein Konto erstellt hast, ignoriere diese Nachricht.`});}
+      catch{db.prepare('DELETE FROM email_verifications WHERE token_hash=?').run(hash(token));console.error('Registrierungs-E-Mail konnte nicht zugestellt werden.');}}
     startSession(req,res,user);
   }));
   app.post('/api/auth/login',authLimit,wrap(async(req,res)=>{
@@ -105,12 +109,12 @@ function createApp(options = {}) {
     if(!crypto.timingSafeEqual(Buffer.from(stored,'hex'),derived) || !user) return fail(res,401,'Anmeldedaten stimmen nicht.');
     startSession(req,res,user);
   }));
-  app.get('/api/auth/me',loginRequired,(req,res)=>res.json({user:req.user,csrf:req.session.csrf,emailVerified:!!db.prepare('SELECT email_verified_at FROM users WHERE id=?').get(req.user.id).email_verified_at,emailDeliveryAvailable:!!options.mailer}));
+  app.get('/api/auth/me',loginRequired,(req,res)=>res.json({user:req.user,csrf:req.session.csrf,emailVerified:!!db.prepare('SELECT email_verified_at FROM users WHERE id=?').get(req.user.id).email_verified_at,emailDeliveryAvailable:!!mailer}));
   app.post('/api/auth/forgot-password',authLimit,wrap(async(req,res)=>{
-    if(!options.mailer)return fail(res,503,'Passwort zurücksetzen ist noch nicht verfügbar: Der E-Mail-Versand wird gerade eingerichtet.');
+    if(!mailer)return fail(res,503,'Passwort zurücksetzen ist noch nicht verfügbar: Der E-Mail-Versand wird gerade eingerichtet.');
     const user=db.prepare('SELECT * FROM users WHERE email=?').get(String(req.body.email||'').trim().toLowerCase());
     if(user){const token=random();db.prepare('INSERT INTO password_resets VALUES (?,?,?)').run(hash(token),user.id,Date.now()+3600000);
-      try{await options.mailer({to:user.email,subject:'Passwort zurücksetzen · Event-Fotos',text:`Neues Passwort festlegen: ${baseUrl.origin}/reset-password#${token}\nDieser Link ist eine Stunde gültig. Falls du ihn nicht angefordert hast, ignoriere diese Nachricht.`});}catch{db.prepare('DELETE FROM password_resets WHERE token_hash=?').run(hash(token));}}
+      try{await mailer({to:user.email,subject:'Passwort zurücksetzen · Event-Fotos',text:`Neues Passwort festlegen: ${baseUrl.origin}/reset-password#${token}\nDieser Link ist eine Stunde gültig. Falls du ihn nicht angefordert hast, ignoriere diese Nachricht.`});}catch{db.prepare('DELETE FROM password_resets WHERE token_hash=?').run(hash(token));}}
     res.json({success:true,message:'Falls ein Konto existiert, erhältst du einen Link zum Zurücksetzen.'});
   }));
   app.post('/api/auth/reset-password',authLimit,wrap(async(req,res)=>{
@@ -122,10 +126,10 @@ function createApp(options = {}) {
     if(!changed)return fail(res,400,'Link ungültig oder abgelaufen. Bitte einen neuen anfordern.');res.clearCookie('event_session',{path:'/'});res.json({success:true});
   }));
   app.post('/api/auth/request-verification',authLimit,loginRequired,wrap(async(req,res)=>{
-    if(!options.mailer)return fail(res,503,'E-Mail-Versand ist noch nicht eingerichtet.');
+    if(!mailer)return fail(res,503,'E-Mail-Versand ist noch nicht eingerichtet.');
     const token=random();const expires=Date.now()+86400000;
     db.prepare('INSERT INTO email_verifications VALUES (?,?,?)').run(hash(token),req.user.id,expires);
-    try{await options.mailer({to:req.user.email,subject:'Bestätige deine E-Mail-Adresse · Event-Fotos',text:`Bestätige deine E-Mail-Adresse: ${baseUrl.origin}/verify-email#${token}\nDieser Link ist 24 Stunden gültig. Falls du ihn nicht angefordert hast, ignoriere diese Nachricht.`});}
+    try{await mailer({to:req.user.email,subject:'Bestätige deine E-Mail-Adresse · Event-Fotos',text:`Bestätige deine E-Mail-Adresse: ${baseUrl.origin}/verify-email#${token}\nDieser Link ist 24 Stunden gültig. Falls du ihn nicht angefordert hast, ignoriere diese Nachricht.`});}
     catch(error){db.prepare('DELETE FROM email_verifications WHERE token_hash=?').run(hash(token));return fail(res,503,'E-Mail konnte nicht versendet werden. Bitte später erneut versuchen.');}
     res.json({success:true});
   }));
