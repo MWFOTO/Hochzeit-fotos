@@ -16,6 +16,10 @@
 
   const uploadTrigger = document.getElementById('upload-trigger');
   const fileInput = document.getElementById('file-input');
+  const cameraInput = document.getElementById('camera-input');
+  const cameraTrigger = document.getElementById('camera-trigger');
+  cameraTrigger.addEventListener('click', () => cameraInput.click());
+  cameraInput.addEventListener('change', () => {if(cameraInput.files.length) uploadFiles(Array.from(cameraInput.files));});
   const statusEl = document.getElementById('status');
   const progressWrap = document.getElementById('progress-wrap');
   const progressBar = document.getElementById('progress-bar');
@@ -30,10 +34,13 @@
   fileInput.addEventListener('change', () => {
     const files = fileInput.files;
     if (!files || files.length === 0) return;
-    uploadFiles(files);
+    uploadFiles(Array.from(files));
   });
 
   function uploadFiles(files) {
+    if(files.length>10){setStatus('Bitte höchstens 10 Fotos gleichzeitig auswählen.', 'error');return;}
+    uploadTrigger.disabled=true;cameraTrigger.disabled=true;
+    const unlock=()=>{uploadTrigger.disabled=false;cameraTrigger.disabled=false;fileInput.value='';cameraInput.value='';};
     const formData = new FormData();
     for (const file of files) {
       formData.append('photos', file);
@@ -55,6 +62,7 @@
     });
 
     xhr.onload = () => {
+      unlock();
       showProgress(false);
       if (xhr.status >= 200 && xhr.status < 300) {
         const result = JSON.parse(xhr.responseText);
@@ -73,6 +81,7 @@
     };
 
     xhr.onerror = () => {
+      unlock();
       showProgress(false);
       setStatus('✗ Verbindung fehlgeschlagen. Bitte erneut versuchen.', 'error');
     };
