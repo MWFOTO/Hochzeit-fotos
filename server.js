@@ -96,7 +96,7 @@ function createApp(options = {}) {
     try {db.prepare('INSERT INTO users (id,email,password_hash,created_at) VALUES (?,?,?,?)').run(user.id,email,encoded,Date.now());}
     catch(err) {if(err.code==='SQLITE_CONSTRAINT_UNIQUE') return fail(res,409,'Registrierung nicht möglich. Bitte anmelden.'); throw err;}
     if(mailer){const token=random();db.prepare('INSERT INTO email_verifications VALUES (?,?,?)').run(hash(token),user.id,Date.now()+86400000);
-      try{await mailer({to:email,subject:'Willkommen bei Event-Fotos – bestätige deine E-Mail',text:`Dein Konto ist erstellt.\nBestätige deine E-Mail-Adresse: ${baseUrl.origin}/verify-email#${token}\nDer Link gilt 24 Stunden.\nDein Veranstalterkonto: ${baseUrl.origin}/dashboard\nFalls du kein Konto erstellt hast, ignoriere diese Nachricht.`});}
+      try{await mailer({to:email,subject:'Willkommen bei FinalSnap – bestätige deine E-Mail',text:`Dein Konto ist erstellt.\nBestätige deine E-Mail-Adresse: ${baseUrl.origin}/verify-email#${token}\nDer Link gilt 24 Stunden.\nDein Veranstalterkonto: ${baseUrl.origin}/dashboard\nFalls du kein Konto erstellt hast, ignoriere diese Nachricht.`});}
       catch{db.prepare('DELETE FROM email_verifications WHERE token_hash=?').run(hash(token));console.error('Registrierungs-E-Mail konnte nicht zugestellt werden.');}}
     startSession(req,res,user);
   }));
@@ -114,7 +114,7 @@ function createApp(options = {}) {
     if(!mailer)return fail(res,503,'Passwort zurücksetzen ist noch nicht verfügbar: Der E-Mail-Versand wird gerade eingerichtet.');
     const user=db.prepare('SELECT * FROM users WHERE email=?').get(String(req.body.email||'').trim().toLowerCase());
     if(user){const token=random();db.prepare('INSERT INTO password_resets VALUES (?,?,?)').run(hash(token),user.id,Date.now()+3600000);
-      try{await mailer({to:user.email,subject:'Passwort zurücksetzen · Event-Fotos',text:`Neues Passwort festlegen: ${baseUrl.origin}/reset-password#${token}\nDieser Link ist eine Stunde gültig. Falls du ihn nicht angefordert hast, ignoriere diese Nachricht.`});}catch{db.prepare('DELETE FROM password_resets WHERE token_hash=?').run(hash(token));}}
+      try{await mailer({to:user.email,subject:'Passwort zurücksetzen · FinalSnap',text:`Neues Passwort festlegen: ${baseUrl.origin}/reset-password#${token}\nDieser Link ist eine Stunde gültig. Falls du ihn nicht angefordert hast, ignoriere diese Nachricht.`});}catch{db.prepare('DELETE FROM password_resets WHERE token_hash=?').run(hash(token));}}
     res.json({success:true,message:'Falls ein Konto existiert, erhältst du einen Link zum Zurücksetzen.'});
   }));
   app.post('/api/auth/reset-password',authLimit,wrap(async(req,res)=>{
@@ -129,7 +129,7 @@ function createApp(options = {}) {
     if(!mailer)return fail(res,503,'E-Mail-Versand ist noch nicht eingerichtet.');
     const token=random();const expires=Date.now()+86400000;
     db.prepare('INSERT INTO email_verifications VALUES (?,?,?)').run(hash(token),req.user.id,expires);
-    try{await mailer({to:req.user.email,subject:'Bestätige deine E-Mail-Adresse · Event-Fotos',text:`Bestätige deine E-Mail-Adresse: ${baseUrl.origin}/verify-email#${token}\nDieser Link ist 24 Stunden gültig. Falls du ihn nicht angefordert hast, ignoriere diese Nachricht.`});}
+    try{await mailer({to:req.user.email,subject:'Bestätige deine E-Mail-Adresse · FinalSnap',text:`Bestätige deine E-Mail-Adresse: ${baseUrl.origin}/verify-email#${token}\nDieser Link ist 24 Stunden gültig. Falls du ihn nicht angefordert hast, ignoriere diese Nachricht.`});}
     catch(error){db.prepare('DELETE FROM email_verifications WHERE token_hash=?').run(hash(token));console.error('Bestätigungsmail: Versandstatus',Number(error.deliveryStatus)||'Netzwerkfehler');return fail(res,503,error.deliveryHint||'E-Mail-Versand nicht erreichbar. Bitte später erneut versuchen.');}
     res.json({success:true});
   }));
@@ -174,7 +174,7 @@ function createApp(options = {}) {
     let session;
     if(payment.stripe_session_id) session=await stripe.checkout.sessions.retrieve(payment.stripe_session_id);
     else {
-      session=await stripe.checkout.sessions.create({mode:'payment',payment_method_types:['card'],customer_email:e.email,line_items:[{price_data:{currency:'eur',unit_amount:payment.amount_cents,product_data:{name:`Event-Fotos: ${PLANS[e.plan].label}`}},quantity:1}],metadata:{eventId:e.id,paymentId:payment.id},success_url:`${baseUrl.origin}/success?session_id={CHECKOUT_SESSION_ID}`,cancel_url:`${baseUrl.origin}/dashboard`},{idempotencyKey:`payment-${payment.id}`});
+      session=await stripe.checkout.sessions.create({mode:'payment',payment_method_types:['card'],customer_email:e.email,line_items:[{price_data:{currency:'eur',unit_amount:payment.amount_cents,product_data:{name:`FinalSnap: ${PLANS[e.plan].label}`}},quantity:1}],metadata:{eventId:e.id,paymentId:payment.id},success_url:`${baseUrl.origin}/success?session_id={CHECKOUT_SESSION_ID}`,cancel_url:`${baseUrl.origin}/dashboard`},{idempotencyKey:`payment-${payment.id}`});
       if(session.livemode!==false) throw new Error('Live-Checkout gesperrt');
       db.prepare('UPDATE payments SET stripe_session_id=? WHERE id=?').run(session.id,payment.id);
       db.prepare('UPDATE events SET stripe_session_id=? WHERE id=?').run(session.id,e.id);

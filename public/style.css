@@ -304,3 +304,14 @@ body{font-family:'Trebuchet MS','Segoe UI',sans-serif;line-height:1.6;height:aut
 .event-tabs{margin:22px 0}.event-tabs button[aria-pressed="true"]{background:var(--color-accent);color:white}.event-card progress{display:block;width:100%;height:10px;accent-color:var(--color-accent);margin-bottom:20px}.photo-toolbar{margin:18px 0}.managed-grid article.selected{outline:3px solid var(--color-accent)}.event-open{margin-top:12px!important}
 
 .slideshow-back{position:fixed;top:16px;left:16px;z-index:50;background:#fffffff0}.quota-notice{padding:16px 20px;background:#e0f0f5;border-radius:16px;margin:20px 0;max-width:600px}.quota-notice p{margin:4px 0 12px}.quota-near{background:#fff4d2;border:1px solid #e0bf59}.status.notice{color:#65521d;background:#fff4d2;border-radius:12px;padding:16px}
+
+/* FinalSnap: energetic headings with readable system-font body text. */
+:root{--color-accent:#1263d6;--color-accent-dark:#174ba0;--yellow:#ffd43b;--orange:#ff883e}
+body{font-family:'Segoe UI',Roboto,Arial,sans-serif}
+h1,h2,.brand{font-family:'Arial Black','Trebuchet MS','Segoe UI',sans-serif;font-weight:900;letter-spacing:-.045em}
+.brand{font-style:italic;color:#174ba0}.brand span{position:relative}.brand span::after{content:'';display:block;height:4px;background:linear-gradient(90deg,#ffd43b,#ff883e);transform:skewX(-20deg);border-radius:3px}
+.hero{position:relative}.hero h1 span{color:#1263d6}.eyebrow{color:#174ba0}.art-circle{background:radial-gradient(circle at 40% 40%,#eef6ff 0%,#d9e9ff 65%,#fbeac8 100%)}
+.sticker{background:#ffd43b;border-bottom:4px solid #ff883e}.primary,.upload-btn{background:#ffd43b;box-shadow:0 4px 0 #d5a824}.primary:hover,.upload-btn:hover{background:#ffe473}
+.steps article:first-child{border-top-color:#1263d6}.steps article:nth-child(2){border-top-color:#ffd43b}.steps article:nth-child(3){border-top-color:#ff883e}.step-number{color:#174ba0}
+.closing-cta{background:linear-gradient(125deg,#e2edff,#f7faff 65%,#fff0c3);border:1px solid #cddcf4}.event-tabs button[aria-pressed="true"]{background:#1263d6}.account-page article.event-card{border-top:4px solid #1263d6}.plan-card{position:relative;border-top:4px solid #1263d6}.plan-card:nth-child(2){border-top-color:#ffd43b}.plan-card:nth-child(3){border-top-color:#ff883e}.auth-card{border-top:5px solid #1263d6}
+@media(max-width:760px){.hero h1{font-size:clamp(2.5rem,11vw,3.2rem)}.brand{font-size:1.15rem}.site-header{gap:12px}}
