@@ -175,3 +175,23 @@ test('Email verification uses expiring single-use tokens without plaintext stora
  const expired=sentMail.at(-1).text.match(/#([a-f0-9]{64})/)[1];app.locals.db.prepare('UPDATE email_verifications SET expires_at=0 WHERE user_id=?').run(u.id);
  assert.equal((await request('/api/auth/verify-email',{method:'POST',body:{token:expired}})).status,400);
 });
+
+test('Login page retrieves CSRF for an existing browser session before signing in',async()=>{
+ const vm=require('node:vm');const nodes=new Map();const get=id=>{if(!nodes.has(id))nodes.set(id,{value:id==='password'?'a-good-long-password':id==='email'?'test@example.com':'',hidden:true});return nodes.get(id);};
+ const calls=[];const location={pathname:'/login',search:''};
+ vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../public/account.js'),'utf8'),{document:{getElementById:get},location,URLSearchParams,fetch:async(url,options)=>{calls.push({url,options});return {ok:true,json:async()=>url==='/api/auth/me'?{csrf:'existing-session-token'}:{}};}});
+ await get('login-form').onsubmit({preventDefault(){}});
+ assert.equal(calls[0].url,'/api/auth/me');assert.equal(calls[1].options.headers['X-CSRF-Token'],'existing-session-token');assert.equal(location.href,'/dashboard');
+});
+test('Password reset invalidates sessions, expires and cannot be reused',async()=>{
+ const u=await register('reset@example.com');
+ assert.equal((await request('/api/auth/forgot-password',{method:'POST',body:{email:'reset@example.com'}})).status,200);
+ const token=sentMail.at(-1).text.match(/#([a-f0-9]{64})/)[1];
+ assert.equal((await request('/api/auth/reset-password',{method:'POST',body:{token,password:'a-new-long-password'}})).status,200);
+ assert.equal((await request('/api/auth/me',{user:u})).status,401);
+ assert.equal((await request('/api/auth/reset-password',{method:'POST',body:{token,password:'a-new-long-password'}})).status,400);
+ assert.equal((await request('/api/auth/login',{method:'POST',body:{email:'reset@example.com',password:'a-new-long-password'}})).status,200);
+ await request('/api/auth/forgot-password',{method:'POST',body:{email:'reset@example.com'}});
+ const expired=sentMail.at(-1).text.match(/#([a-f0-9]{64})/)[1];app.locals.db.prepare('UPDATE password_resets SET expires_at=0 WHERE user_id=?').run(u.id);
+ assert.equal((await request('/api/auth/reset-password',{method:'POST',body:{token:expired,password:'another-long-password'}})).status,400);
+});

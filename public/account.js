@@ -3,6 +3,7 @@
   const message = document.getElementById('message');
   const report = error => {message.textContent = error.message;};
   async function api(url, method='GET', body) {
+    if(method!=='GET'&&!csrf){const me=await fetch('/api/auth/me');if(me.ok)csrf=(await me.json()).csrf;}
     const res=await fetch(url,{method,headers:{'Content-Type':'application/json',...(csrf?{'X-CSRF-Token':csrf}:{})},...(body?{body:JSON.stringify(body)}:{})});
     const data=await res.json();
     if(!res.ok) throw new Error(data.error||'Anfrage fehlgeschlagen.');

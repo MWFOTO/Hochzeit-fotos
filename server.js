@@ -106,6 +106,21 @@ function createApp(options = {}) {
     startSession(req,res,user);
   }));
   app.get('/api/auth/me',loginRequired,(req,res)=>res.json({user:req.user,csrf:req.session.csrf,emailVerified:!!db.prepare('SELECT email_verified_at FROM users WHERE id=?').get(req.user.id).email_verified_at,emailDeliveryAvailable:!!options.mailer}));
+  app.post('/api/auth/forgot-password',authLimit,wrap(async(req,res)=>{
+    if(!options.mailer)return fail(res,503,'Passwort zurücksetzen ist noch nicht verfügbar: Der E-Mail-Versand wird gerade eingerichtet.');
+    const user=db.prepare('SELECT * FROM users WHERE email=?').get(String(req.body.email||'').trim().toLowerCase());
+    if(user){const token=random();db.prepare('INSERT INTO password_resets VALUES (?,?,?)').run(hash(token),user.id,Date.now()+3600000);
+      try{await options.mailer({to:user.email,subject:'Passwort zurücksetzen · Event-Fotos',text:`Neues Passwort festlegen: ${baseUrl.origin}/reset-password#${token}\nDieser Link ist eine Stunde gültig. Falls du ihn nicht angefordert hast, ignoriere diese Nachricht.`});}catch{db.prepare('DELETE FROM password_resets WHERE token_hash=?').run(hash(token));}}
+    res.json({success:true,message:'Falls ein Konto existiert, erhältst du einen Link zum Zurücksetzen.'});
+  }));
+  app.post('/api/auth/reset-password',authLimit,wrap(async(req,res)=>{
+    const token=String(req.body.token||''),password=req.body.password;
+    if(!/^[a-f0-9]{64}$/.test(token)||typeof password!=='string'||password.length<12||password.length>128)return fail(res,400,'Gültigen Link und Passwort mit 12–128 Zeichen verwenden.');
+    const encoded=await passwordHash(password);
+    const changed=db.transaction(()=>{const record=db.prepare('SELECT * FROM password_resets WHERE token_hash=? AND expires_at>?').get(hash(token),Date.now());if(!record)return false;
+      db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(encoded,record.user_id);db.prepare('DELETE FROM password_resets WHERE user_id=?').run(record.user_id);db.prepare('DELETE FROM sessions WHERE user_id=?').run(record.user_id);return true;})();
+    if(!changed)return fail(res,400,'Link ungültig oder abgelaufen. Bitte einen neuen anfordern.');res.clearCookie('event_session',{path:'/'});res.json({success:true});
+  }));
   app.post('/api/auth/request-verification',authLimit,loginRequired,wrap(async(req,res)=>{
     if(!options.mailer)return fail(res,503,'E-Mail-Versand ist noch nicht eingerichtet.');
     const token=random();const expires=Date.now()+86400000;
@@ -266,10 +281,12 @@ function createApp(options = {}) {
     for(const e of db.prepare("SELECT * FROM events WHERE owner_id IS NOT NULL AND deleted_at IS NULL AND status IN ('paid','trial') AND expires_at<=?").all(Date.now())) erase(e);
     db.prepare('DELETE FROM sessions WHERE expires_at<=?').run(Date.now());
     db.prepare('DELETE FROM email_verifications WHERE expires_at<=?').run(Date.now());
+    db.prepare('DELETE FROM password_resets WHERE expires_at<=?').run(Date.now());
     for(const entry of fs.readdirSync(temp)) {const file=path.join(temp,entry);if(fs.statSync(file).mtimeMs<Date.now()-86400000) fs.rmSync(file,{force:true});}
   }
   const pub=path.join(__dirname,'public');
   app.get('/',(req,res)=>res.sendFile(path.join(pub,'landing.html')));
+  app.get(['/forgot-password','/reset-password'],(req,res)=>res.sendFile(path.join(pub,'password-recovery.html')));
   app.get('/verify-email',(req,res)=>res.sendFile(path.join(pub,'verify-email.html')));
   app.get('/impressum',(req,res)=>res.sendFile(path.join(pub,'impressum.html')));
   app.get('/register',(req,res)=>req.user?res.redirect('/dashboard'):res.sendFile(path.join(pub,'login.html')));
