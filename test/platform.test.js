@@ -203,7 +203,7 @@ test('Verification and password recovery pages serve their executable scripts',a
 });
 
 test('Upgrade selection sets server-side price and duration, then locks started checkout',async()=>{
- const stranger=await register('packages-other@example.com');const u=await register('packages@example.com');await request('/api/events',{method:'POST',user:u,body:{eventId:'package-test',title:'Packages',plan:'1m'}});
+ const stranger=await register('packages-other@example.com');const u=await register('packages@example.com');assert.equal((await request('/register?plan=6m',{user:u})).res.headers.get('location'),'/dashboard?plan=6m');assert.equal((await request('/register?plan=invalid',{user:u})).res.headers.get('location'),'/dashboard');await request('/api/events',{method:'POST',user:u,body:{eventId:'package-test',title:'Packages',plan:'1m'}});
  assert.equal((await request('/api/checkout',{method:'POST',user:stranger,body:{eventId:'package-test',plan:'6m'}})).status,404);
  assert.equal((await request('/api/checkout',{method:'POST',user:u,body:{eventId:'package-test',plan:'wrong'}})).status,400);
  assert.equal((await request('/api/checkout',{method:'POST',user:u,body:{eventId:'package-test',plan:'6m',amount_cents:1}})).status,200);

@@ -13,6 +13,8 @@
   const login=document.getElementById('login-form');
   if(login) {
     const registering=location.pathname==='/register';
+    const selectedPlan=new URLSearchParams(location.search).get('plan');
+    if(['1m','3m','6m'].includes(selectedPlan)){document.getElementById('auth-description').textContent='Deine Paketauswahl wird übernommen. Die erste Veranstaltung kannst du kostenlos testen.';const switchLink=document.querySelector('#auth-switch a');if(switchLink)switchLink.href=`/${registering?'login':'register'}?plan=${encodeURIComponent(selectedPlan)}`;}
     const password=document.getElementById('password');
     const confirmation=document.getElementById('password-confirm');
     if(registering){
@@ -23,13 +25,13 @@
       document.getElementById('confirm-label').hidden=false;confirmation.required=true;
       password.autocomplete='new-password';
       document.getElementById('auth-submit').textContent='Konto erstellen & Event anlegen';
-      const switcher=document.getElementById('auth-switch');switcher.replaceChildren(document.createTextNode('Schon ein Konto? '));const a=document.createElement('a');a.href='/login';a.textContent='Anmelden';switcher.append(a);
+      const switcher=document.getElementById('auth-switch');switcher.replaceChildren(document.createTextNode('Schon ein Konto? '));const a=document.createElement('a');a.href=selectedPlan&&['1m','3m','6m'].includes(selectedPlan)?`/login?plan=${encodeURIComponent(selectedPlan)}`:'/login';a.textContent='Anmelden';switcher.append(a);
     }
     login.onsubmit=async e=>{
       e.preventDefault();
       if(registering && password.value!==confirmation.value){report(new Error('Die Passwörter stimmen nicht überein.'));confirmation.focus();return;}
       const button=document.getElementById('auth-submit');button.disabled=true;
-      try{await api(`/api/auth/${registering?'register':'login'}`,'POST',{email:document.getElementById('email').value,password:password.value});const event=new URLSearchParams(location.search).get('event');location.href=event?`/dashboard?event=${encodeURIComponent(event)}`:'/dashboard';}catch(err){report(err);button.disabled=false;}
+      try{await api(`/api/auth/${registering?'register':'login'}`,'POST',{email:document.getElementById('email').value,password:password.value});const event=new URLSearchParams(location.search).get('event');location.href=event?`/dashboard?event=${encodeURIComponent(event)}`:selectedPlan&&['1m','3m','6m'].includes(selectedPlan)?`/dashboard?plan=${encodeURIComponent(selectedPlan)}`:'/dashboard';}catch(err){report(err);button.disabled=false;}
     };return;
   }
 
@@ -120,6 +122,6 @@
     e.preventDefault();eventIdInput.value=normalizeEventId(eventIdInput.value);if(!/^[a-z0-9][a-z0-9_-]{2,63}$/.test(eventIdInput.value)){message.textContent='Bitte einen Kurznamen mit mindestens 3 Buchstaben oder Zahlen eingeben.';message.scrollIntoView({block:'center'});eventIdInput.focus();return;}try{await api('/api/events','POST',{title:document.getElementById('title').value,eventId:document.getElementById('event-id').value,plan:document.getElementById('plan').value,moderation:document.getElementById('moderation').checked});message.textContent='Veranstaltung erstellt. Öffne die Verwaltung für deinen Gästezugang und den aktuellen Status.';e.target.reset();await load();message.scrollIntoView({block:'center',behavior:'smooth'});}catch(err){report(err);message.scrollIntoView({block:'center',behavior:'smooth'});}
   };
   (async()=>{
-    try{const account=await api('/api/auth/me');if(account.emailDeliveryAvailable&&!account.emailVerified){const notice=element('div');notice.className='test-notice';notice.append(element('p','Bitte bestätige deine E-Mail-Adresse über den Link in deiner Mail.'));button(notice,'Bestätigungsmail erneut senden',async()=>{await api('/api/auth/request-verification','POST');message.textContent='Bestätigungsmail angefordert. Bitte auch im Spamordner nachsehen.';});document.getElementById('events').before(notice);}const storage=await api('/api/storage');if(storage.warning)message.textContent=storage.uploadsPaused?'Fotospeicher voll: Uploads sind vorübergehend pausiert.':'Der Fotospeicher wird knapp. Bitte vor weiteren Tests Speicher freigeben.';const plans=await api('/api/plans');availablePlans=plans;for(const [key,plan] of Object.entries(plans)){if(plan.legacy)continue;const option=element('option',`${plan.label} · ${(plan.priceCents/100).toFixed(2)} €`);option.value=key;document.getElementById('plan').append(option);}await load();}catch(err){report(err);}
+    try{const account=await api('/api/auth/me');if(account.emailDeliveryAvailable&&!account.emailVerified){const notice=element('div');notice.className='test-notice';notice.append(element('p','Bitte bestätige deine E-Mail-Adresse über den Link in deiner Mail.'));button(notice,'Bestätigungsmail erneut senden',async()=>{await api('/api/auth/request-verification','POST');message.textContent='Bestätigungsmail angefordert. Bitte auch im Spamordner nachsehen.';});document.getElementById('events').before(notice);}const storage=await api('/api/storage');if(storage.warning)message.textContent=storage.uploadsPaused?'Fotospeicher voll: Uploads sind vorübergehend pausiert.':'Der Fotospeicher wird knapp. Bitte vor weiteren Tests Speicher freigeben.';const plans=await api('/api/plans');availablePlans=plans;for(const [key,plan] of Object.entries(plans)){if(plan.legacy)continue;const option=element('option',`${plan.label} · ${(plan.priceCents/100).toFixed(2)} €`);option.value=key;document.getElementById('plan').append(option);}const chosen=new URLSearchParams(location.search).get('plan');if(plans[chosen]&&!plans[chosen].legacy){document.getElementById('plan').value=chosen;document.querySelector('.create-panel').open=true;message.textContent=`Ausgewählt: ${plans[chosen].label}. Erstelle deine Veranstaltung; bezahlt wird erst beim Upgrade.`;}await load();}catch(err){report(err);}
   })();
 })();
