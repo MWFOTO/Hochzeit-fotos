@@ -17,7 +17,7 @@ const hash = value => crypto.createHash('sha256').update(value).digest('hex');
 const random = () => crypto.randomBytes(32).toString('hex');
 const fail = (res, status, error) => res.status(status).json({error});
 const wrap = fn => (req,res,next) => Promise.resolve(fn(req,res,next)).catch(next);
-const active = e => e && e.status === 'paid' && e.expires_at > Date.now() && !e.deleted_at;
+const active = e => e && ['paid','trial'].includes(e.status) && e.expires_at > Date.now() && !e.deleted_at;
 function createApp(options = {}) {
   const cfg = {...process.env, ...options};
   if (cfg.STRIPE_SECRET_KEY && !cfg.STRIPE_SECRET_KEY.startsWith('sk_test_')) throw new Error('Phase 1 erlaubt ausschließlich Stripe-Testschlüssel.');
@@ -46,7 +46,7 @@ function createApp(options = {}) {
       if (!payment) throw new Error('Unbekannte Checkout-Session; Webhook erneut zustellen');
       if (session.currency !== 'eur' || session.amount_total !== payment.amount_cents || session.mode !== 'payment' || session.metadata?.paymentId !== payment.id || session.metadata?.eventId !== payment.event_id) throw new Error('Zahlungsdaten stimmen nicht überein');
       const e = lookup(payment.event_id);
-      if (payment.status !== 'paid' && e.status === 'pending' && !e.deleted_at) {
+      if (payment.status !== 'paid' && ['pending','trial'].includes(e.status) && !e.deleted_at) {
         db.prepare("UPDATE events SET status='paid', expires_at=? WHERE id=?").run(Date.now()+payment.months*30*86400000,e.id);
         db.prepare("UPDATE payments SET status='paid' WHERE id=?").run(payment.id);
       }
@@ -107,26 +107,29 @@ function createApp(options = {}) {
   }));
   app.get('/api/auth/me',loginRequired,(req,res)=>res.json({user:req.user,csrf:req.session.csrf}));
   app.post('/api/auth/logout',loginRequired,(req,res)=>{db.prepare('DELETE FROM sessions WHERE token_hash=?').run(req.session.token_hash);res.clearCookie('event_session',{path:'/'});res.json({success:true});});
+  app.get('/api/storage',loginRequired,(req,res)=>{const disk=fs.statfsSync(root);const freeBytes=Number(disk.bavail)*Number(disk.bsize);res.json({warning:freeBytes<200*1024**2,uploadsPaused:freeBytes<100*1024**2});});
   app.get('/api/plans',(req,res)=>res.json(PLANS));
   app.get('/api/events',loginRequired,(req,res)=>{
     const events=db.prepare(`SELECT e.*, COUNT(p.id) photoCount, COALESCE(SUM(p.bytes),0) storageBytes
       FROM events e LEFT JOIN photos p ON p.event_id=e.id
       WHERE e.owner_id=? AND e.deleted_at IS NULL GROUP BY e.id ORDER BY e.created_at DESC`).all(req.user.id);
-    res.json({events:events.map(e=>({...e,storageLimitBytes:Number(cfg.MAX_EVENT_BYTES||2*1024**3),guestUrl:active(e)?`${baseUrl.origin}/event/${e.id}?token=${e.guest_token}`:null}))});
+    res.json({events:events.map(e=>({...e,storageLimitBytes:e.status==='trial'?Math.min(250*1024**2,Number(cfg.MAX_EVENT_BYTES||2*1024**3)):Number(cfg.MAX_EVENT_BYTES||2*1024**3),photoLimit:e.status==='trial'?25:Number(cfg.MAX_EVENT_PHOTOS||2000),guestUrl:active(e)?`${baseUrl.origin}/event/${e.id}?token=${e.guest_token}`:null}))});
   });
   app.post('/api/events',loginRequired,(req,res)=>{
     const id=String(req.body.eventId||''); const plan=PLANS[req.body.plan]; const title=String(req.body.title||'').trim();
     if(!/^[a-z0-9][a-z0-9_-]{2,63}$/.test(id) || !plan || !title || title.length>120) return fail(res,400,'Event-ID (3–64 Zeichen, klein), Titel und Laufzeit prüfen.');
     if(lookup(id) || fs.existsSync(path.join(root,id))) return fail(res,409,'Event-ID bereits vergeben, auch für Bestandsdaten.');
+    const trial=req.body.trial!==false&&!db.prepare('SELECT 1 FROM events WHERE owner_id=? AND trial_used=1').get(req.user.id);
     db.prepare('INSERT INTO events (id,email,plan,amount_cents,status,created_at,owner_id,title,guest_token,moderation) VALUES (?,?,?,?,?,?,?,?,?,?)').run(id,req.user.email,req.body.plan,plan.priceCents,'pending',Date.now(),req.user.id,title,random(),req.body.moderation===true?1:0);
-    res.status(201).json({eventId:id});
+    if(trial)db.prepare("UPDATE events SET status='trial', trial_used=1, expires_at=? WHERE id=?").run(Date.now()+14*86400000,id);
+    res.status(201).json({eventId:id,trial:!!trial});
   });
   app.get('/api/event/:eventId/availability',(req,res)=>res.json({available:/^[a-z0-9][a-z0-9_-]{2,63}$/.test(req.params.eventId)&&!lookup(req.params.eventId)&&!fs.existsSync(path.join(root,req.params.eventId))}));
   function owner(req,res,next) { const e=lookup(req.params.eventId); if(!own(req,e)) return fail(res,404,'Event nicht gefunden.'); req.event=e; next(); }
   app.post('/api/checkout',loginRequired,wrap(async(req,res)=>{
     const e=lookup(String(req.body.eventId||''));
     if(!own(req,e)) return fail(res,404,'Event nicht gefunden.');
-    if(e.status!=='pending' || e.deleted_at) return fail(res,409,'Dieses Event kann nicht bezahlt werden.');
+    if(!['pending','trial'].includes(e.status) || e.deleted_at) return fail(res,409,'Dieses Event kann nicht bezahlt werden.');
     if(!stripe || !cfg.STRIPE_WEBHOOK_SECRET) return fail(res,503,'Stripe-Testmodus noch nicht eingerichtet.');
     // One stable payment/idempotency key per event prevents parallel checkout overwrites.
     let payment=db.prepare('SELECT * FROM payments WHERE event_id=?').get(e.id);
@@ -182,10 +185,11 @@ function createApp(options = {}) {
       const written=[];
       try {
         if(err) throw err;
+        const disk=fs.statfsSync(root);if(Number(disk.bavail)*Number(disk.bsize)<100*1024**2)throw new Error('Fotospeicher vorübergehend ausgelastet. Bitte den Veranstalter informieren.');
         if(!req.files?.length) return fail(res,400,'Keine Fotos empfangen.');
         const dir=path.join(root,req.event.id);fs.mkdirSync(dir,{recursive:true});
         const total=db.prepare('SELECT COUNT(*) count, COALESCE(SUM(bytes),0) bytes FROM photos WHERE event_id=?').get(req.event.id);
-        if(total.count+req.files.length>Number(cfg.MAX_EVENT_PHOTOS||2000)) throw new Error('Fotoanzahl für dieses Event überschritten.');
+        if(total.count+req.files.length>(req.event.status==='trial'?25:Number(cfg.MAX_EVENT_PHOTOS||2000))) throw new Error(req.event.status==='trial'?'Die 25 kostenlosen Fotos sind ausgeschöpft. Bitte den Veranstalter informieren. Vorhandene Fotos bleiben sichtbar.':'Fotoanzahl für dieses Event überschritten.');
         let bytes=total.bytes;
         for(const file of req.files) {
           const image=sharp(file.path,{limitInputPixels:40000000,animated:false});
@@ -193,15 +197,16 @@ function createApp(options = {}) {
           if(!['jpeg','png','webp','heif'].includes(meta.format)) throw new Error('Nur JPEG, PNG, WebP und unterstützte HEIF-Bilder erlaubt.');
           const id=crypto.randomUUID(), filename=`${id}.jpg`, dest=path.join(dir,filename);
           written.push({id,filename,dest});
-          await image.rotate().jpeg({quality:90}).toFile(dest);
+          await image.rotate().resize({width:2560,height:2560,fit:'inside',withoutEnlargement:true}).jpeg({quality:82,mozjpeg:true}).toFile(dest);
           const size=fs.statSync(dest).size;bytes+=size;written[written.length-1].bytes=size;
-          if(bytes>Number(cfg.MAX_EVENT_BYTES||2*1024**3)) throw new Error('Speicherlimit für dieses Event überschritten.');
+          if(bytes>(req.event.status==='trial'?Math.min(250*1024**2,Number(cfg.MAX_EVENT_BYTES||2*1024**3)):Number(cfg.MAX_EVENT_BYTES||2*1024**3))) throw new Error('Speicherlimit für dieses Event überschritten.');
         }
         // Recheck expiry after processing and before publication.
         if(!active(lookup(req.event.id))) throw new Error('Event inzwischen abgelaufen.');
         db.transaction(()=>{for(const f of written) db.prepare('INSERT INTO photos VALUES (?,?,?,?,?,?)').run(f.id,req.event.id,f.filename,f.bytes,req.event.moderation?0:1,Date.now());})();
+        db.prepare('UPDATE events SET upload_successes=upload_successes+1 WHERE id=?').run(req.event.id);
         res.json({success:true,count:written.length,pending:!!req.event.moderation});
-      } catch(error) {for(const f of written) fs.rmSync(f.dest,{force:true}); fail(res,400,error.message);}
+      } catch(error) {db.prepare('UPDATE events SET upload_failures=upload_failures+1 WHERE id=?').run(req.event.id);for(const f of written) fs.rmSync(f.dest,{force:true}); fail(res,400,error.message);}
       finally {for(const f of req.files||[]) fs.rmSync(f.path,{force:true});busy.delete(req.event.id);}
     });
   });
@@ -244,7 +249,7 @@ function createApp(options = {}) {
   }
   app.delete('/api/event/:eventId',loginRequired,owner,(req,res)=>{if(!erase(req.event)) return fail(res,409,'Upload läuft. Bitte erneut versuchen.');res.json({success:true});});
   function cleanup() {
-    for(const e of db.prepare("SELECT * FROM events WHERE owner_id IS NOT NULL AND deleted_at IS NULL AND status='paid' AND expires_at<=?").all(Date.now())) erase(e);
+    for(const e of db.prepare("SELECT * FROM events WHERE owner_id IS NOT NULL AND deleted_at IS NULL AND status IN ('paid','trial') AND expires_at<=?").all(Date.now())) erase(e);
     db.prepare('DELETE FROM sessions WHERE expires_at<=?').run(Date.now());
     for(const entry of fs.readdirSync(temp)) {const file=path.join(temp,entry);if(fs.statSync(file).mtimeMs<Date.now()-86400000) fs.rmSync(file,{force:true});}
   }
