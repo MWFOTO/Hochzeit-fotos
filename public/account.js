@@ -36,6 +36,7 @@
   const element=(tag,text)=>{const el=document.createElement(tag);if(text)el.textContent=text;return el;};
   const button=(parent,label,action)=>{const el=element('button',label);el.onclick=()=>Promise.resolve(action()).catch(report);parent.append(el);return el;};
   const link=(parent,label,url)=>{const el=element('a',label);el.href=url;el.className='button secondary';parent.append(el);};
+  let availablePlans={};
   let activeEvent=null;
   async function manage(event) {
     const section=document.getElementById('photo-manager');section.hidden=false;
@@ -67,7 +68,18 @@
       const tabs=element('nav');tabs.className='actions event-tabs';tabs.setAttribute('aria-label','Veranstaltungsbereiche');card.append(tabs);
       const panels=[];
       const showPanel=index=>{panels.forEach((panel,i)=>panel.hidden=i!==index);tabs.querySelectorAll('button').forEach((b,i)=>b.setAttribute('aria-pressed',String(i===index)));document.getElementById('photo-manager').hidden=index!==0;if(index===0)return manage(event);};
-      if(['pending','trial'].includes(event.status))button(card,event.status==='trial'?'Album erweitern · Testzahlung':'Im Stripe-Testmodus bezahlen',async()=>{const data=await api('/api/checkout','POST',{eventId:event.id});location.href=data.url;});
+      if(['pending','trial'].includes(event.status)){
+        const chooser=element('details');chooser.className='upgrade-panel';chooser.open=activeEvent===event.id;chooser.append(element('summary','Paket auswählen & Album erweitern'));
+        chooser.append(element('p','Fotos, QR-Code und Gästelink bleiben erhalten. Die Laufzeit beginnt nach bestätigter Zahlung. Aktuell ausschließlich Testzahlungen.'));
+        const grid=element('div');grid.className='plan-grid';chooser.append(grid);
+        for(const [key,plan] of Object.entries(availablePlans)){
+          if(plan.legacy&&event.plan!==key)continue;
+          const item=element('div');item.className='plan-card';item.append(element('h3',plan.label),element('p',new Intl.NumberFormat('de-DE',{style:'currency',currency:'EUR'}).format(plan.priceCents/100)),element('p',`Bis zu ${plan.photoLimit} Fotos innerhalb von ${plan.storageLimitMB} MB. Galerie, QR-Code, Diashow und Gesamtdownload enthalten.`));
+          const choose=button(item,event.checkoutStarted&&event.plan===key?'Testzahlung fortsetzen':`${plan.label} auswählen`,async()=>{choose.disabled=true;try{const data=await api('/api/checkout','POST',{eventId:event.id,plan:key});location.href=data.url;}finally{choose.disabled=false;}});choose.className='primary';choose.disabled=event.checkoutStarted&&event.plan!==key;grid.append(item);
+        }
+        if(event.checkoutStarted)chooser.append(element('p','Die begonnene Testzahlung ist an das ausgewählte Paket gebunden.'));
+        card.append(chooser);
+      }
       if(event.guestUrl) {
         const photosSection=element('div');photosSection.className='event-section';photosSection.append(element('h3','Fotos & Live-Diashow'));card.append(photosSection);const photoActions=element('div');photoActions.className='actions';photosSection.append(photoActions);
         const accessSection=element('div');accessSection.className='event-section';accessSection.append(element('h3','QR-Code & Gästezugang'));card.append(accessSection);const accessActions=element('div');accessActions.className='actions';accessSection.append(accessActions);
@@ -108,6 +120,6 @@
     e.preventDefault();eventIdInput.value=normalizeEventId(eventIdInput.value);if(!/^[a-z0-9][a-z0-9_-]{2,63}$/.test(eventIdInput.value)){message.textContent='Bitte einen Kurznamen mit mindestens 3 Buchstaben oder Zahlen eingeben.';message.scrollIntoView({block:'center'});eventIdInput.focus();return;}try{await api('/api/events','POST',{title:document.getElementById('title').value,eventId:document.getElementById('event-id').value,plan:document.getElementById('plan').value,moderation:document.getElementById('moderation').checked});message.textContent='Veranstaltung erstellt. Öffne die Verwaltung für deinen Gästezugang und den aktuellen Status.';e.target.reset();await load();message.scrollIntoView({block:'center',behavior:'smooth'});}catch(err){report(err);message.scrollIntoView({block:'center',behavior:'smooth'});}
   };
   (async()=>{
-    try{const account=await api('/api/auth/me');if(account.emailDeliveryAvailable&&!account.emailVerified){const notice=element('div');notice.className='test-notice';notice.append(element('p','Bitte bestätige deine E-Mail-Adresse über den Link in deiner Mail.'));button(notice,'Bestätigungsmail erneut senden',async()=>{await api('/api/auth/request-verification','POST');message.textContent='Bestätigungsmail angefordert. Bitte auch im Spamordner nachsehen.';});document.getElementById('events').before(notice);}const storage=await api('/api/storage');if(storage.warning)message.textContent=storage.uploadsPaused?'Fotospeicher voll: Uploads sind vorübergehend pausiert.':'Der Fotospeicher wird knapp. Bitte vor weiteren Tests Speicher freigeben.';const plans=await api('/api/plans');for(const [key,plan] of Object.entries(plans)){const option=element('option',`${plan.label} · ${(plan.priceCents/100).toFixed(2)} €`);option.value=key;document.getElementById('plan').append(option);}await load();}catch(err){report(err);}
+    try{const account=await api('/api/auth/me');if(account.emailDeliveryAvailable&&!account.emailVerified){const notice=element('div');notice.className='test-notice';notice.append(element('p','Bitte bestätige deine E-Mail-Adresse über den Link in deiner Mail.'));button(notice,'Bestätigungsmail erneut senden',async()=>{await api('/api/auth/request-verification','POST');message.textContent='Bestätigungsmail angefordert. Bitte auch im Spamordner nachsehen.';});document.getElementById('events').before(notice);}const storage=await api('/api/storage');if(storage.warning)message.textContent=storage.uploadsPaused?'Fotospeicher voll: Uploads sind vorübergehend pausiert.':'Der Fotospeicher wird knapp. Bitte vor weiteren Tests Speicher freigeben.';const plans=await api('/api/plans');availablePlans=plans;for(const [key,plan] of Object.entries(plans)){if(plan.legacy)continue;const option=element('option',`${plan.label} · ${(plan.priceCents/100).toFixed(2)} €`);option.value=key;document.getElementById('plan').append(option);}await load();}catch(err){report(err);}
   })();
 })();

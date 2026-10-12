@@ -141,12 +141,12 @@ function createApp(options = {}) {
   });
   app.post('/api/auth/logout',loginRequired,(req,res)=>{db.prepare('DELETE FROM sessions WHERE token_hash=?').run(req.session.token_hash);res.clearCookie('event_session',{path:'/'});res.json({success:true});});
   app.get('/api/storage',loginRequired,(req,res)=>{const disk=fs.statfsSync(root);const freeBytes=Number(disk.bavail)*Number(disk.bsize);res.json({warning:freeBytes<200*1024**2,uploadsPaused:freeBytes<100*1024**2});});
-  app.get('/api/plans',(req,res)=>res.json(Object.fromEntries(Object.entries(PLANS).map(([key,plan])=>[key,{...plan,photoLimit:Number(cfg.MAX_EVENT_PHOTOS||2000),storageLimitMB:Math.floor(Number(cfg.MAX_EVENT_BYTES||2*1024**3)/1024**2)}]))));
+  app.get('/api/plans',(req,res)=>res.json(Object.fromEntries(Object.entries(PLANS).map(([key,plan])=>[key,{...plan,legacy:key==='12m',photoLimit:Number(cfg.MAX_EVENT_PHOTOS||2000),storageLimitMB:Math.floor(Number(cfg.MAX_EVENT_BYTES||2*1024**3)/1024**2)}]))));
   app.get('/api/events',loginRequired,(req,res)=>{
     const events=db.prepare(`SELECT e.*, COUNT(p.id) photoCount, COALESCE(SUM(p.bytes),0) storageBytes
       FROM events e LEFT JOIN photos p ON p.event_id=e.id
       WHERE e.owner_id=? AND e.deleted_at IS NULL GROUP BY e.id ORDER BY e.created_at DESC`).all(req.user.id);
-    res.json({events:events.map(e=>({...e,storageLimitBytes:e.status==='trial'?Math.min(250*1024**2,Number(cfg.MAX_EVENT_BYTES||2*1024**3)):Number(cfg.MAX_EVENT_BYTES||2*1024**3),photoLimit:e.status==='trial'?25:Number(cfg.MAX_EVENT_PHOTOS||2000),guestUrl:active(e)?`${baseUrl.origin}/event/${e.id}?token=${e.guest_token}`:null}))});
+    res.json({events:events.map(e=>({...e,storageLimitBytes:e.status==='trial'?Math.min(250*1024**2,Number(cfg.MAX_EVENT_BYTES||2*1024**3)):Number(cfg.MAX_EVENT_BYTES||2*1024**3),photoLimit:e.status==='trial'?25:Number(cfg.MAX_EVENT_PHOTOS||2000),checkoutStarted:!!db.prepare('SELECT 1 FROM payments WHERE event_id=?').get(e.id),guestUrl:active(e)?`${baseUrl.origin}/event/${e.id}?token=${e.guest_token}`:null}))});
   });
   app.post('/api/events',loginRequired,(req,res)=>{
     const id=String(req.body.eventId||''); const plan=PLANS[req.body.plan]; const title=String(req.body.title||'').trim();
@@ -160,10 +160,15 @@ function createApp(options = {}) {
   app.get('/api/event/:eventId/availability',(req,res)=>res.json({available:/^[a-z0-9][a-z0-9_-]{2,63}$/.test(req.params.eventId)&&!lookup(req.params.eventId)&&!fs.existsSync(path.join(root,req.params.eventId))}));
   function owner(req,res,next) { const e=lookup(req.params.eventId); if(!own(req,e)) return fail(res,404,'Event nicht gefunden.'); req.event=e; next(); }
   app.post('/api/checkout',loginRequired,wrap(async(req,res)=>{
-    const e=lookup(String(req.body.eventId||''));
+    let e=lookup(String(req.body.eventId||''));
     if(!own(req,e)) return fail(res,404,'Event nicht gefunden.');
     if(!['pending','trial'].includes(e.status) || e.deleted_at) return fail(res,409,'Dieses Event kann nicht bezahlt werden.');
     if(!stripe || !cfg.STRIPE_WEBHOOK_SECRET) return fail(res,503,'Stripe-Testmodus noch nicht eingerichtet.');
+    if(req.body.plan!==undefined){
+      const plan=PLANS[req.body.plan];if(!plan)return fail(res,400,'Bitte ein gültiges Paket wählen.');
+      if(req.body.plan!==e.plan){if(db.prepare('SELECT 1 FROM payments WHERE event_id=?').get(e.id))return fail(res,409,'Für dieses Album wurde bereits eine Testzahlung gestartet. Bitte mit dem bisherigen Paket fortfahren.');
+        db.prepare('UPDATE events SET plan=?, amount_cents=? WHERE id=?').run(req.body.plan,plan.priceCents,e.id);e=lookup(e.id);}
+    }
     // One stable payment/idempotency key per event prevents parallel checkout overwrites.
     let payment=db.prepare('SELECT * FROM payments WHERE event_id=?').get(e.id);
     if(!payment) {

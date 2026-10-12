@@ -201,3 +201,15 @@ test('Verification and password recovery pages serve their executable scripts',a
  for(const script of ['/verify-email.js','/password-recovery.js'])assert.match((await request(script)).res.headers.get('content-type'),/javascript/);
  assert.equal((await request('/server.js')).status,404);
 });
+
+test('Upgrade selection sets server-side price and duration, then locks started checkout',async()=>{
+ const stranger=await register('packages-other@example.com');const u=await register('packages@example.com');await request('/api/events',{method:'POST',user:u,body:{eventId:'package-test',title:'Packages',plan:'1m'}});
+ assert.equal((await request('/api/checkout',{method:'POST',user:stranger,body:{eventId:'package-test',plan:'6m'}})).status,404);
+ assert.equal((await request('/api/checkout',{method:'POST',user:u,body:{eventId:'package-test',plan:'wrong'}})).status,400);
+ assert.equal((await request('/api/checkout',{method:'POST',user:u,body:{eventId:'package-test',plan:'6m',amount_cents:1}})).status,200);
+ const payment=app.locals.db.prepare('SELECT * FROM payments WHERE event_id=?').get('package-test');assert.equal(payment.amount_cents,3900);assert.equal(payment.months,6);
+ assert.equal((await request('/api/checkout',{method:'POST',user:u,body:{eventId:'package-test',plan:'1m'}})).status,409);
+ assert.equal((await request('/api/checkout',{method:'POST',user:u,body:{eventId:'package-test',plan:'6m'}})).status,200);
+ const session=sessions.get(payment.stripe_session_id);session.payment_status='paid';assert.equal(await webhook(session),200);
+ const event=(await request('/api/events',{user:u})).data.events[0];assert.equal(event.plan,'6m');assert.equal(event.status,'paid');assert.ok(event.expires_at>Date.now()+179*86400000);
+});
