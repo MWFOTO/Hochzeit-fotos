@@ -195,3 +195,9 @@ test('Password reset invalidates sessions, expires and cannot be reused',async()
  const expired=sentMail.at(-1).text.match(/#([a-f0-9]{64})/)[1];app.locals.db.prepare('UPDATE password_resets SET expires_at=0 WHERE user_id=?').run(u.id);
  assert.equal((await request('/api/auth/reset-password',{method:'POST',body:{token:expired,password:'another-long-password'}})).status,400);
 });
+
+test('Verification and password recovery pages serve their executable scripts',async()=>{
+ for(const route of ['/verify-email','/forgot-password','/reset-password','/verify-email.js','/password-recovery.js'])assert.equal((await request(route)).status,200);
+ for(const script of ['/verify-email.js','/password-recovery.js'])assert.match((await request(script)).res.headers.get('content-type'),/javascript/);
+ assert.equal((await request('/server.js')).status,404);
+});
