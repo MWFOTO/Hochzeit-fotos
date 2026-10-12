@@ -130,7 +130,7 @@ function createApp(options = {}) {
     const token=random();const expires=Date.now()+86400000;
     db.prepare('INSERT INTO email_verifications VALUES (?,?,?)').run(hash(token),req.user.id,expires);
     try{await mailer({to:req.user.email,subject:'Bestätige deine E-Mail-Adresse · Event-Fotos',text:`Bestätige deine E-Mail-Adresse: ${baseUrl.origin}/verify-email#${token}\nDieser Link ist 24 Stunden gültig. Falls du ihn nicht angefordert hast, ignoriere diese Nachricht.`});}
-    catch(error){db.prepare('DELETE FROM email_verifications WHERE token_hash=?').run(hash(token));return fail(res,503,'E-Mail konnte nicht versendet werden. Bitte später erneut versuchen.');}
+    catch(error){db.prepare('DELETE FROM email_verifications WHERE token_hash=?').run(hash(token));console.error('Bestätigungsmail: Versandstatus',Number(error.deliveryStatus)||'Netzwerkfehler');return fail(res,503,error.deliveryHint||'E-Mail-Versand nicht erreichbar. Bitte später erneut versuchen.');}
     res.json({success:true});
   }));
   app.post('/api/auth/verify-email',authLimit,(req,res)=>{
