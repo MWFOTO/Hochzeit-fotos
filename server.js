@@ -108,7 +108,12 @@ function createApp(options = {}) {
   app.get('/api/auth/me',loginRequired,(req,res)=>res.json({user:req.user,csrf:req.session.csrf}));
   app.post('/api/auth/logout',loginRequired,(req,res)=>{db.prepare('DELETE FROM sessions WHERE token_hash=?').run(req.session.token_hash);res.clearCookie('event_session',{path:'/'});res.json({success:true});});
   app.get('/api/plans',(req,res)=>res.json(PLANS));
-  app.get('/api/events',loginRequired,(req,res)=>res.json({events:db.prepare('SELECT * FROM events WHERE owner_id=? AND deleted_at IS NULL ORDER BY created_at DESC').all(req.user.id).map(e=>({...e,guestUrl:active(e)?`${baseUrl.origin}/event/${e.id}?token=${e.guest_token}`:null}))}));
+  app.get('/api/events',loginRequired,(req,res)=>{
+    const events=db.prepare(`SELECT e.*, COUNT(p.id) photoCount, COALESCE(SUM(p.bytes),0) storageBytes
+      FROM events e LEFT JOIN photos p ON p.event_id=e.id
+      WHERE e.owner_id=? AND e.deleted_at IS NULL GROUP BY e.id ORDER BY e.created_at DESC`).all(req.user.id);
+    res.json({events:events.map(e=>({...e,storageLimitBytes:Number(cfg.MAX_EVENT_BYTES||2*1024**3),guestUrl:active(e)?`${baseUrl.origin}/event/${e.id}?token=${e.guest_token}`:null}))});
+  });
   app.post('/api/events',loginRequired,(req,res)=>{
     const id=String(req.body.eventId||''); const plan=PLANS[req.body.plan]; const title=String(req.body.title||'').trim();
     if(!/^[a-z0-9][a-z0-9_-]{2,63}$/.test(id) || !plan || !title || title.length>120) return fail(res,400,'Event-ID (3–64 Zeichen, klein), Titel und Laufzeit prüfen.');

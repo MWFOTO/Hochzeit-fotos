@@ -78,6 +78,9 @@ test('Content validation, guest upload, moderation, protected files, QR, quota a
   const image=await sharp({create:{width:20,height:20,channels:3,background:'red'}}).jpeg().toBuffer();
   assert.equal((await upload(image)).status,200);
   assert.equal((await request(`/api/event/birthday/photos?token=${token}`)).data.photos.length,0);
+  const stats=(await request('/api/events',{user})).data.events.find(e=>e.id==='birthday');
+  assert.equal(stats.photoCount,1);assert.ok(stats.storageBytes>0);assert.equal(stats.storageLimitBytes,2*1024**3);
+  assert.equal((await request('/api/events',{user:other})).data.events.length,0);
   photo=(await request('/api/event/birthday/photos?manage=1',{user})).data.photos[0];
   assert.equal((await request(photo.url)).status,403);
   assert.equal((await request(photo.url+`?token=${token}`)).status,404);
