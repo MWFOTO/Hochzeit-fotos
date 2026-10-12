@@ -28,7 +28,7 @@
       e.preventDefault();
       if(registering && password.value!==confirmation.value){report(new Error('Die Passwörter stimmen nicht überein.'));confirmation.focus();return;}
       const button=document.getElementById('auth-submit');button.disabled=true;
-      try{await api(`/api/auth/${registering?'register':'login'}`,'POST',{email:document.getElementById('email').value,password:password.value});location.href='/dashboard';}catch(err){report(err);button.disabled=false;}
+      try{await api(`/api/auth/${registering?'register':'login'}`,'POST',{email:document.getElementById('email').value,password:password.value});const event=new URLSearchParams(location.search).get('event');location.href=event?`/dashboard?event=${encodeURIComponent(event)}`:'/dashboard';}catch(err){report(err);button.disabled=false;}
     };return;
   }
 

@@ -302,3 +302,5 @@ body{font-family:'Trebuchet MS','Segoe UI',sans-serif;line-height:1.6;height:aut
 .faq-section{max-width:850px;margin:auto}.faq-section details{border-bottom:1px solid var(--line);padding:20px 0}.faq-section summary{font-weight:700;cursor:pointer}.closing-cta{text-align:center;background:#e0f0f5;padding:45px 25px;border-radius:24px;margin:20px 0 50px}.plans-section>.actions{margin-top:24px}
 
 .event-tabs{margin:22px 0}.event-tabs button[aria-pressed="true"]{background:var(--color-accent);color:white}.event-card progress{display:block;width:100%;height:10px;accent-color:var(--color-accent);margin-bottom:20px}.photo-toolbar{margin:18px 0}.managed-grid article.selected{outline:3px solid var(--color-accent)}.event-open{margin-top:12px!important}
+
+.slideshow-back{position:fixed;top:16px;left:16px;z-index:50;background:#fffffff0}.quota-notice{padding:16px 20px;background:#e0f0f5;border-radius:16px;margin:20px 0;max-width:600px}.quota-notice p{margin:4px 0 12px}.quota-near{background:#fff4d2;border:1px solid #e0bf59}.status.notice{color:#65521d;background:#fff4d2;border-radius:12px;padding:16px}

@@ -30,6 +30,22 @@
     }).catch(() => nativeSend.call(xhr, body));
   };
   const eventId = location.pathname.split('/')[2];
+  async function refreshQuota(){
+    if(!eventId)return;
+    const res=await window.fetch(`/api/event/${encodeURIComponent(eventId)}/info`);if(!res.ok)return;
+    const info=await res.json();
+    let notice=document.getElementById('quota-notice');
+    if(!notice){notice=document.createElement('div');notice.id='quota-notice';notice.className='quota-notice';notice.setAttribute('role','status');const parent=document.querySelector('.gallery-header')||document.querySelector('.upload-page');if(parent)parent.append(notice);}
+    if(notice){notice.replaceChildren();notice.hidden=!info.trial;
+      if(info.trial){const left=Math.max(0,info.photoLimit-info.photoCount);const text=document.createElement('p');text.textContent=left===0?'Die 25 kostenlosen Fotos sind genutzt. Erweitere das Album mit einem Paket.':`Noch ${left} kostenlose ${left===1?'Foto':'Fotos'} verfügbar.`;notice.append(text);
+        if(left<=5){notice.classList.add('quota-near');const a=document.createElement('a');a.className='button primary';a.textContent=info.canManage?'Paket auswählen':'Veranstalter? Paket auswählen';a.href=info.canManage?`/dashboard?event=${encodeURIComponent(eventId)}`:`/login?event=${encodeURIComponent(eventId)}`;notice.append(a);if(!info.canManage){const hint=document.createElement('p');hint.textContent='Gäste zahlen nichts. Das Paket wird im Veranstalterkonto gebucht.';notice.append(hint);}}
+      }
+    }
+    const back=document.getElementById('album-back');if(back)back.href=window.guestUrl(`/event/${encodeURIComponent(eventId)}/gallery`);
+    const manage=document.getElementById('manage-back');if(manage){manage.hidden=!info.canManage;manage.href=`/dashboard?event=${encodeURIComponent(eventId)}`;}
+  }
+  window.refreshEventQuota=refreshQuota;
+  document.addEventListener('DOMContentLoaded',()=>{refreshQuota().catch(()=>{});if(!location.pathname.endsWith('/slideshow'))setInterval(()=>refreshQuota().catch(()=>{}),10000);});
   if (eventId) window.fetch(`/api/event/${encodeURIComponent(eventId)}/info`).then(res => res.json()).then(info => {
     const title = document.querySelector('.event-title');
     if (title && info.title) title.textContent = info.title;

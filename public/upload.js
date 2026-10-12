@@ -68,6 +68,7 @@
         const result = JSON.parse(xhr.responseText);
         setStatus(result.pending ? '✓ Danke! Deine Fotos warten auf Freigabe.' : '✓ Danke! Deine Fotos wurden hochgeladen.', 'success');
         showLocalPreview(files);
+        window.refreshEventQuota?.().catch(()=>{});
         // Datei-Input zurücksetzen, damit dieselbe Datei erneut gewählt werden kann
         fileInput.value = '';
       } else {
@@ -76,7 +77,9 @@
           const res = JSON.parse(xhr.responseText);
           if (res.error) message = res.error;
         } catch (_) {}
-        setStatus('✗ ' + message, 'error');
+        const quota=message.startsWith('Die 25 kostenlosen');
+        setStatus(quota?message:'✗ '+message,quota?'notice':'error');
+        window.refreshEventQuota?.().catch(()=>{});
       }
     };
 

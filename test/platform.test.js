@@ -15,7 +15,8 @@ const sessions=new Map();
 const fake={webhooks:signer.webhooks,checkout:{sessions:{create:async(data,options)=>{
   creations++;const session={id:'cs_test_'+options.idempotencyKey,livemode:false,status:'open',payment_status:'unpaid',mode:data.mode,metadata:data.metadata,currency:'eur',amount_total:data.line_items[0].price_data.unit_amount,url:'https://checkout.stripe.com/test'};sessions.set(session.id,session);return session;
 },retrieve:async id=>sessions.get(id)}}};
-const app=createApp({DB_PATH:path.join(tmp,'events.db'),UPLOAD_DIR:path.join(tmp,'uploads'),BASE_URL:'http://localhost:3000',STRIPE_WEBHOOK_SECRET:signing,stripe:fake,MAX_EVENT_PHOTOS:2});
+const sentMail=[];
+const app=createApp({mailer:async message=>sentMail.push(message),DB_PATH:path.join(tmp,'events.db'),UPLOAD_DIR:path.join(tmp,'uploads'),BASE_URL:'http://localhost:3000',STRIPE_WEBHOOK_SECRET:signing,stripe:fake,MAX_EVENT_PHOTOS:2});
 const server=app.listen(0);
 const origin=`http://127.0.0.1:${server.address().port}`;
 after(()=>{server.close();app.locals.db.close();fs.rmSync(tmp,{recursive:true,force:true});});
@@ -116,7 +117,7 @@ test('Live key blocked and old SQLite schema migrated without overwriting rows',
 test('Legacy import dry-run, backup, ownership, no overwrite and repeatability',async()=>{
   const {importLegacy}=require('../scripts/import-legacy');
   const dbPath=path.join(tmp,'import.db'),uploadRoot=path.join(tmp,'import-uploads');
-  const db=openDatabase(dbPath);db.prepare('INSERT INTO users VALUES (?,?,?,?)').run('legacy-owner','legacy@example.com','unused',1);db.close();
+  const db=openDatabase(dbPath);db.prepare('INSERT INTO users (id,email,password_hash,created_at) VALUES (?,?,?,?)').run('legacy-owner','legacy@example.com','unused',1);db.close();
   fs.mkdirSync(path.join(uploadRoot,'legacy-photo'),{recursive:true});
   const original=await sharp({create:{width:10,height:10,channels:3,background:'blue'}}).png().toBuffer();
   const file=path.join(uploadRoot,'legacy-photo','original.png');fs.writeFileSync(file,original);
@@ -160,4 +161,17 @@ test('Free trial quota, compression, counters and upgrade preserve photos and gu
   assert.equal(await webhook(session),200);
   event=(await request('/api/events',{user:trialUser})).data.events.find(e=>e.id==='trial-event');assert.equal(event.status,'paid');assert.equal(event.photoCount,25);assert.equal(event.guest_token,trialToken);
   assert.equal((await request('/api/storage',{user:trialUser})).status,200);assert.equal((await request('/api/storage')).status,401);
+});
+
+test('Email verification uses expiring single-use tokens without plaintext storage',async()=>{
+ const u=await register('verify@example.com');
+ assert.equal((await request('/api/auth/request-verification',{method:'POST',user:u})).status,200);
+ const token=sentMail.at(-1).text.match(/#([a-f0-9]{64})/)[1];
+ assert.equal(app.locals.db.prepare('SELECT 1 FROM email_verifications WHERE token_hash=?').get(token),undefined);
+ assert.equal((await request('/api/auth/verify-email',{method:'POST',body:{token}})).status,200);
+ assert.equal((await request('/api/auth/me',{user:u})).data.emailVerified,true);
+ assert.equal((await request('/api/auth/verify-email',{method:'POST',body:{token}})).status,400);
+ assert.equal((await request('/api/auth/request-verification',{method:'POST',user:u})).status,200);
+ const expired=sentMail.at(-1).text.match(/#([a-f0-9]{64})/)[1];app.locals.db.prepare('UPDATE email_verifications SET expires_at=0 WHERE user_id=?').run(u.id);
+ assert.equal((await request('/api/auth/verify-email',{method:'POST',body:{token:expired}})).status,400);
 });

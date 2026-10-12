@@ -92,7 +92,7 @@ function createApp(options = {}) {
     if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length>254 || typeof password!=='string' || password.length<12 || password.length>128) return fail(res,400,'Gültige E-Mail und Passwort mit 12–128 Zeichen erforderlich.');
     const encoded=await passwordHash(password);
     const user={id:crypto.randomUUID(),email};
-    try {db.prepare('INSERT INTO users VALUES (?,?,?,?)').run(user.id,email,encoded,Date.now());}
+    try {db.prepare('INSERT INTO users (id,email,password_hash,created_at) VALUES (?,?,?,?)').run(user.id,email,encoded,Date.now());}
     catch(err) {if(err.code==='SQLITE_CONSTRAINT_UNIQUE') return fail(res,409,'Registrierung nicht möglich. Bitte anmelden.'); throw err;}
     startSession(req,res,user);
   }));
@@ -105,10 +105,24 @@ function createApp(options = {}) {
     if(!crypto.timingSafeEqual(Buffer.from(stored,'hex'),derived) || !user) return fail(res,401,'Anmeldedaten stimmen nicht.');
     startSession(req,res,user);
   }));
-  app.get('/api/auth/me',loginRequired,(req,res)=>res.json({user:req.user,csrf:req.session.csrf}));
+  app.get('/api/auth/me',loginRequired,(req,res)=>res.json({user:req.user,csrf:req.session.csrf,emailVerified:!!db.prepare('SELECT email_verified_at FROM users WHERE id=?').get(req.user.id).email_verified_at,emailDeliveryAvailable:!!options.mailer}));
+  app.post('/api/auth/request-verification',authLimit,loginRequired,wrap(async(req,res)=>{
+    if(!options.mailer)return fail(res,503,'E-Mail-Versand ist noch nicht eingerichtet.');
+    const token=random();const expires=Date.now()+86400000;
+    db.prepare('INSERT INTO email_verifications VALUES (?,?,?)').run(hash(token),req.user.id,expires);
+    try{await options.mailer({to:req.user.email,subject:'Bestätige deine E-Mail-Adresse · Event-Fotos',text:`Bestätige deine E-Mail-Adresse: ${baseUrl.origin}/verify-email#${token}\nDieser Link ist 24 Stunden gültig. Falls du ihn nicht angefordert hast, ignoriere diese Nachricht.`});}
+    catch(error){db.prepare('DELETE FROM email_verifications WHERE token_hash=?').run(hash(token));return fail(res,503,'E-Mail konnte nicht versendet werden. Bitte später erneut versuchen.');}
+    res.json({success:true});
+  }));
+  app.post('/api/auth/verify-email',authLimit,(req,res)=>{
+    const token=String(req.body.token||'');if(!/^[a-f0-9]{64}$/.test(token))return fail(res,400,'Bestätigungslink ungültig oder abgelaufen.');
+    const verification=db.prepare('SELECT * FROM email_verifications WHERE token_hash=? AND expires_at>?').get(hash(token),Date.now());
+    if(!verification)return fail(res,400,'Bestätigungslink ungültig oder abgelaufen.');
+    db.transaction(()=>{db.prepare('UPDATE users SET email_verified_at=? WHERE id=?').run(Date.now(),verification.user_id);db.prepare('DELETE FROM email_verifications WHERE user_id=?').run(verification.user_id);})();res.json({success:true});
+  });
   app.post('/api/auth/logout',loginRequired,(req,res)=>{db.prepare('DELETE FROM sessions WHERE token_hash=?').run(req.session.token_hash);res.clearCookie('event_session',{path:'/'});res.json({success:true});});
   app.get('/api/storage',loginRequired,(req,res)=>{const disk=fs.statfsSync(root);const freeBytes=Number(disk.bavail)*Number(disk.bsize);res.json({warning:freeBytes<200*1024**2,uploadsPaused:freeBytes<100*1024**2});});
-  app.get('/api/plans',(req,res)=>res.json(PLANS));
+  app.get('/api/plans',(req,res)=>res.json(Object.fromEntries(Object.entries(PLANS).map(([key,plan])=>[key,{...plan,photoLimit:Number(cfg.MAX_EVENT_PHOTOS||2000),storageLimitMB:Math.floor(Number(cfg.MAX_EVENT_BYTES||2*1024**3)/1024**2)}]))));
   app.get('/api/events',loginRequired,(req,res)=>{
     const events=db.prepare(`SELECT e.*, COUNT(p.id) photoCount, COALESCE(SUM(p.bytes),0) storageBytes
       FROM events e LEFT JOIN photos p ON p.event_id=e.id
@@ -189,7 +203,7 @@ function createApp(options = {}) {
         if(!req.files?.length) return fail(res,400,'Keine Fotos empfangen.');
         const dir=path.join(root,req.event.id);fs.mkdirSync(dir,{recursive:true});
         const total=db.prepare('SELECT COUNT(*) count, COALESCE(SUM(bytes),0) bytes FROM photos WHERE event_id=?').get(req.event.id);
-        if(total.count+req.files.length>(req.event.status==='trial'?25:Number(cfg.MAX_EVENT_PHOTOS||2000))) throw new Error(req.event.status==='trial'?'Die 25 kostenlosen Fotos sind ausgeschöpft. Bitte den Veranstalter informieren. Vorhandene Fotos bleiben sichtbar.':'Fotoanzahl für dieses Event überschritten.');
+        if(total.count+req.files.length>(req.event.status==='trial'?25:Number(cfg.MAX_EVENT_PHOTOS||2000))) throw new Error(req.event.status==='trial'?'Die 25 kostenlosen Fotos sind genutzt. Das Album kann mit einem Paket erweitert werden. Vorhandene Fotos bleiben sichtbar.':'Fotoanzahl für dieses Event überschritten.');
         let bytes=total.bytes;
         for(const file of req.files) {
           const image=sharp(file.path,{limitInputPixels:40000000,animated:false});
@@ -211,7 +225,7 @@ function createApp(options = {}) {
     });
   });
   function photoUrl(req,p) {return `/uploads/${req.event.id}/${p.filename}${own(req,req.event)?'':`?token=${req.event.guest_token}`}`;}
-  app.get('/api/event/:eventId/info',access,(req,res)=>res.json({title:req.event.title,expiresAt:req.event.expires_at,moderation:!!req.event.moderation}));
+  app.get('/api/event/:eventId/info',access,(req,res)=>res.json({title:req.event.title,expiresAt:req.event.expires_at,moderation:!!req.event.moderation,trial:req.event.status==='trial',photoCount:db.prepare('SELECT COUNT(*) count FROM photos WHERE event_id=?').get(req.event.id).count,photoLimit:req.event.status==='trial'?25:Number(cfg.MAX_EVENT_PHOTOS||2000),canManage:own(req,req.event)}));
   app.get('/api/event/:eventId/photos',access,(req,res)=>{
     const admin=own(req,req.event)&&req.query.manage==='1';
     const photos=db.prepare(`SELECT * FROM photos WHERE event_id=? ${admin?'':'AND approved=1'} ORDER BY created_at,id`).all(req.event.id);
@@ -251,10 +265,12 @@ function createApp(options = {}) {
   function cleanup() {
     for(const e of db.prepare("SELECT * FROM events WHERE owner_id IS NOT NULL AND deleted_at IS NULL AND status IN ('paid','trial') AND expires_at<=?").all(Date.now())) erase(e);
     db.prepare('DELETE FROM sessions WHERE expires_at<=?').run(Date.now());
+    db.prepare('DELETE FROM email_verifications WHERE expires_at<=?').run(Date.now());
     for(const entry of fs.readdirSync(temp)) {const file=path.join(temp,entry);if(fs.statSync(file).mtimeMs<Date.now()-86400000) fs.rmSync(file,{force:true});}
   }
   const pub=path.join(__dirname,'public');
   app.get('/',(req,res)=>res.sendFile(path.join(pub,'landing.html')));
+  app.get('/verify-email',(req,res)=>res.sendFile(path.join(pub,'verify-email.html')));
   app.get('/impressum',(req,res)=>res.sendFile(path.join(pub,'impressum.html')));
   app.get('/register',(req,res)=>req.user?res.redirect('/dashboard'):res.sendFile(path.join(pub,'login.html')));
   app.get('/login',(req,res)=>res.sendFile(path.join(pub,'login.html')));
