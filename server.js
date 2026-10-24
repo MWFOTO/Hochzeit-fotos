@@ -17,7 +17,7 @@ const hash = value => crypto.createHash('sha256').update(value).digest('hex');
 const random = () => crypto.randomBytes(32).toString('hex');
 const fail = (res, status, error) => res.status(status).json({error});
 const wrap = fn => (req,res,next) => Promise.resolve(fn(req,res,next)).catch(next);
-const active = e => e && ['paid','trial'].includes(e.status) && e.expires_at > Date.now() && !e.deleted_at;
+const active = e => e && ['paid','trial','pilot'].includes(e.status) && e.expires_at > Date.now() && !e.deleted_at;
 function createApp(options = {}) {
   const cfg = {...process.env, ...options};
   const mailer=options.mailer||require('./mailer').createMailer(cfg);
@@ -29,6 +29,15 @@ function createApp(options = {}) {
   const root = path.resolve(cfg.UPLOAD_DIR || path.join(__dirname,'uploads'));
   fs.mkdirSync(root, {recursive:true});
   const db = openDatabase(cfg.DB_PATH || path.join(__dirname,'events.db'));
+  // Operator-only pilot provisioning. No guest endpoint can enable a pilot.
+  // The original capability and owner remain unchanged; deleted albums stay deleted.
+  if (cfg.PILOT_EVENT_ID) {
+    const expires = Date.parse(cfg.PILOT_ENDS_AT || '');
+    if (!Number.isFinite(expires) || !/^[a-z0-9][a-z0-9_-]{2,63}$/.test(cfg.PILOT_EVENT_ID)) throw new Error('Pilot-Konfiguration ungültig.');
+    const title = String(cfg.PILOT_TITLE || '').trim();
+    if (title.length > 120) throw new Error('Pilot-Titel zu lang.');
+    db.prepare("UPDATE events SET status='pilot', expires_at=?, title=CASE WHEN ?='' THEN title ELSE ? END WHERE id=? AND owner_id IS NOT NULL AND deleted_at IS NULL AND status IN ('pending','trial','pilot')").run(expires,title,title,cfg.PILOT_EVENT_ID);
+  }
   const stripe = options.stripe || (cfg.STRIPE_SECRET_KEY ? new Stripe(cfg.STRIPE_SECRET_KEY) : null);
   const app = express();
   if (cfg.TRUST_PROXY === '1') app.set('trust proxy', 1);
@@ -140,7 +149,7 @@ function createApp(options = {}) {
     db.transaction(()=>{db.prepare('UPDATE users SET email_verified_at=? WHERE id=?').run(Date.now(),verification.user_id);db.prepare('DELETE FROM email_verifications WHERE user_id=?').run(verification.user_id);})();res.json({success:true});
   });
   app.post('/api/auth/logout',loginRequired,(req,res)=>{db.prepare('DELETE FROM sessions WHERE token_hash=?').run(req.session.token_hash);res.clearCookie('event_session',{path:'/'});res.json({success:true});});
-  app.get('/api/storage',loginRequired,(req,res)=>{const disk=fs.statfsSync(root);const freeBytes=Number(disk.bavail)*Number(disk.bsize);res.json({warning:freeBytes<200*1024**2,uploadsPaused:freeBytes<100*1024**2});});
+  app.get('/api/storage',loginRequired,(req,res)=>{const disk=fs.statfsSync(root);const freeBytes=Number(disk.bavail)*Number(disk.bsize);res.json({freeBytes,totalBytes:Number(disk.blocks)*Number(disk.bsize),warning:freeBytes<200*1024**2,uploadsPaused:freeBytes<100*1024**2});});
   app.get('/api/plans',(req,res)=>res.json(Object.fromEntries(Object.entries(PLANS).map(([key,plan])=>[key,{...plan,legacy:key==='12m',photoLimit:Number(cfg.MAX_EVENT_PHOTOS||2000),storageLimitMB:Math.floor(Number(cfg.MAX_EVENT_BYTES||2*1024**3)/1024**2)}]))));
   app.get('/api/events',loginRequired,(req,res)=>{
     const events=db.prepare(`SELECT e.*, COUNT(p.id) photoCount, COALESCE(SUM(p.bytes),0) storageBytes
@@ -249,7 +258,7 @@ function createApp(options = {}) {
     });
   });
   function photoUrl(req,p) {return `/uploads/${req.event.id}/${p.filename}${own(req,req.event)?'':`?token=${req.event.guest_token}`}`;}
-  app.get('/api/event/:eventId/info',access,(req,res)=>res.json({title:req.event.title,expiresAt:req.event.expires_at,moderation:!!req.event.moderation,trial:req.event.status==='trial',photoCount:db.prepare('SELECT COUNT(*) count FROM photos WHERE event_id=?').get(req.event.id).count,photoLimit:req.event.status==='trial'?25:Number(cfg.MAX_EVENT_PHOTOS||2000),canManage:own(req,req.event)}));
+  app.get('/api/event/:eventId/info',access,(req,res)=>res.json({title:req.event.title,expiresAt:req.event.expires_at,moderation:!!req.event.moderation,trial:req.event.status==='trial',photoCount:db.prepare('SELECT COUNT(*) count FROM photos WHERE event_id=?').get(req.event.id).count,photoLimit:req.event.status==='trial'?25:Number(cfg.MAX_EVENT_PHOTOS||2000),pilot:req.event.status==='pilot',canManage:own(req,req.event)}));
   app.get('/api/event/:eventId/photos',access,(req,res)=>{
     const admin=own(req,req.event)&&req.query.manage==='1';
     const photos=db.prepare(`SELECT * FROM photos WHERE event_id=? ${admin?'':'AND approved=1'} ORDER BY created_at,id`).all(req.event.id);
@@ -287,7 +296,7 @@ function createApp(options = {}) {
   }
   app.delete('/api/event/:eventId',loginRequired,owner,(req,res)=>{if(!erase(req.event)) return fail(res,409,'Upload läuft. Bitte erneut versuchen.');res.json({success:true});});
   function cleanup() {
-    for(const e of db.prepare("SELECT * FROM events WHERE owner_id IS NOT NULL AND deleted_at IS NULL AND status IN ('paid','trial') AND expires_at<=?").all(Date.now())) erase(e);
+    for(const e of db.prepare("SELECT * FROM events WHERE owner_id IS NOT NULL AND deleted_at IS NULL AND status IN ('paid','trial','pilot') AND expires_at<=?").all(Date.now())) erase(e);
     db.prepare('DELETE FROM sessions WHERE expires_at<=?').run(Date.now());
     db.prepare('DELETE FROM email_verifications WHERE expires_at<=?').run(Date.now());
     db.prepare('DELETE FROM password_resets WHERE expires_at<=?').run(Date.now());
@@ -315,6 +324,8 @@ function createApp(options = {}) {
 if(require.main===module) {
   const app=createApp();
   app.locals.cleanup();
+  const disk=fs.statfsSync(path.resolve(process.env.UPLOAD_DIR || path.join(__dirname,'uploads')));
+  console.info('Fotospeicher verfügbar (MiB):',Math.floor(Number(disk.bavail)*Number(disk.bsize)/1024**2));
   setInterval(()=>{try{app.locals.cleanup();}catch(err){console.error('Löschung fehlgeschlagen:',err.message);}},3600000).unref();
   app.listen(process.env.PORT||3000,()=>console.log('Event-Foto-Plattform gestartet (Stripe-Testmodus).'));
 }
