@@ -39,8 +39,8 @@ Ressourcen wird automatisch angelegt.
 | UPLOAD_DIR | /data/uploads |
 | STRIPE_SECRET_KEY | sk_test_… als Secret |
 | STRIPE_WEBHOOK_SECRET | whsec_… des Test-Webhooks als Secret |
-| MAX_EVENT_PHOTOS | 2000, vor Verkauf abstimmen |
-| MAX_EVENT_BYTES | 2147483648 pro Event, vor Verkauf abstimmen |
+| MAX_EVENT_PHOTOS | Nur für geschlossene Pilot-Events; im Verkaufspaket keine feste Fotoanzahl |
+| MAX_EVENT_BYTES | 26843545600 als 25-GB-Ziel pro bezahltem Event; Hosting-Wert vor Verkauf prüfen |
 
 Für SQLite und Bilder muss `/data` auf einer Persistent Disk liegen.
 Nur Pfade auf dem gemounteten Datenträger sind dauerhaft. Free-Webservices haben

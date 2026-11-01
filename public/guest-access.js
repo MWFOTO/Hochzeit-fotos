@@ -36,9 +36,9 @@
     const info=await res.json();
     let notice=document.getElementById('quota-notice');
     if(!notice){notice=document.createElement('div');notice.id='quota-notice';notice.className='quota-notice';notice.setAttribute('role','status');const parent=document.querySelector('.gallery-header')||document.querySelector('.upload-page');if(parent)parent.append(notice);}
-    if(notice){notice.replaceChildren();notice.hidden=!info.trial;
-      if(info.trial){const left=Math.max(0,info.photoLimit-info.photoCount);const text=document.createElement('p');text.textContent=left===0?'Die 25 kostenlosen Fotos sind genutzt. Erweitere das Album mit einem Paket.':`Noch ${left} kostenlose ${left===1?'Foto':'Fotos'} verfügbar.`;notice.append(text);
-        if(left<=5){notice.classList.add('quota-near');const a=document.createElement('a');a.className='button primary';a.textContent=info.canManage?'Paket auswählen':'Veranstalter? Paket auswählen';a.href=info.canManage?`/dashboard?event=${encodeURIComponent(eventId)}`:`/login?event=${encodeURIComponent(eventId)}`;notice.append(a);if(!info.canManage){const hint=document.createElement('p');hint.textContent='Gäste zahlen nichts. Das Paket wird im Veranstalterkonto gebucht.';notice.append(hint);}}
+    if(notice){notice.replaceChildren();notice.hidden=!info.testMode;
+      if(info.testMode){const left=Math.max(0,info.photoLimit-info.photoCount);const text=document.createElement('p');text.textContent=left===0?(info.preEventTest?'Die 25 Testfotos sind genutzt. Das 25-GB-Paket startet am Veranstaltungsdatum.':'Die 25 kostenlosen Testfotos sind genutzt. Buche das Album im Veranstalterkonto.'):(info.preEventTest?`Vorabtest: noch ${left} ${left===1?'Foto':'Fotos'} bis zum Veranstaltungsdatum.`:`Noch ${left} kostenlose ${left===1?'Testfoto':'Testfotos'} verfügbar.`);notice.append(text);
+        if(info.trial&&left<=5){notice.classList.add('quota-near');const a=document.createElement('a');a.className='button primary';a.textContent=info.canManage?'Album buchen':'Veranstalter? Album buchen';a.href=info.canManage?`/dashboard?event=${encodeURIComponent(eventId)}`:`/login?event=${encodeURIComponent(eventId)}`;notice.append(a);if(!info.canManage){const hint=document.createElement('p');hint.textContent='Gäste zahlen nichts. Das Album wird im Veranstalterkonto gebucht.';notice.append(hint);}}
       }
     }
     const back=document.getElementById('album-back');if(back)back.href=window.guestUrl(`/event/${encodeURIComponent(eventId)}/gallery`);

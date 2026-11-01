@@ -6,14 +6,14 @@ Stand: 12. Oktober 2026. Die Anwendung bleibt im Stripe-Testmodus. Dieser Plan i
 - [x] Registrierung, Anmeldung und Veranstalterkonto.
 - [x] Brevo für Bestätigungsmails und Passwort-Zurücksetzen angebunden; vom Betreiber im echten Postfach getestet.
 - [x] QR-Gästezugang ohne Konto, Upload, Kamera-Auswahl, Galerie und Diashow.
-- [x] Kostenloser Einstieg: einmal pro Konto, 25 Fotos, 14 Tage; Praxisprüfung erfolgreich.
+- [x] Kostenloser Einstieg: einmal pro Konto bis zu 25 Testfotos; vor dem Veranstaltungsdatum vorbereiten.
 - [x] Fotoverwaltung, Mehrfachauswahl, Moderation und Löschung.
 - [x] Bilder auf maximal 2.560 Pixel, JPEG-Qualität 82; keine unveränderten Originale.
 - [x] Stripe-Testcheckout, Webhook-Prüfung und Übergang vom Testalbum zur Zahlung.
 - [x] Grundlegende Zugriffskontrollen, Origin/CSRF-Schutz, Rate Limits und Upload-Prüfung; noch keine vollständige Sicherheitsprüfung.
 - [x] Speicheranzeige, Uploadzähler und Warnung bei wenig freiem Disk-Speicher.
 - [x] Gästefotos sind pro Browser getrennt: Gäste sehen nur eigene Uploads; Veranstalter sehen alle. Gleicher Browser bedeutet dieselbe anonyme Gästesitzung.
-- [x] 90-tägige Nur-Lese-Downloadphase nach Ablauf des Albumzeitraums; danach automatische Entfernung der Fotos.
+- [x] 90-tägige Nur-Lese-Downloadphase nach dem Albumzeitraum; davor zwölf Monate ab Veranstaltungsdatum online.
 - [x] FinalSnap als Arbeitsmarke, Paketkarten und Übernahme der Auswahl von der Landingpage.
 - [x] 20 automatisierte Tests bestehen. Mobile End-to-End- und Lasttests bleiben offen.
 
@@ -28,18 +28,17 @@ Stand: 12. Oktober 2026. Die Anwendung bleibt im Stripe-Testmodus. Dieser Plan i
 - [ ] Daten sichern und Wiederherstellung testen, bevor produktive Daten umgezogen werden.
 - [ ] Vollständigen Umzug mit Rückweg und Datenabgleich vorbereiten; alte Disk erst nach Prüfung abbauen.
 
-## Angebot – verbindlich offen halten
-- [ ] Fotoanzahl ist Hauptunterschied der Pakete; Laufzeit ist Zusatzinformation.
-- [ ] Klein / Mittel / Groß; mittleres Paket als Empfehlung. Keine unbelegte Behauptung „am beliebtesten“.
-- [ ] Vorgeschlagene 300 / 1.000 / 3.000 Fotos und 19,90 / 34,90 / 54,90 Euro sind NICHT festgelegt oder umgesetzt.
-- [ ] Aktuelle 1-/3-/6-Monatsangebote sind vorläufige technische Testangebote und müssen vor Verkauf ersetzt werden.
-- [ ] Fotoanzahl und Speicherlimit müssen zusammenpassen; keine irreführenden Mengenzusagen.
-- [ ] Speicher- und Uploadzeit getrennt definieren; Laufzeitstart an Veranstaltung statt Zahlung prüfen.
-- [ ] Paket-Upgrade gegen Preisdifferenz auch für bereits bezahlte Alben implementieren.
-- [ ] Foto-Nachschläge ohne Laufzeitverlängerung kalkulieren und implementieren.
-- [ ] Hinweis bei 80 % des Kontingents, Uploadpause am Limit und Fortsetzung nach bestätigter Buchung prüfen.
+## Angebot – Arbeitsmodell, vor Verkauf noch bestätigen
+- [x] Ein Kernpaket je Veranstaltung: 34,90 € als vorläufiger Arbeitspreis.
+- [x] Keine feste Fotoanzahl; Zielgrenze bis zu 25 GB verarbeitete Fotos je Event.
+- [x] Start am Veranstaltungsdatum; zwölf Monate online und danach 90 Tage Nur-Lese-Download.
+- [x] Bis zu 25 Testfotos für die Vorbereitung; bei Buchung bleiben sie erhalten und zählen zum Event-Speicher.
+- [ ] Praxistest, Providerkapazität, aktuelle Hosting-Umgebungswerte und Kosten vor Verkauf prüfen.
+- [ ] Arbeitspreis anhand Speicher, Downloadverkehr, Zahlungsgebühren, Steuern und Support bestätigen.
+- [ ] 25-GB-Grenze, Speicherwarnung und Uploadverhalten bei vollem Speicher in Hosting und Nutzerhinweisen bestätigen.
+- [ ] Videos bleiben zunächst außerhalb des Kernpakets; Grußbox als spätere Option kalkulieren und umsetzen.
+- [ ] Fotospiegel und persönliche Begleitung separat kalkulieren; Landingpage-Anfragen sind kein bestätigtes Miet-/Serviceangebot.
 - [ ] Gäste zahlen nichts; Kaufaktionen gehören ins Veranstalterkonto.
-- [ ] Videos erst nach eigener Speicher-, Verarbeitungskosten- und Rechteprüfung anbieten.
 
 ## Datenschutz, Rechte und Cookies – vor öffentlichem Verkauf prüfen lassen
 - [ ] Verarbeitungsvorgänge und Datenflüsse dokumentieren: Konto, Bilder, Metadaten, Zahlungen, E-Mails, Logs, Backups.
