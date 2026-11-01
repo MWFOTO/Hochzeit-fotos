@@ -50,7 +50,7 @@ Disk und Service können Kosten verursachen: erst nach ausdrücklicher Freigabe.
 Ein einzelner Prozess/eine Instanz; kein Node-Cluster und keine horizontale Skalierung.
 Datenträger ist während Build/Pre-deploy nicht verfügbar: Import dort nicht ausführen.
 
-## Zielbetrieb Deutschland: Render Frankfurt plus Hetzner Object Storage
+## Zielbetrieb Deutschland: Sliplane Deutschland plus Hetzner Object Storage
 
 Diese getrennte Zielumgebung ist vorbereitet, aber wird nicht automatisch erstellt
 oder bereitgestellt. Der bestehende Render-Dienst in Ohio bleibt bis zu einem
@@ -59,9 +59,9 @@ abgestimmten Umzug unverändert.
 | Einstellung | Wert |
 | --- | --- |
 | Git-Branch | `codex/germany-storage` |
-| Render-Region | Frankfurt |
+| Hosting | Sliplane, Serverstandort Deutschland |
 | Instanzen | 1 (SQLite wird nicht horizontal geteilt) |
-| Dauerplatte-Mount | `/data` |
+| Dauer-Volume-Mount | `/data` |
 | DB_PATH | `/data/events.db` |
 | UPLOAD_DIR | `/data/staging` (temporäre Uploads; die Fotos gehen in S3) |
 | S3_BUCKET | privater Hetzner-Bucket in Nürnberg oder Falkenstein |
@@ -70,8 +70,9 @@ abgestimmten Umzug unverändert.
 | S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY | nur als geheime Hosting-Variablen eintragen |
 | S3_MAX_STORAGE_BYTES | 900 GiB standardmäßig; stoppt Uploads vor dem 1-TB-Speicherkontingent |
 
-Die App hält Datenbank und temporäre Uploads auf der dauerhaften Render-Platte.
-Fotoobjekte werden ausschließlich in den deutschen Hetzner-Standort geschrieben.
+Die App wird aus dem GitHub-Zweig auf Sliplane bereitgestellt. Datenbank und
+temporäre Uploads liegen auf einem dauerhaften Volume am deutschen Standort.
+Fotoobjekte werden ausschließlich in einen deutschen Hetzner-Standort geschrieben.
 Der Bucket bleibt privat; die App prüft Veranstaltungsstatus, Freigabe und Gastlink,
 bevor sie ein Foto aus S3 ausliefert. Zugangsdaten kommen nie in Browsercode oder
 Repository. Die alten lokalen Fotos werden durch einen wiederholbaren Kopierlauf
@@ -95,18 +96,19 @@ keine pauschale S3-Löschfrist verwendet, die ein noch gültiges Album vorzeitig
 entfernen könnte. Backups der SQLite-Datenbank und deren eigene Aufbewahrungsfrist
 müssen vor dem Produktivbetrieb separat eingerichtet werden.
 
-Der Hetzner-Grundpreis deckt 1 TB Speicher und 1 TB ausgehenden Traffic ab; die
-Anwendung begrenzt den Speicher standardmäßig auf 900 GiB. Das ist keine
+Der Hetzner-Grundpreis enthält 1 TB Speicher und ein Kontingent für ausgehenden
+Traffic; die Anwendung begrenzt den Speicher standardmäßig auf 900 GiB. Das ist keine
 Traffic-Sperre. Bei sehr großen Downloads kann zusätzlicher Egress berechnet
 werden. Die aktuellen Tarife sind vor der Bestellung zu prüfen.
 
-Render unterstützt Frankfurt, bleibt als Unternehmen aber Render. Die deutsche
-Region sagt etwas über den gewählten Dienststandort aus, ersetzt jedoch nicht die
-Prüfung von AV-Vertrag, Unterauftragnehmern und Datenschutzunterlagen vor dem
-kommerziellen Betrieb.
+Sliplane ist ein deutscher Anbieter mit auswählbarem Standort Deutschland. Die
+deutsche Region muss für Server und Hetzner-Bucket ausdrücklich gewählt werden.
+Vor dem kommerziellen Betrieb sind der Sliplane-AV-Vertrag, Unterauftragnehmer,
+Hetzner-AV-Vertrag und die übrigen eingesetzten Dienste zu prüfen. Eine deutsche
+Hostingregion allein erledigt diese Prüfung nicht.
 
 Im Stripe-Testmodus einen Webhook für
-`https://DEIN-TESTSERVICE.onrender.com/api/stripe/webhook` anlegen:
+`https://DEIN-TESTSERVICE/api/stripe/webhook` anlegen:
 `checkout.session.completed`, `checkout.session.async_payment_succeeded`.
 CLI- und Dashboard-Endpunkte besitzen unterschiedliche Webhook-Secrets.
 BASE_URL muss exakt zur aufgerufenen HTTPS-Origin passen (CSRF/Herkunftsprüfung).
@@ -153,7 +155,7 @@ Nicht annehmen, dass `db.js` bereits produktiv verwendet wird.
    Alte Dateiadressen/Dateinamen bleiben erhalten, benötigen aber Zugang/Freigabe.
    Fotoordnernamen außerhalb der erlaubten ID-Regel separat prüfen.
 
-Produktive Datenübernahme, Umschalten des Render-Branches und Live-Schlüssel sind
+Produktive Datenübernahme, Umschalten des Hosting-Branches und Live-Schlüssel sind
 nicht Teil der automatischen Schritte. Vor Umzug/Rollback Datenbankbackup und
 Foto-Kopie bereitstellen; Code-Rollback allein macht Schemaänderungen nicht rückgängig.
 Backups nach vereinbarter Frist löschen. Restore regelmäßig auf einer Kopie testen.
