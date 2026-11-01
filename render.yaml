@@ -5,6 +5,8 @@ services:
     region: frankfurt
     plan: starter
     branch: codex/germany-storage
+    domains:
+      - finalsnap.de
     buildCommand: npm ci
     startCommand: npm start
     healthCheckPath: /health
@@ -15,10 +17,7 @@ services:
       sizeGB: 10
     envVars:
       - key: BASE_URL
-        fromService:
-          type: web
-          name: finalsnap-deutschland
-          envVarKey: RENDER_EXTERNAL_URL
+        value: https://finalsnap.de
       - key: DB_PATH
         value: /data/events.db
       - key: UPLOAD_DIR
