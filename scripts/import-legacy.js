@@ -36,7 +36,7 @@ async function importLegacy({dbPath,uploadRoot,eventId,ownerEmail,apply=false}) 
     db.transaction(()=>{
       if(!event)db.prepare("INSERT INTO events (id,email,plan,amount_cents,status,created_at) VALUES (?,?,'1m',1900,'pending',?)").run(eventId,owner.email,Date.now());
       db.prepare('UPDATE events SET owner_id=?, guest_token=COALESCE(guest_token,?) WHERE id=?').run(owner.id,crypto.randomBytes(32).toString('hex'),eventId);
-      for(const p of photos)db.prepare('INSERT INTO photos VALUES (?,?,?,?,0,?)').run(crypto.randomUUID(),eventId,p.filename,p.bytes,p.time);
+      for(const p of photos)db.prepare('INSERT INTO photos (id,event_id,filename,bytes,approved,created_at,uploader_token_hash) VALUES (?,?,?,?,0,?,NULL)').run(crypto.randomUUID(),eventId,p.filename,p.bytes,p.time);
     })();
     return summary;
   } finally {db.close();}

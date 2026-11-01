@@ -12,11 +12,13 @@ Stand: 12. Oktober 2026. Die Anwendung bleibt im Stripe-Testmodus. Dieser Plan i
 - [x] Stripe-Testcheckout, Webhook-Prüfung und Übergang vom Testalbum zur Zahlung.
 - [x] Grundlegende Zugriffskontrollen, Origin/CSRF-Schutz, Rate Limits und Upload-Prüfung; noch keine vollständige Sicherheitsprüfung.
 - [x] Speicheranzeige, Uploadzähler und Warnung bei wenig freiem Disk-Speicher.
+- [x] Gästefotos sind pro Browser getrennt: Gäste sehen nur eigene Uploads; Veranstalter sehen alle. Gleicher Browser bedeutet dieselbe anonyme Gästesitzung.
+- [x] 90-tägige Nur-Lese-Downloadphase nach Ablauf des Albumzeitraums; danach automatische Entfernung der Fotos.
 - [x] FinalSnap als Arbeitsmarke, Paketkarten und Übernahme der Auswahl von der Landingpage.
-- [x] 15 automatisierte Tests bestehen. Mobile End-to-End- und Lasttests bleiben offen.
+- [x] 20 automatisierte Tests bestehen. Mobile End-to-End- und Lasttests bleiben offen.
 
 ## Als Nächstes: Praxistests und Infrastruktur
-- [ ] Ein bis zwei geschlossene Testveranstaltungen durchführen; zulässige Testbilder und Löschtermin abstimmen.
+- [ ] Ein bis zwei geschlossene Testveranstaltungen durchführen; mehrere Mobilgeräte, getrennte Gästegalerien und Löschtermine prüfen.
 - [ ] Anzahl, Durchschnittsgröße und Gesamtvolumen der Fotos, Uploadfehler und Supportbedarf auswerten.
 - [ ] Android/iPhone, HEIF-Unterstützung, Kamera, mehrere Uploads, langsames Netz, Verbindungsabbrüche und ZIP-Downloads testen.
 - [ ] Gleichzeitige Uploads prüfen; derzeit wird pro Event nur ein Uploadauftrag gleichzeitig verarbeitet.
@@ -47,6 +49,7 @@ Stand: 12. Oktober 2026. Die Anwendung bleibt im Stripe-Testmodus. Dieser Plan i
 - [ ] Datenschutzerklärung, Nutzungsbedingungen/AGB, Impressum und Verbraucher-Checkout rechtlich prüfen lassen.
 - [ ] Speicherfristen begründen; keine vermeintlich gesetzliche 3-/6-Monatsfrist behaupten.
 - [ ] Löschkonzept für Originale, Vorschaubilder, Tokens, Konten, Logs und Backups erstellen und technisch testen.
+- [ ] Externe Wiederherstellung/Backup- und Provider-Log-Aufbewahrung passend zur 90-Tage-Frist prüfen; App-Löschung allein löscht keine außerhalb der App vorhandenen Kopien.
 - [ ] Auskunft, Berichtigung, Löschung, Widerruf/Widerspruch und zuständige Kontaktstelle organisatorisch ermöglichen.
 - [ ] Cookies, Browser-Speicher, Tracking und externe Ressourcen inventarisieren; erforderliche Einwilligung und Hinweise konkret prüfen.
 - [ ] Brevo-Tracking und E-Mail-Protokollierung prüfen; Konto-Verifizierung nicht mit Newsletter-Anmeldung vermischen.

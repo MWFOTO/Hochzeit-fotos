@@ -90,11 +90,13 @@ ausgeführt werden, damit neue Fotos seit dem ersten Lauf ebenfalls enthalten si
 Fotos ohne Datenbankeintrag werden nicht automatisch übernommen; solche Altordner
 müssen vorher geprüft und zugeordnet werden.
 
-Die 90-Tage-Löschung bleibt an das jeweilige Veranstaltungsende gekoppelt: Der
-Anwendungsprozess löscht Fotos samt Metadaten stündlich und beim Start. Es wird
-keine pauschale S3-Löschfrist verwendet, die ein noch gültiges Album vorzeitig
-entfernen könnte. Backups der SQLite-Datenbank und deren eigene Aufbewahrungsfrist
-müssen vor dem Produktivbetrieb separat eingerichtet werden.
+Nach dem gebuchten Albumzeitraum beginnt eine 90-tägige Downloadphase. In dieser
+Zeit bleiben Galerie, Diashow und Downloads erreichbar; neue Uploads sind gesperrt.
+Danach löscht der Anwendungsprozess die Fotos und ihre Datenbankeinträge stündlich
+und beim Start. Der private Hetzner-Bucket erhält keine pauschale S3-Löschfrist,
+die ein noch gültiges Album vorzeitig entfernen könnte. Backups der SQLite-Datenbank,
+Provider-Logs und deren eigene Aufbewahrungsfristen müssen vor dem Produktivbetrieb
+separat eingerichtet und geprüft werden.
 
 Der Hetzner-Grundpreis enthält 1 TB Speicher und ein Kontingent für ausgehenden
 Traffic; die Anwendung begrenzt den Speicher standardmäßig auf 900 GiB. Das ist keine

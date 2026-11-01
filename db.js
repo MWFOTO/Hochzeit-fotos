@@ -29,6 +29,8 @@ function openDatabase(filename) {
   }
   const userColumns=new Set(db.prepare('PRAGMA table_info(users)').all().map(x=>x.name));
   if(!userColumns.has('email_verified_at'))db.exec('ALTER TABLE users ADD COLUMN email_verified_at INTEGER');
+  const photoColumns=new Set(db.prepare('PRAGMA table_info(photos)').all().map(x=>x.name));
+  if(!photoColumns.has('uploader_token_hash'))db.exec('ALTER TABLE photos ADD COLUMN uploader_token_hash TEXT');
   db.exec(`CREATE TABLE IF NOT EXISTS password_resets (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS email_verifications (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL);`);
   db.exec('CREATE INDEX IF NOT EXISTS photos_event ON photos(event_id); CREATE INDEX IF NOT EXISTS events_owner ON events(owner_id); CREATE UNIQUE INDEX IF NOT EXISTS payments_event ON payments(event_id);');
   return db;

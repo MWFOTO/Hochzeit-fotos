@@ -46,16 +46,38 @@
   }
   window.refreshEventQuota=refreshQuota;
   document.addEventListener('DOMContentLoaded',()=>{refreshQuota().catch(()=>{});if(!location.pathname.endsWith('/slideshow'))setInterval(()=>refreshQuota().catch(()=>{}),10000);});
-  if (eventId) window.fetch(`/api/event/${encodeURIComponent(eventId)}/info`).then(res => res.json()).then(info => {
-    const title = document.querySelector('.event-title');
-    if (title && info.title) title.textContent = info.title;
-    const subtitle = document.querySelector('.event-subtitle');
-    if (subtitle) subtitle.textContent = info.moderation ? 'Teile deine schönsten Momente. Nach Freigabe sind sie für die Gäste in Galerie und Diashow sichtbar.' : 'Teile deine schönsten Momente. Deine Fotos sind direkt für die Gäste in Galerie und Diashow sichtbar.';
-    const hint = document.getElementById('retention-hint');
-    if (hint && info.expiresAt) hint.textContent = `Diese Veranstaltung läuft bis ${new Date(info.expiresAt).toLocaleString('de-DE')}. Danach sind die Bilder nicht mehr erreichbar und werden im nächsten Löschlauf entfernt.`;
-    const link = document.getElementById('gallery-link');
-    if (link) link.href = window.guestUrl(`/event/${encodeURIComponent(eventId)}/gallery`);
-  }).catch(() => {});
+  const applyEventInfo = info => {
+    const update = () => {
+      const title = document.querySelector('.event-title');
+      if (title && info.title) title.textContent = info.title;
+      const subtitle = document.querySelector('.event-subtitle');
+      if (subtitle) subtitle.textContent = info.readOnly
+        ? `Der Albumzeitraum ist beendet. Fotos bleiben bis ${new Date(info.retentionUntil).toLocaleDateString('de-DE')} abrufbar.`
+        : info.canManage
+          ? 'Verwalte alle Fotos eurer Feier. Gäste sehen auf ihrem eigenen Gerät nur die Fotos, die sie selbst hochgeladen haben.'
+          : info.moderation
+            ? 'Teile deine schönsten Momente. Deine Fotos erscheinen nach Freigabe in deiner Galerie.'
+            : 'Teile deine schönsten Momente. Deine Fotos erscheinen in der Galerie auf diesem Gerät.';
+      const galleryHeading=document.querySelector('.gallery-header .eyebrow');
+      if(galleryHeading)galleryHeading.textContent=info.canManage?'ALLE MOMENTE EURER FEIER':'DEINE FOTOS AUF DIESEM GERÄT';
+      const galleryDescription=document.querySelector('.gallery-header > p');
+      if(galleryDescription)galleryDescription.textContent=info.readOnly
+        ? `Downloadphase: Fotos sind bis ${new Date(info.retentionUntil).toLocaleDateString('de-DE')} abrufbar. Neue Uploads sind geschlossen.`
+        : info.canManage?'Verwalte alle Fotos eurer Feier. Gäste sehen jeweils ihre eigenen Uploads.':'Hier siehst du die Fotos, die du mit diesem Browser hochgeladen hast.';
+      const emptyMessage=document.getElementById('empty-msg');
+      if(emptyMessage)emptyMessage.textContent=info.canManage?'Noch keine Fotos vorhanden.':'Du hast mit diesem Browser noch keine Fotos hochgeladen.';
+      const downloadButton=document.getElementById('download-all-btn');
+      if(downloadButton)downloadButton.textContent=info.canManage?'Alle Fotos als ZIP herunterladen':'Meine Fotos als ZIP herunterladen';
+      const uploadLink=document.getElementById('upload-link');if(uploadLink)uploadLink.hidden=info.readOnly;
+      for(const id of ['upload-trigger','camera-trigger']){const button=document.getElementById(id);if(button)button.hidden=info.readOnly;}
+      const hint = document.getElementById('retention-hint');
+      if (hint && info.expiresAt) hint.textContent = `Der Albumzeitraum endet am ${new Date(info.expiresAt).toLocaleDateString('de-DE')}. Du kannst Fotos noch bis zum ${new Date(info.retentionUntil).toLocaleDateString('de-DE')} ansehen und herunterladen. Danach werden sie gelöscht.`;
+      const link = document.getElementById('gallery-link');
+      if (link) link.href = window.guestUrl(`/event/${encodeURIComponent(eventId)}/gallery`);
+    };
+    if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',update,{once:true});else update();
+  };
+  if (eventId) window.fetch(`/api/event/${encodeURIComponent(eventId)}/info`).then(res => res.ok?res.json():null).then(info => {if(info)applyEventInfo(info);}).catch(() => {});
   window.guestUrl = url => {
     const parsed = new URL(url, location.origin);
     if (token) parsed.searchParams.set('token', token);

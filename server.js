@@ -14,11 +14,13 @@ const { openDatabase } = require('./db');
 const { createPhotoStorage } = require('./photo-storage');
 const scrypt = promisify(crypto.scrypt);
 const PLANS = { '1m': {label:'1 Monat',months:1,priceCents:1900}, '3m':{label:'3 Monate',months:3,priceCents:2900}, '6m':{label:'6 Monate',months:6,priceCents:3900}, '12m':{label:'12 Monate',months:12,priceCents:5900} };
+const RETENTION_MS = 90*86400000;
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
 const random = () => crypto.randomBytes(32).toString('hex');
 const fail = (res, status, error) => res.status(status).json({error});
 const wrap = fn => (req,res,next) => Promise.resolve(fn(req,res,next)).catch(next);
 const active = e => e && ['paid','trial','pilot'].includes(e.status) && e.expires_at > Date.now() && !e.deleted_at;
+const readable = e => e && ['paid','trial','pilot'].includes(e.status) && e.expires_at+RETENTION_MS > Date.now() && !e.deleted_at;
 function createApp(options = {}) {
   const cfg = {...process.env, ...options};
   const mailer=options.mailer||require('./mailer').createMailer(cfg);
@@ -166,7 +168,7 @@ function createApp(options = {}) {
     const events=db.prepare(`SELECT e.*, COUNT(p.id) photoCount, COALESCE(SUM(p.bytes),0) storageBytes
       FROM events e LEFT JOIN photos p ON p.event_id=e.id
       WHERE e.owner_id=? AND e.deleted_at IS NULL GROUP BY e.id ORDER BY e.created_at DESC`).all(req.user.id);
-    res.json({events:events.map(e=>({...e,storageLimitBytes:e.status==='trial'?Math.min(250*1024**2,Number(cfg.MAX_EVENT_BYTES||2*1024**3)):Number(cfg.MAX_EVENT_BYTES||2*1024**3),photoLimit:e.status==='trial'?25:Number(cfg.MAX_EVENT_PHOTOS||2000),checkoutStarted:!!db.prepare('SELECT 1 FROM payments WHERE event_id=?').get(e.id),guestUrl:active(e)?`${baseUrl.origin}/event/${e.id}?token=${e.guest_token}`:null}))});
+    res.json({events:events.map(e=>({...e,storageLimitBytes:e.status==='trial'?Math.min(250*1024**2,Number(cfg.MAX_EVENT_BYTES||2*1024**3)):Number(cfg.MAX_EVENT_BYTES||2*1024**3),photoLimit:e.status==='trial'?25:Number(cfg.MAX_EVENT_PHOTOS||2000),checkoutStarted:!!db.prepare('SELECT 1 FROM payments WHERE event_id=?').get(e.id),readOnly:!active(e)&&readable(e),retentionUntil:e.expires_at?e.expires_at+RETENTION_MS:null,guestUrl:readable(e)?`${baseUrl.origin}/event/${e.id}?token=${e.guest_token}`:null}))});
   });
   app.post('/api/events',loginRequired,(req,res)=>{
     const id=String(req.body.eventId||''); const plan=PLANS[req.body.plan]; const title=String(req.body.title||'').trim();
@@ -182,7 +184,7 @@ function createApp(options = {}) {
   app.post('/api/checkout',loginRequired,wrap(async(req,res)=>{
     let e=lookup(String(req.body.eventId||''));
     if(!own(req,e)) return fail(res,404,'Event nicht gefunden.');
-    if(!['pending','trial'].includes(e.status) || e.deleted_at) return fail(res,409,'Dieses Event kann nicht bezahlt werden.');
+    if(!['pending','trial'].includes(e.status) || e.deleted_at || (e.status==='trial'&&!active(e))) return fail(res,409,'Dieses Event kann nicht bezahlt werden.');
     if(!stripe || !cfg.STRIPE_WEBHOOK_SECRET) return fail(res,503,'Stripe-Testmodus noch nicht eingerichtet.');
     if(req.body.plan!==undefined){
       const plan=PLANS[req.body.plan];if(!plan)return fail(res,400,'Bitte ein gültiges Paket wählen.');
@@ -215,10 +217,19 @@ function createApp(options = {}) {
   });
   function access(req,res,next) {
     const e=lookup(req.params.eventId);
-    if(!active(e)) return fail(res,402,'Event nicht aktiv.');
+    if(!readable(e)) return fail(res,402,'Album und Downloadzeitraum sind abgelaufen.');
     if(!own(req,e)) {
       const token=req.query.token || req.headers['x-event-token'];
       if(typeof token!=='string' || !e.guest_token || Buffer.byteLength(token)!==Buffer.byteLength(e.guest_token) || !crypto.timingSafeEqual(Buffer.from(token),Buffer.from(e.guest_token))) return fail(res,403,'Gültiger Veranstaltungslink erforderlich.');
+      const cookieName=`finalsnap_guest_${e.id}`;
+      const escapedName=cookieName.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+      const match=new RegExp(`(?:^|;\\s*)${escapedName}=([a-f0-9]{64})(?:;|$)`).exec(req.headers.cookie||'');
+      let guestToken=match?.[1];
+      if(!guestToken) {
+        guestToken=random();
+        res.cookie(cookieName,guestToken,{httpOnly:true,secure:baseUrl.protocol==='https:',sameSite:'lax',maxAge:Math.max(0,Math.min(500*86400000,e.expires_at+RETENTION_MS-Date.now())),path:'/'});
+      }
+      req.guestTokenHash=hash(guestToken);
     }
     req.event=e; next();
   }
@@ -228,7 +239,7 @@ function createApp(options = {}) {
   });
   app.post('/api/event/:eventId/rotate-token',loginRequired,owner,(req,res)=>{db.prepare('UPDATE events SET guest_token=? WHERE id=?').run(random(),req.event.id);res.json({success:true});});
   app.get('/api/event/:eventId/qr',loginRequired,owner,wrap(async(req,res)=>{
-    if(!active(req.event)) return fail(res,402,'QR-Code erst nach Zahlung verfügbar.');
+    if(!readable(req.event)) return fail(res,402,'Album und Downloadzeitraum sind abgelaufen.');
     const url=`${baseUrl.origin}/event/${req.event.id}?token=${req.event.guest_token}`;
     res.type('png').attachment(`${req.event.id}-qr.png`).send(await QRCode.toBuffer(url,{width:1200,margin:4,errorCorrectionLevel:'M'}));
   }));
@@ -238,6 +249,7 @@ function createApp(options = {}) {
   const busy=new Set();
   let remoteStorageReservedBytes=0;
   app.post('/api/event/:eventId/upload',uploadLimit,access,(req,res,next)=>{
+    if(!active(req.event)) return fail(res,402,'Der Albumzeitraum ist beendet. Fotos können noch während der Downloadphase angesehen und heruntergeladen werden.');
     if(busy.has(req.event.id)) return fail(res,429,'Upload läuft bereits. Bitte kurz warten.');
     busy.add(req.event.id);
     upload(req,res,async err=>{
@@ -270,7 +282,7 @@ function createApp(options = {}) {
         }
         // Recheck expiry after processing and before publication.
         if(!active(lookup(req.event.id))) throw new Error('Event inzwischen abgelaufen.');
-        db.transaction(()=>{for(const f of written) db.prepare('INSERT INTO photos VALUES (?,?,?,?,?,?)').run(f.id,req.event.id,f.filename,f.bytes,req.event.moderation?0:1,Date.now());})();
+        db.transaction(()=>{for(const f of written) db.prepare('INSERT INTO photos (id,event_id,filename,bytes,approved,created_at,uploader_token_hash) VALUES (?,?,?,?,?,?,?)').run(f.id,req.event.id,f.filename,f.bytes,req.event.moderation?0:1,Date.now(),req.guestTokenHash||null);})();
         db.prepare('UPDATE events SET upload_successes=upload_successes+1 WHERE id=?').run(req.event.id);
         res.json({success:true,count:written.length,pending:!!req.event.moderation});
       } catch(error) {db.prepare('UPDATE events SET upload_failures=upload_failures+1 WHERE id=?').run(req.event.id);for(const f of written){try{if(photoStorage.mode==='s3')await photoStorage.deletePhoto(req.event.id,f.filename);else fs.rmSync(f.dest,{force:true});}catch(cleanupError){console.error('Upload-Aufräumen fehlgeschlagen:',cleanupError.message);}}if(error.code==='PHOTO_STORAGE_UNAVAILABLE')console.error('Hetzner Object Storage:',error.cause?.message||error.message);fail(res,error.code==='PHOTO_STORAGE_UNAVAILABLE'?503:400,error.message);}
@@ -278,15 +290,18 @@ function createApp(options = {}) {
     });
   });
   function photoUrl(req,p) {return `/uploads/${req.event.id}/${p.filename}${own(req,req.event)?'':`?token=${req.event.guest_token}`}`;}
-  app.get('/api/event/:eventId/info',access,(req,res)=>res.json({title:req.event.title,expiresAt:req.event.expires_at,moderation:!!req.event.moderation,trial:req.event.status==='trial',photoCount:db.prepare('SELECT COUNT(*) count FROM photos WHERE event_id=?').get(req.event.id).count,photoLimit:req.event.status==='trial'?25:Number(cfg.MAX_EVENT_PHOTOS||2000),pilot:req.event.status==='pilot',canManage:own(req,req.event)}));
+  app.get('/api/event/:eventId/info',access,(req,res)=>res.json({title:req.event.title,expiresAt:req.event.expires_at,retentionUntil:req.event.expires_at+RETENTION_MS,readOnly:!active(req.event),moderation:!!req.event.moderation,trial:req.event.status==='trial'&&active(req.event),photoCount:db.prepare('SELECT COUNT(*) count FROM photos WHERE event_id=?').get(req.event.id).count,photoLimit:req.event.status==='trial'?25:Number(cfg.MAX_EVENT_PHOTOS||2000),pilot:req.event.status==='pilot',canManage:own(req,req.event)}));
   app.get('/api/event/:eventId/photos',access,(req,res)=>{
     const admin=own(req,req.event)&&req.query.manage==='1';
-    const photos=db.prepare(`SELECT * FROM photos WHERE event_id=? ${admin?'':'AND approved=1'} ORDER BY created_at,id`).all(req.event.id);
+    const photos=own(req,req.event)
+      ? db.prepare(`SELECT * FROM photos WHERE event_id=? ${admin?'':'AND approved=1'} ORDER BY created_at,id`).all(req.event.id)
+      : db.prepare('SELECT * FROM photos WHERE event_id=? AND approved=1 AND uploader_token_hash=? ORDER BY created_at,id').all(req.event.id,req.guestTokenHash);
     res.json({photos:photos.map(p=>({id:p.id,url:photoUrl(req,p),timestamp:p.created_at,approved:!!p.approved})),serverTime:Date.now()});
   });
   app.get('/uploads/:eventId/:filename',access,wrap(async(req,res)=>{
     const p=db.prepare('SELECT * FROM photos WHERE event_id=? AND filename=?').get(req.event.id,req.params.filename);
     if(!p || (!p.approved && !own(req,req.event))) return fail(res,404,'Foto nicht gefunden.');
+    if(!own(req,req.event) && p.uploader_token_hash!==req.guestTokenHash) return fail(res,404,'Foto nicht gefunden.');
     if(photoStorage.mode==='local') return res.sendFile(path.join(root,req.event.id,p.filename));
     const stream=await photoStorage.getStream(req.event.id,p.filename);
     res.type('jpeg');res.set('Cache-Control','private, no-store');stream.on('error',()=>res.destroy());stream.pipe(res);
@@ -302,7 +317,9 @@ function createApp(options = {}) {
     await photoStorage.deletePhoto(req.event.id,p.filename);db.prepare('DELETE FROM photos WHERE id=?').run(p.id);res.json({success:true});
   }));
   app.get('/api/event/:eventId/download',access,wrap(async(req,res)=>{
-    const photos=db.prepare(`SELECT * FROM photos WHERE event_id=? ${own(req,req.event)?'':'AND approved=1'}`).all(req.event.id);
+    const photos=own(req,req.event)
+      ? db.prepare('SELECT * FROM photos WHERE event_id=?').all(req.event.id)
+      : db.prepare('SELECT * FROM photos WHERE event_id=? AND approved=1 AND uploader_token_hash=?').all(req.event.id,req.guestTokenHash);
     if(!photos.length) return fail(res,404,'Keine Fotos vorhanden.');
     res.attachment(`event-${req.event.id}-fotos.zip`);
     const archive=archiver('zip',{zlib:{level:1}});
@@ -322,7 +339,7 @@ function createApp(options = {}) {
   }
   app.delete('/api/event/:eventId',loginRequired,owner,wrap(async(req,res)=>{if(!await erase(req.event)) return fail(res,409,'Upload läuft. Bitte erneut versuchen.');res.json({success:true});}));
   function cleanup() {
-    const expired=db.prepare("SELECT * FROM events WHERE owner_id IS NOT NULL AND deleted_at IS NULL AND status IN ('paid','trial','pilot') AND expires_at<=?").all(Date.now());
+    const expired=db.prepare("SELECT * FROM events WHERE owner_id IS NOT NULL AND deleted_at IS NULL AND status IN ('paid','trial','pilot') AND expires_at<=?").all(Date.now()-RETENTION_MS);
     const pruneRecords=()=>{
       db.prepare('DELETE FROM sessions WHERE expires_at<=?').run(Date.now());
       db.prepare('DELETE FROM email_verifications WHERE expires_at<=?').run(Date.now());

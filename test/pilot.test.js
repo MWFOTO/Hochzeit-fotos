@@ -20,8 +20,9 @@ test('Operator pilot preserves guest access, lifts trial quota, expires and cann
   assert.equal((await fetch(origin+'/api/event/wedding-test/info?token=wrong')).status,403);
   assert.equal(db.prepare('SELECT status FROM events WHERE id=?').get('other-event').status,'trial');
   const eventDir=path.join(cfg.UPLOAD_DIR,'wedding-test');fs.mkdirSync(eventDir);fs.writeFileSync(path.join(eventDir,'image.jpg'),'test');
-  db.prepare('UPDATE events SET expires_at=0 WHERE id=?').run('wedding-test');
-  assert.equal((await fetch(origin+'/api/event/wedding-test/info?token=guest-secret')).status,402);
+  db.prepare('UPDATE events SET expires_at=? WHERE id=?').run(Date.now()-1,'wedding-test');
+  const retained=await fetch(origin+'/api/event/wedding-test/info?token=guest-secret');assert.equal(retained.status,200);assert.equal((await retained.json()).readOnly,true);
+  db.prepare('UPDATE events SET expires_at=? WHERE id=?').run(Date.now()-91*86400000,'wedding-test');
   app.locals.cleanup();assert.equal(fs.existsSync(eventDir),false);assert.equal(db.prepare('SELECT guest_token FROM events WHERE id=?').get('wedding-test').guest_token,null);
  } finally {server.close();db.close();}
  const restarted=createApp(cfg);assert.equal(restarted.locals.db.prepare('SELECT status FROM events WHERE id=?').get('wedding-test').status,'expired');restarted.locals.db.close();fs.rmSync(dir,{recursive:true,force:true});
