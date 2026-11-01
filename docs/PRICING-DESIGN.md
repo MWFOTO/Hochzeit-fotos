@@ -11,7 +11,7 @@ Stand: 1. November 2026. Interner Arbeitsstand; keine Freigabe für Verkauf oder
 - **Onlinezeit:** zwölf Monate ab Veranstaltungsdatum.
 - **Danach:** 90 Tage zum Ansehen und Herunterladen; keine neuen Uploads.
 - **Kernumfang:** QR-Code, Gästegalerien ohne Gästekonto, Veranstalterübersicht, Live-Diashow, Downloads, Text-Gästebuch und Fotoaufgaben.
-- **Nicht im Kernpaket:** Videos, unveränderte Originaldateien, persönliche Begleitung und Fotospiegel. Begleitung und Fotospiegel können individuell angefragt werden; Preis und Verfügbarkeit sind nicht festgelegt.
+- **Nicht im Kernpaket:** Videos, unveränderte Originaldateien, persönliche Begleitung und Fotospiegel. Zusatzoptionen werden auf der Startseite nicht angeboten. Eine spätere Auswahl im Buchungsablauf wird erst ergänzt, wenn Preis, Umfang und Verfügbarkeit geklärt sind.
 
 „Unbegrenzte Fotos“ wird nicht beworben: Die technische Grenze ist der Speicher von 25 GB. Neue Fotos werden auf maximal 2.560 Pixel und JPEG-Qualität 82 verarbeitet. Das ist eine reduzierte, webfreundliche Fassung und keine Originalqualität.
 
@@ -29,12 +29,14 @@ Der Preis von 34,90 € ist vorläufig. Picjar veröffentlicht ein Angebot zu 39
 
 Die gemeinsame Hosting-Grenze ist von der Eventgrenze getrennt. Der Code-Standard liegt bei 25 GB pro Event; vorhandene Hosting-Umgebungswerte können diesen Standard überschreiben. Vor öffentlichem Verkauf müssen Hosting-Konfiguration, Kapazität und Speicherwarnungen ausdrücklich geprüft werden. Eine Codeänderung allein ändert keinen bereits eingerichteten Hosting-Wert.
 
-## Spätere optionale Angebote
+## Mögliche spätere Zusatzoptionen – vorerst nicht anbieten
 
-- **Video-Grußbox / Video-Gästebuch:** mögliche spätere Zusatzoption. Cliplänge, Menge, Speicher, Sichtbarkeit, Moderation und Löschfrist separat festlegen. Nicht als verfügbar oder enthalten bewerben, bevor gebaut und kalkuliert.
-- **Persönliche Begleitung:** Einrichtung und Vorbereitungsgespräch sowie Unterstützung am Veranstaltungstag separat kalkulieren.
-- **Fotospiegel:** separates Mietangebot, optional zusammen mit dem Album.
-- **Foto-/Videografie:** FinalSnap als Zusatzleistung oder Bonus in bestehenden Foto-/Videoangeboten prüfen.
+Diese Leistungen erscheinen derzeit weder auf der Startseite noch im Buchungsablauf. Wenn wir passende digitale Zusatzoptionen festlegen, sollen sie vor der Zahlung verständlich auswählbar sein.
+
+- **Video-Grußbox / Video-Gästebuch:** Cliplänge, Menge, Speicher, Sichtbarkeit, Moderation, Löschfrist und Preis erst festlegen; danach als mögliche digitale Option prüfen.
+- **Persönliche Begleitung:** nur nach persönlichem Gespräch anbieten. Vorher müssen Leistungsumfang, Preis und ein realistischer regionaler Einsatzradius feststehen. Keine pauschale Zusage für Anfahrten, etwa nach Süddeutschland.
+- **Fotospiegel:** derzeit nicht als FinalSnap-Option bewerben. Ein separates Mietangebot braucht klare Einsatzregion, Anfahrt, Verfügbarkeit und Preis.
+- **Foto-/Videografie:** mögliche separate Dienstleistung oder Ergänzung bestehender Foto-/Videoangebote; Umfang und Einsatzgebiet erst abstimmen.
 
 ## Marktvergleich (öffentliche Endkundenpreise, einmalig)
 
