@@ -11,6 +11,7 @@ const { promisify } = require('node:util');
 const fs = require('node:fs');
 const path = require('node:path');
 const { openDatabase } = require('./db');
+const { createPhotoStorage } = require('./photo-storage');
 const scrypt = promisify(crypto.scrypt);
 const PLANS = { '1m': {label:'1 Monat',months:1,priceCents:1900}, '3m':{label:'3 Monate',months:3,priceCents:2900}, '6m':{label:'6 Monate',months:6,priceCents:3900}, '12m':{label:'12 Monate',months:12,priceCents:5900} };
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
@@ -28,6 +29,9 @@ function createApp(options = {}) {
   if (cfg.NODE_ENV === 'production' && (baseUrl.protocol !== 'https:' || !cfg.DB_PATH || !cfg.UPLOAD_DIR)) throw new Error('HTTPS, DB_PATH und UPLOAD_DIR sind im Hosting erforderlich.');
   const root = path.resolve(cfg.UPLOAD_DIR || path.join(__dirname,'uploads'));
   fs.mkdirSync(root, {recursive:true});
+  const photoStorage = options.photoStorage || createPhotoStorage(cfg);
+  const storageLimit = Number(cfg.S3_MAX_STORAGE_BYTES || 900 * 1024 ** 3);
+  if (!Number.isSafeInteger(storageLimit) || storageLimit <= 100 * 1024 ** 2) throw new Error('S3_MAX_STORAGE_BYTES muss größer als 100 MiB sein.');
   const db = openDatabase(cfg.DB_PATH || path.join(__dirname,'events.db'));
   // Operator-only pilot provisioning. No guest endpoint can enable a pilot.
   // The original capability and owner remain unchanged; deleted albums stay deleted.
@@ -149,7 +153,14 @@ function createApp(options = {}) {
     db.transaction(()=>{db.prepare('UPDATE users SET email_verified_at=? WHERE id=?').run(Date.now(),verification.user_id);db.prepare('DELETE FROM email_verifications WHERE user_id=?').run(verification.user_id);})();res.json({success:true});
   });
   app.post('/api/auth/logout',loginRequired,(req,res)=>{db.prepare('DELETE FROM sessions WHERE token_hash=?').run(req.session.token_hash);res.clearCookie('event_session',{path:'/'});res.json({success:true});});
-  app.get('/api/storage',loginRequired,(req,res)=>{const disk=fs.statfsSync(root);const freeBytes=Number(disk.bavail)*Number(disk.bsize);res.json({freeBytes,totalBytes:Number(disk.blocks)*Number(disk.bsize),warning:freeBytes<200*1024**2,uploadsPaused:freeBytes<100*1024**2});});
+  app.get('/api/storage',loginRequired,(req,res)=>{
+    if (photoStorage.mode === 's3') {
+      const usedBytes = Number(db.prepare('SELECT COALESCE(SUM(bytes),0) bytes FROM photos').get().bytes);
+      const freeBytes = Math.max(0, storageLimit - usedBytes);
+      return res.json({freeBytes,totalBytes:storageLimit,warning:freeBytes<200*1024**2,uploadsPaused:freeBytes<100*1024**2,location:'object-storage'});
+    }
+    const disk=fs.statfsSync(root);const freeBytes=Number(disk.bavail)*Number(disk.bsize);res.json({freeBytes,totalBytes:Number(disk.blocks)*Number(disk.bsize),warning:freeBytes<200*1024**2,uploadsPaused:freeBytes<100*1024**2,location:'server-disk'});
+  });
   app.get('/api/plans',(req,res)=>res.json(Object.fromEntries(Object.entries(PLANS).map(([key,plan])=>[key,{...plan,legacy:key==='12m',photoLimit:Number(cfg.MAX_EVENT_PHOTOS||2000),storageLimitMB:Math.floor(Number(cfg.MAX_EVENT_BYTES||2*1024**3)/1024**2)}]))));
   app.get('/api/events',loginRequired,(req,res)=>{
     const events=db.prepare(`SELECT e.*, COUNT(p.id) photoCount, COALESCE(SUM(p.bytes),0) storageBytes
@@ -225,6 +236,7 @@ function createApp(options = {}) {
   const temp=path.join(root,'.tmp');fs.mkdirSync(temp,{recursive:true});
   const upload=multer({dest:temp,limits:{fileSize:20*1024*1024,files:10,fields:0,parts:10}}).array('photos',10);
   const busy=new Set();
+  let remoteStorageReservedBytes=0;
   app.post('/api/event/:eventId/upload',uploadLimit,access,(req,res,next)=>{
     if(busy.has(req.event.id)) return fail(res,429,'Upload läuft bereits. Bitte kurz warten.');
     busy.add(req.event.id);
@@ -234,7 +246,7 @@ function createApp(options = {}) {
         if(err) throw err;
         const disk=fs.statfsSync(root);if(Number(disk.bavail)*Number(disk.bsize)<100*1024**2)throw new Error('Fotospeicher vorübergehend ausgelastet. Bitte den Veranstalter informieren.');
         if(!req.files?.length) return fail(res,400,'Keine Fotos empfangen.');
-        const dir=path.join(root,req.event.id);fs.mkdirSync(dir,{recursive:true});
+        const dir=photoStorage.mode==='local'?path.join(root,req.event.id):temp;if(photoStorage.mode==='local')fs.mkdirSync(dir,{recursive:true});
         const total=db.prepare('SELECT COUNT(*) count, COALESCE(SUM(bytes),0) bytes FROM photos WHERE event_id=?').get(req.event.id);
         if(total.count+req.files.length>(req.event.status==='trial'?25:Number(cfg.MAX_EVENT_PHOTOS||2000))) throw new Error(req.event.status==='trial'?'Die 25 kostenlosen Fotos sind genutzt. Das Album kann mit einem Paket erweitert werden. Vorhandene Fotos bleiben sichtbar.':'Fotoanzahl für dieses Event überschritten.');
         let bytes=total.bytes;
@@ -248,13 +260,21 @@ function createApp(options = {}) {
           const size=fs.statSync(dest).size;bytes+=size;written[written.length-1].bytes=size;
           if(bytes>(req.event.status==='trial'?Math.min(250*1024**2,Number(cfg.MAX_EVENT_BYTES||2*1024**3)):Number(cfg.MAX_EVENT_BYTES||2*1024**3))) throw new Error('Speicherlimit für dieses Event überschritten.');
         }
+        if(photoStorage.mode==='s3') {
+          const usedBytes=Number(db.prepare('SELECT COALESCE(SUM(bytes),0) bytes FROM photos').get().bytes);
+          const incomingBytes=written.reduce((sum,file)=>sum+file.bytes,0);
+          if(usedBytes+remoteStorageReservedBytes+incomingBytes>storageLimit) throw new Error('Der gemeinsame Fotospeicher ist ausgeschöpft. Bitte den Veranstalter informieren.');
+          remoteStorageReservedBytes+=incomingBytes;
+          try {for(const file of written) await photoStorage.put(req.event.id,file.filename,file.dest);}
+          finally {remoteStorageReservedBytes-=incomingBytes;}
+        }
         // Recheck expiry after processing and before publication.
         if(!active(lookup(req.event.id))) throw new Error('Event inzwischen abgelaufen.');
         db.transaction(()=>{for(const f of written) db.prepare('INSERT INTO photos VALUES (?,?,?,?,?,?)').run(f.id,req.event.id,f.filename,f.bytes,req.event.moderation?0:1,Date.now());})();
         db.prepare('UPDATE events SET upload_successes=upload_successes+1 WHERE id=?').run(req.event.id);
         res.json({success:true,count:written.length,pending:!!req.event.moderation});
-      } catch(error) {db.prepare('UPDATE events SET upload_failures=upload_failures+1 WHERE id=?').run(req.event.id);for(const f of written) fs.rmSync(f.dest,{force:true}); fail(res,400,error.message);}
-      finally {for(const f of req.files||[]) fs.rmSync(f.path,{force:true});busy.delete(req.event.id);}
+      } catch(error) {db.prepare('UPDATE events SET upload_failures=upload_failures+1 WHERE id=?').run(req.event.id);for(const f of written){try{if(photoStorage.mode==='s3')await photoStorage.deletePhoto(req.event.id,f.filename);else fs.rmSync(f.dest,{force:true});}catch(cleanupError){console.error('Upload-Aufräumen fehlgeschlagen:',cleanupError.message);}}if(error.code==='PHOTO_STORAGE_UNAVAILABLE')console.error('Hetzner Object Storage:',error.cause?.message||error.message);fail(res,error.code==='PHOTO_STORAGE_UNAVAILABLE'?503:400,error.message);}
+      finally {for(const f of req.files||[]) fs.rmSync(f.path,{force:true});if(photoStorage.mode==='s3')for(const f of written)fs.rmSync(f.dest,{force:true});busy.delete(req.event.id);}
     });
   });
   function photoUrl(req,p) {return `/uploads/${req.event.id}/${p.filename}${own(req,req.event)?'':`?token=${req.event.guest_token}`}`;}
@@ -264,43 +284,53 @@ function createApp(options = {}) {
     const photos=db.prepare(`SELECT * FROM photos WHERE event_id=? ${admin?'':'AND approved=1'} ORDER BY created_at,id`).all(req.event.id);
     res.json({photos:photos.map(p=>({id:p.id,url:photoUrl(req,p),timestamp:p.created_at,approved:!!p.approved})),serverTime:Date.now()});
   });
-  app.get('/uploads/:eventId/:filename',access,(req,res)=>{
+  app.get('/uploads/:eventId/:filename',access,wrap(async(req,res)=>{
     const p=db.prepare('SELECT * FROM photos WHERE event_id=? AND filename=?').get(req.event.id,req.params.filename);
     if(!p || (!p.approved && !own(req,req.event))) return fail(res,404,'Foto nicht gefunden.');
-    res.sendFile(path.join(root,req.event.id,p.filename));
-  });
+    if(photoStorage.mode==='local') return res.sendFile(path.join(root,req.event.id,p.filename));
+    const stream=await photoStorage.getStream(req.event.id,p.filename);
+    res.type('jpeg');res.set('Cache-Control','private, no-store');stream.on('error',()=>res.destroy());stream.pipe(res);
+  }));
   app.patch('/api/event/:eventId/photos/:photoId',loginRequired,owner,(req,res)=>{
     if(typeof req.body.approved!=='boolean') return fail(res,400,'Freigabe muss true oder false sein.');
     const result=db.prepare('UPDATE photos SET approved=? WHERE id=? AND event_id=?').run(req.body.approved?1:0,req.params.photoId,req.event.id);
     if(!result.changes) return fail(res,404,'Foto nicht gefunden.');res.json({success:true});
   });
-  app.delete('/api/event/:eventId/photos/:photoId',loginRequired,owner,(req,res)=>{
+  app.delete('/api/event/:eventId/photos/:photoId',loginRequired,owner,wrap(async(req,res)=>{
     const p=db.prepare('SELECT * FROM photos WHERE id=? AND event_id=?').get(req.params.photoId,req.event.id);
     if(!p) return fail(res,404,'Foto nicht gefunden.');
-    fs.rmSync(path.join(root,req.event.id,p.filename),{force:true});db.prepare('DELETE FROM photos WHERE id=?').run(p.id);res.json({success:true});
-  });
-  app.get('/api/event/:eventId/download',access,(req,res)=>{
+    await photoStorage.deletePhoto(req.event.id,p.filename);db.prepare('DELETE FROM photos WHERE id=?').run(p.id);res.json({success:true});
+  }));
+  app.get('/api/event/:eventId/download',access,wrap(async(req,res)=>{
     const photos=db.prepare(`SELECT * FROM photos WHERE event_id=? ${own(req,req.event)?'':'AND approved=1'}`).all(req.event.id);
     if(!photos.length) return fail(res,404,'Keine Fotos vorhanden.');
     res.attachment(`event-${req.event.id}-fotos.zip`);
     const archive=archiver('zip',{zlib:{level:1}});
     archive.on('error',()=>res.destroy());res.on('close',()=>archive.abort());archive.pipe(res);
-    for(const p of photos) archive.file(path.join(root,req.event.id,p.filename),{name:p.filename});archive.finalize();
-  });
-  function erase(e) {
+    for(const p of photos) {
+      if(photoStorage.mode==='local') archive.file(path.join(root,req.event.id,p.filename),{name:p.filename});
+      else archive.append(await photoStorage.getStream(req.event.id,p.filename),{name:p.filename});
+    }
+    archive.finalize();
+  }));
+  async function erase(e) {
     if(busy.has(e.id)) return false;
     // Legacy unowned events are never removed automatically: review/import first.
-    fs.rmSync(path.join(root,e.id),{recursive:true,force:true});
+    await photoStorage.deleteEvent(e.id);
     db.transaction(()=>{db.prepare('DELETE FROM photos WHERE event_id=?').run(e.id);db.prepare("UPDATE events SET status='expired', deleted_at=?, guest_token=NULL WHERE id=?").run(Date.now(),e.id);})();
     return true;
   }
-  app.delete('/api/event/:eventId',loginRequired,owner,(req,res)=>{if(!erase(req.event)) return fail(res,409,'Upload läuft. Bitte erneut versuchen.');res.json({success:true});});
+  app.delete('/api/event/:eventId',loginRequired,owner,wrap(async(req,res)=>{if(!await erase(req.event)) return fail(res,409,'Upload läuft. Bitte erneut versuchen.');res.json({success:true});}));
   function cleanup() {
-    for(const e of db.prepare("SELECT * FROM events WHERE owner_id IS NOT NULL AND deleted_at IS NULL AND status IN ('paid','trial','pilot') AND expires_at<=?").all(Date.now())) erase(e);
-    db.prepare('DELETE FROM sessions WHERE expires_at<=?').run(Date.now());
-    db.prepare('DELETE FROM email_verifications WHERE expires_at<=?').run(Date.now());
-    db.prepare('DELETE FROM password_resets WHERE expires_at<=?').run(Date.now());
-    for(const entry of fs.readdirSync(temp)) {const file=path.join(temp,entry);if(fs.statSync(file).mtimeMs<Date.now()-86400000) fs.rmSync(file,{force:true});}
+    const expired=db.prepare("SELECT * FROM events WHERE owner_id IS NOT NULL AND deleted_at IS NULL AND status IN ('paid','trial','pilot') AND expires_at<=?").all(Date.now());
+    const pruneRecords=()=>{
+      db.prepare('DELETE FROM sessions WHERE expires_at<=?').run(Date.now());
+      db.prepare('DELETE FROM email_verifications WHERE expires_at<=?').run(Date.now());
+      db.prepare('DELETE FROM password_resets WHERE expires_at<=?').run(Date.now());
+      for(const entry of fs.readdirSync(temp)) {const file=path.join(temp,entry);if(fs.statSync(file).mtimeMs<Date.now()-86400000) fs.rmSync(file,{force:true});}
+    };
+    if(photoStorage.mode==='local') {for(const e of expired) {if(!busy.has(e.id)){fs.rmSync(path.join(root,e.id),{recursive:true,force:true});db.transaction(()=>{db.prepare('DELETE FROM photos WHERE event_id=?').run(e.id);db.prepare("UPDATE events SET status='expired', deleted_at=?, guest_token=NULL WHERE id=?").run(Date.now(),e.id);})();}}pruneRecords();return;}
+    return (async()=>{for(const e of expired) await erase(e);pruneRecords();})();
   }
   const pub=path.join(__dirname,'public');
   app.get('/',(req,res)=>res.sendFile(path.join(pub,'landing.html')));
@@ -318,15 +348,15 @@ function createApp(options = {}) {
   app.get('/health',(req,res)=>res.json({ok:true}));
   app.use((req,res)=>fail(res,404,'Nicht gefunden.'));
   app.use((err,req,res,next)=>{console.error(err.message);if(!res.headersSent) fail(res,500,'Interner Fehler.');});
-  app.locals.db=db;app.locals.cleanup=cleanup;app.locals.fulfill=fulfill;
+  app.locals.db=db;app.locals.cleanup=cleanup;app.locals.fulfill=fulfill;app.locals.photoStorage=photoStorage;
   return app;
 }
 if(require.main===module) {
   const app=createApp();
-  app.locals.cleanup();
+  Promise.resolve(app.locals.cleanup()).catch(err=>console.error('Löschung fehlgeschlagen:',err.message));
   const disk=fs.statfsSync(path.resolve(process.env.UPLOAD_DIR || path.join(__dirname,'uploads')));
-  console.info('Fotospeicher verfügbar (MiB):',Math.floor(Number(disk.bavail)*Number(disk.bsize)/1024**2));
-  setInterval(()=>{try{app.locals.cleanup();}catch(err){console.error('Löschung fehlgeschlagen:',err.message);}},3600000).unref();
+  console.info(photoStorage.mode==='s3'?'Temporärer Upload-Speicher verfügbar (MiB):':'Fotospeicher verfügbar (MiB):',Math.floor(Number(disk.bavail)*Number(disk.bsize)/1024**2));
+  setInterval(()=>{try{Promise.resolve(app.locals.cleanup()).catch(err=>console.error('Löschung fehlgeschlagen:',err.message));}catch(err){console.error('Löschung fehlgeschlagen:',err.message);}},3600000).unref();
   app.listen(process.env.PORT||3000,()=>console.log('Event-Foto-Plattform gestartet (Stripe-Testmodus).'));
 }
 module.exports={createApp};

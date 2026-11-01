@@ -35,20 +35,75 @@ Ressourcen wird automatisch angelegt.
 | NODE_ENV | production |
 | BASE_URL | https://DEIN-TESTSERVICE.onrender.com |
 | TRUST_PROXY | 1 (genau ein vertrauenswürdiger Proxy) |
-| DB_PATH | /var/data/events.db |
-| UPLOAD_DIR | /var/data/uploads |
+| DB_PATH | /data/events.db |
+| UPLOAD_DIR | /data/uploads |
 | STRIPE_SECRET_KEY | sk_test_… als Secret |
 | STRIPE_WEBHOOK_SECRET | whsec_… des Test-Webhooks als Secret |
 | MAX_EVENT_PHOTOS | 2000, vor Verkauf abstimmen |
 | MAX_EVENT_BYTES | 2147483648 pro Event, vor Verkauf abstimmen |
 
-Für SQLite und Bilder muss `/var/data` auf einer Persistent Disk liegen.
+Für SQLite und Bilder muss `/data` auf einer Persistent Disk liegen.
 Nur Pfade auf dem gemounteten Datenträger sind dauerhaft. Free-Webservices haben
 keine Persistent Disk; Bilder/SQLite gehen bei Neustart/Redeploy/Spin-down verloren.
 Deshalb Free nur für wegwerfbare Tests, nicht für Kundendaten einsetzen.
 Disk und Service können Kosten verursachen: erst nach ausdrücklicher Freigabe.
 Ein einzelner Prozess/eine Instanz; kein Node-Cluster und keine horizontale Skalierung.
 Datenträger ist während Build/Pre-deploy nicht verfügbar: Import dort nicht ausführen.
+
+## Zielbetrieb Deutschland: Render Frankfurt plus Hetzner Object Storage
+
+Diese getrennte Zielumgebung ist vorbereitet, aber wird nicht automatisch erstellt
+oder bereitgestellt. Der bestehende Render-Dienst in Ohio bleibt bis zu einem
+abgestimmten Umzug unverändert.
+
+| Einstellung | Wert |
+| --- | --- |
+| Git-Branch | `codex/germany-storage` |
+| Render-Region | Frankfurt |
+| Instanzen | 1 (SQLite wird nicht horizontal geteilt) |
+| Dauerplatte-Mount | `/data` |
+| DB_PATH | `/data/events.db` |
+| UPLOAD_DIR | `/data/staging` (temporäre Uploads; die Fotos gehen in S3) |
+| S3_BUCKET | privater Hetzner-Bucket in Nürnberg oder Falkenstein |
+| S3_ENDPOINT | `https://nbg1.your-objectstorage.com` oder `https://fsn1.your-objectstorage.com` |
+| S3_REGION | passend zum Endpunkt: `nbg1` oder `fsn1` |
+| S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY | nur als geheime Hosting-Variablen eintragen |
+| S3_MAX_STORAGE_BYTES | 900 GiB standardmäßig; stoppt Uploads vor dem 1-TB-Speicherkontingent |
+
+Die App hält Datenbank und temporäre Uploads auf der dauerhaften Render-Platte.
+Fotoobjekte werden ausschließlich in den deutschen Hetzner-Standort geschrieben.
+Der Bucket bleibt privat; die App prüft Veranstaltungsstatus, Freigabe und Gastlink,
+bevor sie ein Foto aus S3 ausliefert. Zugangsdaten kommen nie in Browsercode oder
+Repository. Die alten lokalen Fotos werden durch einen wiederholbaren Kopierlauf
+nach S3 kopiert; das Original wird dabei nicht gelöscht.
+
+Der Kopierlauf ist standardmäßig eine Vorschau:
+
+```bash
+npm run migrate:photos-to-s3
+```
+
+Erst mit `--apply` kopiert er die in der Datenbank erfassten Fotos. Vor dem
+endgültigen Umschalten muss der Kopierlauf nach einer kurzen Upload-Pause erneut
+ausgeführt werden, damit neue Fotos seit dem ersten Lauf ebenfalls enthalten sind.
+Fotos ohne Datenbankeintrag werden nicht automatisch übernommen; solche Altordner
+müssen vorher geprüft und zugeordnet werden.
+
+Die 90-Tage-Löschung bleibt an das jeweilige Veranstaltungsende gekoppelt: Der
+Anwendungsprozess löscht Fotos samt Metadaten stündlich und beim Start. Es wird
+keine pauschale S3-Löschfrist verwendet, die ein noch gültiges Album vorzeitig
+entfernen könnte. Backups der SQLite-Datenbank und deren eigene Aufbewahrungsfrist
+müssen vor dem Produktivbetrieb separat eingerichtet werden.
+
+Der Hetzner-Grundpreis deckt 1 TB Speicher und 1 TB ausgehenden Traffic ab; die
+Anwendung begrenzt den Speicher standardmäßig auf 900 GiB. Das ist keine
+Traffic-Sperre. Bei sehr großen Downloads kann zusätzlicher Egress berechnet
+werden. Die aktuellen Tarife sind vor der Bestellung zu prüfen.
+
+Render unterstützt Frankfurt, bleibt als Unternehmen aber Render. Die deutsche
+Region sagt etwas über den gewählten Dienststandort aus, ersetzt jedoch nicht die
+Prüfung von AV-Vertrag, Unterauftragnehmern und Datenschutzunterlagen vor dem
+kommerziellen Betrieb.
 
 Im Stripe-Testmodus einen Webhook für
 `https://DEIN-TESTSERVICE.onrender.com/api/stripe/webhook` anlegen:
