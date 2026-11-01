@@ -290,7 +290,13 @@ function createApp(options = {}) {
     });
   });
   function photoUrl(req,p) {return `/uploads/${req.event.id}/${p.filename}${own(req,req.event)?'':`?token=${req.event.guest_token}`}`;}
-  app.get('/api/event/:eventId/info',access,(req,res)=>res.json({title:req.event.title,expiresAt:req.event.expires_at,retentionUntil:req.event.expires_at+RETENTION_MS,readOnly:!active(req.event),moderation:!!req.event.moderation,trial:req.event.status==='trial'&&active(req.event),photoCount:db.prepare('SELECT COUNT(*) count FROM photos WHERE event_id=?').get(req.event.id).count,photoLimit:req.event.status==='trial'?25:Number(cfg.MAX_EVENT_PHOTOS||2000),pilot:req.event.status==='pilot',canManage:own(req,req.event)}));
+  app.get('/api/event/:eventId/info',access,(req,res)=>{
+    const canManage=own(req,req.event);
+    const photoCount=canManage
+      ? db.prepare('SELECT COUNT(*) count FROM photos WHERE event_id=?').get(req.event.id).count
+      : db.prepare('SELECT COUNT(*) count FROM photos WHERE event_id=? AND uploader_token_hash=?').get(req.event.id,req.guestTokenHash).count;
+    res.json({title:req.event.title,expiresAt:req.event.expires_at,retentionUntil:req.event.expires_at+RETENTION_MS,readOnly:!active(req.event),moderation:!!req.event.moderation,trial:canManage&&req.event.status==='trial'&&active(req.event),photoCount,photoLimit:req.event.status==='trial'?25:Number(cfg.MAX_EVENT_PHOTOS||2000),pilot:req.event.status==='pilot',canManage});
+  });
   app.get('/api/event/:eventId/photos',access,(req,res)=>{
     const admin=own(req,req.event)&&req.query.manage==='1';
     const photos=own(req,req.event)

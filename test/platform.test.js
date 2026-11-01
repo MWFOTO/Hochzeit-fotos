@@ -95,6 +95,8 @@ test('Content validation, guest upload, moderation, protected files, QR, quota a
   assert.equal((await request(`/api/event/birthday/download?token=${token}`,{guest:guestB})).status,404);
   assert.equal((await request(`/api/event/birthday/photos?token=${token}`,{guest:guestA})).data.photos.length,1);
   assert.equal((await request(`/api/event/birthday/photos?token=${token}`,{guest:guestB})).data.photos.length,0);
+  assert.equal((await request(`/api/event/birthday/info?token=${token}`,{guest:guestA})).data.photoCount,1);
+  assert.equal((await request(`/api/event/birthday/info?token=${token}`,{guest:guestB})).data.photoCount,0);
   const qr=await request('/api/event/birthday/qr',{user});assert.equal(qr.status,200);assert.equal((await sharp(Buffer.from(qr.data)).metadata()).width,1200);
   assert.equal(app.locals.db.prepare('SELECT moderation FROM events WHERE id=?').get('company').moderation,0);
   assert.equal((await request('/api/event/birthday',{method:'PATCH',user,body:{moderation:false}})).status,200);
