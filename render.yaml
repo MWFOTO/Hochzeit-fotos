@@ -27,13 +27,13 @@ services:
       - key: MAX_EVENT_BYTES
         value: "26843545600"
       - key: S3_BUCKET
-        sync: false
+        sync: TFJ9AIRNWZNPAQYS55TO
       - key: S3_ENDPOINT
         sync: false
       - key: S3_REGION
         sync: false
       - key: S3_ACCESS_KEY_ID
-        sync: false
+        sync: rROMc6qgyy6MyhrB552JzOq3sWHMb7J6vGpsMPeC
       - key: S3_SECRET_ACCESS_KEY
         sync: false
       - key: S3_SSE_C_KEY
