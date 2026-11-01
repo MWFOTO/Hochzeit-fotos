@@ -57,6 +57,14 @@ Stand: 12. Oktober 2026. Die Anwendung bleibt im Stripe-Testmodus. Dieser Plan i
 - [ ] Fachkundige rechtliche Prüfung des tatsächlichen Produkts und der Unterlagen abschließen.
 
 ## Sicherheit und Betrieb
+- [x] Schneller Liveness-Endpunkt `/health` und Abhängigkeitsprüfung `/ready` ergänzt; Ready meldet Datenbank-, Uploadspeicher- und Object-Storage-Ausfälle mit HTTP 503.
+- [x] Geordnetes Herunterfahren bei SIGTERM/SIGINT ergänzt, damit laufende Anfragen Zeit zum Beenden erhalten.
+- [ ] Tatsächlichen Live-Dienst, Region, Tarif und Datenpfade im Anbieter-Konto verifizieren; die Projektdokumentation und Render-Kontoabfrage stimmen noch nicht überein.
+- [ ] Externe Erreichbarkeitsüberwachung und Benachrichtigung für `/health` und `/ready` einrichten.
+- [ ] Warnungen für niedrigen freien Speicher, Annäherung an das Object-Storage-Limit und ungewöhnliche Anbieter-Verbrauchskosten einrichten.
+- [ ] Konsistente tägliche SQLite-Sicherung und Fotosicherung an einem unabhängigen Ort einrichten.
+- [ ] Wiederherstellung von Datenbank und Fotos nachweisen; danach regelmäßige Wiederherstellungstests dokumentieren.
+- [ ] Supportzeiten, Zuständigkeit und Störungsablauf festlegen; Runbook in `docs/OPERATIONS.md` beachten.
 - [ ] Unabhängige Prüfung von Berechtigungen, Gäste-Tokens, Sessions, Passwort-Reset, E-Mail-Verifizierung und Checkout.
 - [ ] E-Mail-Bestätigung vor sensiblen Aktionen und Missbrauchsschutz für kostenlose Konten festlegen.
 - [ ] Verifizierungs-/Reset-Mails mit Zustellfehlern, Rate Limits und abgelaufenen Links testen.

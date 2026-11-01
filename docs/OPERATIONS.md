@@ -1,0 +1,64 @@
+# FinalSnap – Betriebsablauf
+
+Stand: 1. November 2026. Arbeitsunterlage; der Live-Betrieb und externe Überwachung sind damit nicht eingerichtet.
+
+## Bekannter Betriebsstand
+
+- Deutschland ist eine feste Vorgabe für den Produktivbetrieb. Ein Dienst außerhalb Deutschlands ist dafür nicht freigegeben.
+- Im Render-Arbeitsbereich „test hochzeit“ läuft `Hochzeit-fotos` (`srv-da2ohr49v7es73cnb2j0`) in Ohio, USA. Er hängt an `https://hochzeit-fotos.onrender.com` und nutzt eine 1-GB-Persistent-Disk unter `/data`. Diese Umgebung erfüllt die Standortvorgabe nicht und darf nicht für den Verkauf mit Kundendaten weiterverwendet werden.
+- Im Render-Arbeitsbereich „hochzeit upload“ wurde kein Dienst gefunden. Dort ist nach jetzigem Stand nichts Laufendes zu löschen.
+- Render bietet Frankfurt als deutsche Region. Da Render die Region eines bestehenden Dienstes nicht nachträglich ändert, braucht es für den Umzug einen neuen Dienst in Frankfurt.
+- Das Zielsetup aus Render Frankfurt und privatem Hetzner Object Storage in Nürnberg oder Falkenstein ist vorbereitet, aber noch nicht eingerichtet oder bereitgestellt.
+- Der neue Render-Dienst, der Hetzner-Bucket, Datenbank-Backups und externe Alarmierung dürfen nicht als eingerichtet gelten, bis sie im jeweiligen Anbieter-Konto geprüft wurden.
+- Brevo dokumentiert EU-weite Verarbeitung und Datenspeicherung auch in Belgien; das erfüllt keine strikte Deutschland-only-Vorgabe. GitHub als Quellcode-/Build-Dienst und Stripe für spätere Zahlungen benötigen eine eigene Standortprüfung. Bis zur Klärung ist eine vollständige Deutschland-Zusage für alle Dienste nicht belegt.
+- Die App nutzt SQLite und ist auf eine Instanz ausgelegt. Keine zweite Instanz und keine horizontale Skalierung aktivieren, solange die Datenbank nicht umgestellt ist.
+- Zahlungen bleiben im Stripe-Testmodus.
+
+## Erreichbarkeit und Bereitschaft
+
+- `GET /health` ist der schnelle Liveness-Endpunkt für den Prozess.
+- `GET /ready` prüft SQLite, mindestens 100 MiB freien Upload-Speicher und den konfigurierten Fotospeicher. Bei einem Fehler antwortet die App mit HTTP 503, ohne interne Details öffentlich auszugeben.
+- Vor dem Produktivbetrieb einen externen Erreichbarkeitsmonitor auf `/health` und eine separate Alarmierung für `/ready` einrichten. Diese Überwachung ist derzeit nicht konfiguriert.
+- Bei wiederholtem Fehler zuerst Providerstatus und Runtime-Logs ansehen, dann Datenbank, Upload-Datenträger und Object Storage prüfen. Nicht durch mehrfaches Neustarten versuchen, einen Speicher- oder Datenbankfehler zu beheben.
+
+## Speicherbetrieb
+
+- Jedes bezahlte Album hat derzeit ein technisches Limit von 25 GB. Alle Veranstaltungen teilen sich zusätzlich das Provider-Kontingent.
+- Im Object-Storage-Betrieb stoppt die App Uploads standardmäßig bei 900 GiB gemeinsam genutzter Fotos. Das lässt Abstand zum 1-TB-Kontingent; es ist keine separate Warnung im Hostinganbieter.
+- Bei lokalem Speicher stoppt die App Uploads mit weniger als 100 MiB freiem Speicher. Der Veranstalterbereich zeigt den freien Speicher an.
+- Gespeicherte Bilder sind verkleinerte JPEGs; Originaldateien werden nicht aufbewahrt.
+- Der stündliche Löschlauf und der Startlauf entfernen App-Fotos nach Ende der Downloadphase. Der tatsächliche Ablauf muss vor Verkauf mit einem Testevent bestätigt werden.
+- Ein Hosting-Datenträger oder Object Storage ist kein geprüftes, unabhängiges Backup.
+
+## Sicherungen und Wiederherstellung
+
+Vor Verkauf fehlen noch ein eingerichteter Sicherungsplan und ein erfolgreicher Wiederherstellungstest. Für die Freigabe müssen feststehen:
+
+1. ein konsistentes tägliches SQLite-Backup über die SQLite-Backup-Funktion, damit auch WAL-Daten berücksichtigt werden;
+2. eine Sicherung der Fotoobjekte, wenn die zugesagte Wiederherstellung auch Veranstaltungsfotos umfassen soll;
+3. ein separater, zugriffsbeschränkter Sicherungsort mit festgelegter Aufbewahrungsdauer;
+4. ein dokumentierter Wiederherstellungstest mindestens monatlich und vor größeren Datenbankänderungen;
+5. ein klarer Umgang mit Fotos, die nach einer Sicherung regulär gelöscht wurden.
+
+Die App stellt diese Sicherungen aktuell nicht automatisch her. Keine Datenbankdatei im laufenden Betrieb einfach kopieren; SQLite muss konsistent gesichert werden. Ein Rollback der App setzt Datenbankänderungen nicht zurück.
+
+## Deploy und Störungen
+
+Vor jeder Änderung am Live-Dienst Identität des Dienstes, Branch, Region, Umgebungswerte, Datenpfade und letzten erfolgreichen Deploy verifizieren. Vor einem Datenbank- oder Speicherwechsel zuerst Sicherung und Wiederherstellung nachweisen.
+
+Nach einem Deploy `/health`, `/ready`, Anmeldung, Eventübersicht und einen kontrollierten Fotozugriff prüfen. Bei Fehlern Logs sichern und zum vorherigen App-Stand zurückkehren; Datenbank und Fotos nicht zurücksetzen oder löschen, solange Ursache und Kompatibilität unklar sind.
+
+Supportfälle mit Event-Kurzname, Zeitpunkt, Gerät/Browser und genauer Fehlermeldung erfassen. Häufige erste Prüfungen:
+
+- **QR-Code oder Gästelink funktioniert nicht:** Eventstatus und Fristen prüfen. Ein erneuerter Gästelink macht bereits gedruckte QR-Codes ungültig.
+- **Foto-Upload schlägt fehl:** Verbindung, Dateityp, Dateigröße, Testfoto-Limit, Eventlimit und gemeinsamen Speicher prüfen.
+- **Foto fehlt:** Veranstalterfreigabe, Uploadstatus und Eventfilter prüfen. Gäste sehen auf ihrem Gerät nur die dort hochgeladenen Fotos; der Veranstalter sieht alle.
+- **Downloadphase:** Neue Uploads und Gästebucheinträge sind geschlossen. Fotos bleiben nur bis zum angezeigten Ende der Downloadfrist verfügbar.
+
+## Noch einzurichten
+
+- Tatsächlichen Live-Dienst im richtigen Anbieter-Konto identifizieren und Region, Tarif sowie Speicherpfade dokumentieren.
+- Mindestens einen Erreichbarkeitsmonitor mit Benachrichtigung für Ausfälle einrichten.
+- Warnungen für niedrigen Datenträgerspeicher, Annäherung an das 900-GiB-Limit und ungewöhnlichen Anbieter-Verbrauch einrichten.
+- SQLite- und Foto-Backups an einem unabhängigen Ziel einrichten und Wiederherstellung nachweisen.
+- Alarmkontakt, Supportzeiten und Verantwortlichkeit bei Störungen festlegen.

@@ -31,7 +31,7 @@ Ressourcen wird automatisch angelegt.
 | Runtime | Node.js 22.13+ oder 24 |
 | Build Command | npm ci |
 | Start Command | npm start |
-| Health Check | /health |
+| Health Check (Liveness) | /health |
 | NODE_ENV | production |
 | BASE_URL | https://DEIN-TESTSERVICE.onrender.com |
 | TRUST_PROXY | 1 (genau ein vertrauenswürdiger Proxy) |
@@ -49,17 +49,26 @@ Deshalb Free nur für wegwerfbare Tests, nicht für Kundendaten einsetzen.
 Disk und Service können Kosten verursachen: erst nach ausdrücklicher Freigabe.
 Ein einzelner Prozess/eine Instanz; kein Node-Cluster und keine horizontale Skalierung.
 Datenträger ist während Build/Pre-deploy nicht verfügbar: Import dort nicht ausführen.
+Zusätzlich prüft `/ready` Datenbank, Upload-Datenträger und Object Storage. Für externe Alarmierung `/ready` überwachen; eine solche Überwachung ist nicht automatisch eingerichtet.
 
-## Zielbetrieb Deutschland: Sliplane Deutschland plus Hetzner Object Storage
+## Zielbetrieb Deutschland: Render Frankfurt plus Hetzner Object Storage
 
-Diese getrennte Zielumgebung ist vorbereitet, aber wird nicht automatisch erstellt
-oder bereitgestellt. Der bestehende Render-Dienst in Ohio bleibt bis zu einem
-abgestimmten Umzug unverändert.
+Diese Zielumgebung ist vorbereitet, aber noch nicht erstellt oder bereitgestellt.
+Der bestehende Render-Dienst in Ohio kann nicht in eine andere Region verschoben
+werden. Für Deutschland muss ein neuer Render-Dienst in Frankfurt angelegt und die
+Anwendungsdaten müssen dorthin migriert werden.
+
+**Deutschland ist eine feste Standortvorgabe für den Produktivbetrieb.** Vor dem
+Start müssen App, Datenbank, temporäre Uploads, Fotos, Sicherungen und relevante
+Protokolle auf ausdrücklich in Deutschland gewählten Standorten liegen. Ein
+EU-Standort in einem anderen Land genügt dafür nicht. Der aktuelle Render-Testdienst
+liegt in Ohio (USA) und darf daher nicht als Produktivumgebung für Kundendaten
+verwendet werden. Er bleibt bis zum geprüften Umzug ein bestehender Teststand.
 
 | Einstellung | Wert |
 | --- | --- |
 | Git-Branch | `codex/germany-storage` |
-| Hosting | Sliplane, Serverstandort Deutschland |
+| Hosting | Render, Region Frankfurt (Deutschland) |
 | Instanzen | 1 (SQLite wird nicht horizontal geteilt) |
 | Dauer-Volume-Mount | `/data` |
 | DB_PATH | `/data/events.db` |
@@ -70,7 +79,14 @@ abgestimmten Umzug unverändert.
 | S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY | nur als geheime Hosting-Variablen eintragen |
 | S3_MAX_STORAGE_BYTES | 900 GiB standardmäßig; stoppt Uploads vor dem 1-TB-Speicherkontingent |
 
-Die App wird aus dem GitHub-Zweig auf Sliplane bereitgestellt. Datenbank und
+`render.yaml` beschreibt den neuen Dienst: Frankfurt, Starter-Plan, 10-GB-Datenträger,
+`/health` und zunächst deaktivierte automatische Deploys. Die Blueprint-Datei legt
+keinen Hetzner-Bucket an. Dafür zuerst einen privaten Bucket in `nbg1` oder `fsn1`
+und Zugangsdaten erstellen; die S3-Werte sowie den Brevo-Schlüssel beim Einrichten
+des Render-Blueprints als geheime Variablen setzen. Vor dem kostenpflichtigen
+Blueprint-Sync den im Render-Dashboard angezeigten Gesamtpreis bestätigen.
+
+Die App wird aus dem GitHub-Zweig auf Render bereitgestellt. Datenbank und
 temporäre Uploads liegen auf einem dauerhaften Volume am deutschen Standort.
 Fotoobjekte werden ausschließlich in einen deutschen Hetzner-Standort geschrieben.
 Der Bucket bleibt privat; die App prüft Veranstaltungsstatus, Freigabe und Gastlink,
@@ -103,11 +119,19 @@ Traffic; die Anwendung begrenzt den Speicher standardmäßig auf 900 GiB. Das is
 Traffic-Sperre. Bei sehr großen Downloads kann zusätzlicher Egress berechnet
 werden. Die aktuellen Tarife sind vor der Bestellung zu prüfen.
 
-Sliplane ist ein deutscher Anbieter mit auswählbarem Standort Deutschland. Die
-deutsche Region muss für Server und Hetzner-Bucket ausdrücklich gewählt werden.
-Vor dem kommerziellen Betrieb sind der Sliplane-AV-Vertrag, Unterauftragnehmer,
-Hetzner-AV-Vertrag und die übrigen eingesetzten Dienste zu prüfen. Eine deutsche
-Hostingregion allein erledigt diese Prüfung nicht.
+Render bietet Frankfurt als Region. Der neue Dienst und der Hetzner-Bucket müssen
+jeweils ausdrücklich in Deutschland angelegt werden. Für Hetzner kommen
+Nürnberg (`nbg1`) oder Falkenstein (`fsn1`) infrage, Helsinki nicht. Das erfüllt
+die Standortvorgabe für App, Upload-Verarbeitung und dauerhafte Fotospeicherung;
+die vorhandene Ohio-Instanz erfüllt sie nicht. Das belegt aber nicht automatisch
+den Standort aller weiteren Dienste. Brevo dokumentiert Datenverarbeitung innerhalb
+der EU, mit Speicherung unter anderem in Belgien; das ist EU-, aber nicht
+Deutschland-exklusiv. GitHub ist der Quellcode- und Build-Ausgangspunkt und Stripe
+ist für spätere Livezahlungen vorgesehen. Ihre konkreten Datenflüsse und
+Speicherorte müssen separat geklärt werden, bevor eine Aussage „alles liegt in
+Deutschland“ getroffen wird. Solange die Vorgabe auch diese Anbieter umfasst,
+bleiben sie für den Produktivbetrieb offen und dürfen nicht stillschweigend als
+deutsch behandelt werden.
 
 Im Stripe-Testmodus einen Webhook für
 `https://DEIN-TESTSERVICE/api/stripe/webhook` anlegen:

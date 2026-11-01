@@ -60,7 +60,7 @@ function createApp(options = {}) {
   const cfg = {...process.env, ...options};
   const mailer=options.mailer||require('./mailer').createMailer(cfg);
   if (cfg.STRIPE_SECRET_KEY && !cfg.STRIPE_SECRET_KEY.startsWith('sk_test_')) throw new Error('Phase 1 erlaubt ausschließlich Stripe-Testschlüssel.');
-  const configuredBase = String(cfg.BASE_URL || '').trim();
+  const configuredBase = String(cfg.BASE_URL || cfg.RENDER_EXTERNAL_URL || '').trim();
   const platformDomain = String(cfg.SLIPLANE_DOMAIN || '').trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
   const unresolvedBase = /\$\{?[A-Za-z_][A-Za-z0-9_]*\}?/.test(configuredBase);
   const base = configuredBase && !unresolvedBase
@@ -445,7 +445,20 @@ function createApp(options = {}) {
   for(const [suffix,file] of [['','gallery.html'],['/upload','upload.html'],['/gallery','gallery.html'],['/slideshow','slideshow.html'],['/games','games.html'],['/guestbook','guestbook.html']]) app.get(`/event/:eventId${suffix}`,access,(req,res)=>res.sendFile(path.join(pub,file)));
   // Only intended public assets; source code and generic HTML routes cannot bypass guards.
   for(const file of ['style.css','upload.js','slideshow.js','guest-access.js','account.js','verify-email.js','password-recovery.js','games.js','guestbook.js','johanna-bastian.png','photographer.webp']) app.get(`/${file}`,(req,res)=>res.sendFile(path.join(pub,file)));
+  // Liveness stays cheap for the host's restart check. Readiness checks critical dependencies.
   app.get('/health',(req,res)=>res.json({ok:true}));
+  app.get('/ready',async(req,res)=>{
+    try {
+      db.prepare('SELECT 1').get();
+      const disk=fs.statfsSync(root),freeBytes=Number(disk.bavail)*Number(disk.bsize);
+      if(freeBytes<100*1024**2)throw new Error('Upload volume below the 100 MiB operating reserve.');
+      await photoStorage.check();
+      res.json({ok:true});
+    } catch(error) {
+      console.error('Readiness check failed:',error.message);
+      res.status(503).json({ok:false});
+    }
+  });
   app.use((req,res)=>fail(res,404,'Nicht gefunden.'));
   app.use((err,req,res,next)=>{console.error(err.message);if(!res.headersSent) fail(res,500,'Interner Fehler.');});
   app.locals.db=db;app.locals.cleanup=cleanup;app.locals.fulfill=fulfill;app.locals.photoStorage=photoStorage;
@@ -456,7 +469,29 @@ if(require.main===module) {
   Promise.resolve(app.locals.cleanup()).catch(err=>console.error('Löschung fehlgeschlagen:',err.message));
   const disk=fs.statfsSync(path.resolve(process.env.UPLOAD_DIR || path.join(__dirname,'uploads')));
   console.info(app.locals.photoStorage.mode==='s3'?'Temporärer Upload-Speicher verfügbar (MiB):':'Fotospeicher verfügbar (MiB):',Math.floor(Number(disk.bavail)*Number(disk.bsize)/1024**2));
-  setInterval(()=>{try{Promise.resolve(app.locals.cleanup()).catch(err=>console.error('Löschung fehlgeschlagen:',err.message));}catch(err){console.error('Löschung fehlgeschlagen:',err.message);}},3600000).unref();
-  app.listen(process.env.PORT||3000,()=>console.log('Event-Foto-Plattform gestartet (Stripe-Testmodus).'));
+  const cleanupTimer=setInterval(()=>{try{Promise.resolve(app.locals.cleanup()).catch(err=>console.error('Löschung fehlgeschlagen:',err.message));}catch(err){console.error('Löschung fehlgeschlagen:',err.message);}},3600000);
+  cleanupTimer.unref();
+  const server=app.listen(process.env.PORT||3000,()=>console.log('Event-Foto-Plattform gestartet (Stripe-Testmodus).'));
+  let shuttingDown=false;
+  const shutdown=signal=>{
+    if(shuttingDown)return;
+    shuttingDown=true;
+    console.info(`${signal}: Beende laufende Anfragen.`);
+    clearInterval(cleanupTimer);
+    const timeout=setTimeout(()=>{
+      console.error('Geordnetes Herunterfahren dauerte zu lange; offene Verbindungen werden geschlossen.');
+      server.closeAllConnections?.();
+      try{app.locals.db.close();}catch{}
+      process.exit(1);
+    },25000);
+    timeout.unref();
+    server.close(()=>{
+      clearTimeout(timeout);
+      app.locals.db.close();
+      console.info('Server sauber beendet.');
+    });
+  };
+  process.once('SIGTERM',()=>shutdown('SIGTERM'));
+  process.once('SIGINT',()=>shutdown('SIGINT'));
 }
 module.exports={createApp};

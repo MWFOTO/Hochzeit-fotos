@@ -71,13 +71,13 @@
       const panels=[];
       const showPanel=index=>{panels.forEach((panel,i)=>panel.hidden=i!==index);tabs.querySelectorAll('button').forEach((b,i)=>b.setAttribute('aria-pressed',String(i===index)));document.getElementById('photo-manager').hidden=index!==0;if(index===0)return manage(event);};
       if(['pending','trial'].includes(event.status)&&!event.readOnly){
-        const chooser=element('details');chooser.className='upgrade-panel';chooser.open=activeEvent===event.id;chooser.append(element('summary','FinalSnap Fotoalbum buchen'));
-        chooser.append(element('p','Einmalig 34,90 €. Keine feste Fotoanzahl, bis zu 25 GB Fotospeicher. Das Paket startet am Veranstaltungsdatum; die 25 Testfotos bleiben erhalten. Aktuell ausschließlich Testzahlungen.'));
+        const chooser=element('details');chooser.className='upgrade-panel';chooser.open=activeEvent===event.id;chooser.append(element('summary','Paket & Buchung'));
+        chooser.append(element('p','Ein Paket für die Veranstaltung. Die 25 Testfotos bleiben erhalten und zählen ab dem Veranstaltungsdatum zum Speicher. 34,90 € ist ein vorläufiger Arbeitswert; der endgültige Bruttopreis wird vor dem Verkaufsstart festgelegt. Hier ist ausschließlich eine Testzahlung möglich.'));
         const grid=element('div');grid.className='plan-grid';chooser.append(grid);
         for(const [key,plan] of Object.entries(availablePlans)){
           if(plan.legacy&&event.plan!==key)continue;
           const item=element('div');item.className='plan-card';item.append(element('h3',plan.label),element('p',new Intl.NumberFormat('de-DE',{style:'currency',currency:'EUR'}).format(plan.priceCents/100)),element('p',`Keine feste Fotoanzahl · bis zu ${plan.storageLimitGB.toLocaleString('de-DE',{maximumFractionDigits:1})} GB Fotospeicher. QR-Code, Gästebuch, Fotoaufgaben, Diashow und Downloads enthalten.`));
-          const choose=button(item,event.checkoutStarted&&event.plan===key?'Testzahlung fortsetzen':'Jetzt einmalig buchen',async()=>{choose.disabled=true;try{const data=await api('/api/checkout','POST',{eventId:event.id,plan:key});location.href=data.url;}finally{choose.disabled=false;}});choose.className='primary';choose.disabled=event.checkoutStarted&&event.plan!==key;grid.append(item);
+          const choose=button(item,event.checkoutStarted&&event.plan===key?'Testzahlung fortsetzen':'Testzahlung starten',async()=>{choose.disabled=true;try{const data=await api('/api/checkout','POST',{eventId:event.id,plan:key});location.href=data.url;}finally{choose.disabled=false;}});choose.className='primary';choose.disabled=event.checkoutStarted&&event.plan!==key;grid.append(item);
         }
         if(event.checkoutStarted)chooser.append(element('p','Die begonnene Testzahlung ist an das einmalige FinalSnap-Fotoalbum gebunden.'));
         card.append(chooser);
@@ -122,6 +122,30 @@
   const eventIdInput=document.getElementById('event-id');
   const normalizeEventId=value=>value.trim().toLowerCase().replace(/ä/g,'ae').replace(/ö/g,'oe').replace(/ü/g,'ue').replace(/ß/g,'ss').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9_-]+/g,'-').replace(/^[-_]+|[-_]+$/g,'');
   eventIdInput.addEventListener('blur',()=>{eventIdInput.value=normalizeEventId(eventIdInput.value);});
+  const eventDateInput=document.getElementById('event-date');
+  const timelinePreview=document.getElementById('event-timeline-preview');
+  const shiftDate=(value,months=0,days=0)=>{
+    const [year,month,day]=value.split('-').map(Number);
+    const monthStart=new Date(Date.UTC(year,month-1+months,1));
+    const lastDay=new Date(Date.UTC(monthStart.getUTCFullYear(),monthStart.getUTCMonth()+1,0)).getUTCDate();
+    const shifted=new Date(Date.UTC(monthStart.getUTCFullYear(),monthStart.getUTCMonth(),Math.min(day,lastDay)+days));
+    return shifted.toISOString().slice(0,10);
+  };
+  const displayDate=value=>new Intl.DateTimeFormat('de-DE',{dateStyle:'long',timeZone:'UTC'}).format(new Date(`${value}T12:00:00Z`));
+  const updateTimelinePreview=()=>{
+    if(!timelinePreview)return;
+    timelinePreview.replaceChildren(element('strong','So läuft dein Album'));
+    if(!eventDateInput.value){timelinePreview.append(element('p','Wähle ein Veranstaltungsdatum, um den Zeitplan zu sehen.'));return;}
+    const start=eventDateInput.value,end=shiftDate(start,12),downloadEnd=shiftDate(end,0,90),list=element('ul');
+    list.append(element('li',`Vor der Feier: bis zu 25 kostenlose Testfotos.`));
+    list.append(element('li',`Ab ${displayDate(start)}: Der Veranstaltungszeitraum beginnt; bei Buchung gilt das vollständige Speicherpaket.`));
+    list.append(element('li',`Nach zwölf Monaten, am ${displayDate(end)}, endet die Albumphase.`));
+    list.append(element('li',`Anschließend sind die Fotos noch bis ${displayDate(downloadEnd)} zum Herunterladen verfügbar.`));
+    timelinePreview.append(list);
+  };
+  eventDateInput.addEventListener('input',updateTimelinePreview);
+  eventDateInput.addEventListener('change',updateTimelinePreview);
+  updateTimelinePreview();
   document.getElementById('event-form').onsubmit=async e=>{
     e.preventDefault();eventIdInput.value=normalizeEventId(eventIdInput.value);if(!/^[a-z0-9][a-z0-9_-]{2,63}$/.test(eventIdInput.value)){message.textContent='Bitte einen Kurznamen mit mindestens 3 Buchstaben oder Zahlen eingeben.';message.scrollIntoView({block:'center'});eventIdInput.focus();return;}try{await api('/api/events','POST',{title:document.getElementById('title').value,eventId:document.getElementById('event-id').value,plan:'event',eventDate:document.getElementById('event-date').value,moderation:document.getElementById('moderation').checked,guestbookModeration:document.getElementById('guestbook-moderation').checked});message.textContent='Veranstaltung erstellt. Öffne die Verwaltung für deinen Gästezugang und den aktuellen Status.';e.target.reset();document.getElementById('guestbook-moderation').checked=true;await load();message.scrollIntoView({block:'center',behavior:'smooth'});}catch(err){report(err);message.scrollIntoView({block:'center',behavior:'smooth'});}
   };
