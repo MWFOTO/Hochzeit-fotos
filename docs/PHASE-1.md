@@ -79,15 +79,17 @@ Import bytegleich erhalten und können daher noch EXIF/GPS enthalten.
 ## Datenschutz und Löschverhalten
 
 Technische Maßnahmen: private Speicherung, Owner-Isolation, Token-Gastzugang,
-TLS im Hosting, Moderation, Metadatenentfernung bei neuen Uploads, keine
-öffentlichen Fotoverzeichnisse, Sofortsperre nach Ablauf und Löschlauf.
+Gästefotos pro Browser getrennt, TLS im Hosting, Moderation,
+Metadatenentfernung bei neuen Uploads, keine öffentlichen Fotoverzeichnisse,
+Uploadstopp nach Ablauf, 90-tägiger Lese-/Downloadzeitraum und anschließender Löschlauf.
 Der Upload zeigt einen Hinweis auf Teilen, Empfänger und Löschung. Das ersetzt
 keine vollständige Datenschutzerklärung bzw. Prüfung der Rechtsgrundlage.
 Verantwortliche, Kontakt, Hosting-/Stripe-Verträge, Region, Betroffenenanfragen,
 Nutzungsbedingungen und Datenschutzerklärung vor Veröffentlichung festlegen.
 
-Automatisch werden abgelaufene, zugeordnete, bezahlte Events gelöscht: Bilddateien
-und Foto-Metadaten. Event-ID bleibt als reservierter Tombstone erhalten;
+Nach Ende eines Albumzeitraums bleiben Bilder und Galerie 90 Tage zum Lesen und
+Herunterladen verfügbar; Uploads sind gesperrt. Danach werden Bilddateien und
+Foto-Metadaten automatisch entfernt. Die Event-ID bleibt als reservierter Tombstone erhalten;
 Event-/Payment-Zeilen und Kontodaten haben noch keine automatische Aufbewahrungs-
 regel. Diese fachlich/rechtlich festlegen. Kein unkontrolliertes Löschen von
 zahlungsbezogenen Daten. Sessions nach sieben Tagen ungültig und bereinigt.
