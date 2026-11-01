@@ -24,15 +24,15 @@ function openDatabase(filename) {
       amount_cents INTEGER NOT NULL, months INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'pending');
     CREATE TABLE IF NOT EXISTS webhook_receipts (id TEXT PRIMARY KEY, created_at INTEGER NOT NULL);`);
   const columns = new Set(db.prepare('PRAGMA table_info(events)').all().map(x => x.name));
-  for (const [name, type] of Object.entries({owner_id:'TEXT REFERENCES users(id)', title:"TEXT NOT NULL DEFAULT 'Veranstaltung'", guest_token:'TEXT', moderation:'INTEGER NOT NULL DEFAULT 1', deleted_at:'INTEGER', trial_used:'INTEGER NOT NULL DEFAULT 0', upload_successes:'INTEGER NOT NULL DEFAULT 0', upload_failures:'INTEGER NOT NULL DEFAULT 0'})) {
+  for (const [name, type] of Object.entries({owner_id:'TEXT REFERENCES users(id)', title:"TEXT NOT NULL DEFAULT 'Veranstaltung'", guest_token:'TEXT', moderation:'INTEGER NOT NULL DEFAULT 1', guestbook_moderation:'INTEGER NOT NULL DEFAULT 1', deleted_at:'INTEGER', trial_used:'INTEGER NOT NULL DEFAULT 0', upload_successes:'INTEGER NOT NULL DEFAULT 0', upload_failures:'INTEGER NOT NULL DEFAULT 0'})) {
     if (!columns.has(name)) db.exec(`ALTER TABLE events ADD COLUMN ${name} ${type}`);
   }
   const userColumns=new Set(db.prepare('PRAGMA table_info(users)').all().map(x=>x.name));
   if(!userColumns.has('email_verified_at'))db.exec('ALTER TABLE users ADD COLUMN email_verified_at INTEGER');
   const photoColumns=new Set(db.prepare('PRAGMA table_info(photos)').all().map(x=>x.name));
   if(!photoColumns.has('uploader_token_hash'))db.exec('ALTER TABLE photos ADD COLUMN uploader_token_hash TEXT');
-  db.exec(`CREATE TABLE IF NOT EXISTS password_resets (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS email_verifications (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL);`);
-  db.exec('CREATE INDEX IF NOT EXISTS photos_event ON photos(event_id); CREATE INDEX IF NOT EXISTS events_owner ON events(owner_id); CREATE UNIQUE INDEX IF NOT EXISTS payments_event ON payments(event_id);');
+  db.exec(`CREATE TABLE IF NOT EXISTS guestbook_entries (id TEXT PRIMARY KEY, event_id TEXT NOT NULL REFERENCES events(id), guest_name TEXT NOT NULL DEFAULT '', message TEXT NOT NULL, approved INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS password_resets (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS email_verifications (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL);`);
+  db.exec('CREATE INDEX IF NOT EXISTS photos_event ON photos(event_id); CREATE INDEX IF NOT EXISTS guestbook_event ON guestbook_entries(event_id,created_at); CREATE INDEX IF NOT EXISTS events_owner ON events(owner_id); CREATE UNIQUE INDEX IF NOT EXISTS payments_event ON payments(event_id);');
   return db;
 }
 module.exports = { openDatabase };

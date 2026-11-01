@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Gästebuch · FinalSnap</title>
+  <link rel="stylesheet" href="/style.css" />
+  <script src="/guest-access.js"></script>
+</head>
+<body>
+  <main class="guest-feature-page">
+    <a class="button secondary" id="album-back">← Zurück zum Album</a>
+    <span class="eyebrow">WORTE FÜR SPÄTER</span>
+    <h1 class="event-title">Gästebuch</h1>
+    <p class="event-subtitle">Hinterlasst dem Gastgeber einen lieben Gruß oder eine Erinnerung an diesen Tag.</p>
+    <p class="privacy-note">Freigegebene Einträge können alle sehen, die den Gästelink haben. Bitte teilt keine privaten oder sensiblen Informationen.</p>
+    <form id="guestbook-form" class="guestbook-form">
+      <label for="guest-name">Dein Name <span class="small">(optional, höchstens 40 Zeichen)</span></label>
+      <input id="guest-name" name="name" maxlength="40" autocomplete="name" placeholder="Zum Beispiel: Alex" />
+      <label for="guest-message">Deine Nachricht <span class="small">(höchstens 500 Zeichen)</span></label>
+      <textarea id="guest-message" name="message" maxlength="500" required rows="5" placeholder="Was möchtest du dem Gastgeber mit auf den Weg geben?"></textarea>
+      <div class="guestbook-form-footer"><span id="character-count" class="small">0 / 500</span><button class="primary" type="submit">Gruß abschicken</button></div>
+    </form>
+    <p id="guestbook-status" role="status" aria-live="polite"></p>
+    <section aria-labelledby="entries-heading">
+      <div class="page-heading"><h2 id="entries-heading">Grüße & Erinnerungen</h2><span id="guestbook-count" class="small"></span></div>
+      <div id="guestbook-entries" class="guestbook-entries" aria-live="polite"></div>
+    </section>
+  </main>
+  <script src="/guestbook.js"></script>
+  <footer class="legal-footer"><a href="/impressum">Impressum</a> · <a href="mailto:info@matthiaswendlandfotografie.de">Kontakt</a></footer>
+</body>
+</html>

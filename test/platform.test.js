@@ -44,7 +44,7 @@ test('Registration, login, session, CSRF and protected dashboard',async()=>{
 });
 test('Multiple events, ownership and pending payment gate',async()=>{
   for(const eventId of ['birthday','company'])assert.equal((await request('/api/events',{method:'POST',user,body:{eventId,title:'Test Event',plan:'1m',trial:false,...(eventId==='birthday'?{moderation:true}:{})}})).status,201);
-  assert.equal((await request('/api/events',{user})).data.events.length,2);
+  const ownerEvents=(await request('/api/events',{user})).data.events;assert.equal(ownerEvents.length,2);assert.ok(ownerEvents.every(event=>event.guestbook_moderation===1));
   assert.equal((await request('/api/events',{method:'POST',user:other,body:{eventId:'birthday',title:'Collision',plan:'1m'}})).status,409);
   assert.equal((await request('/event/birthday')).status,402);
   assert.equal((await request('/api/event/birthday/qr',{user})).status,402);
@@ -108,6 +108,29 @@ test('Content validation, guest upload, moderation, protected files, QR, quota a
   assert.equal((await request(`/api/event/birthday/photos/${photo.id}`,{method:'DELETE',user})).status,200);
   assert.equal((await request(photo.url,{user})).status,404);
 });
+test('Guestbook moderation, shared approved notes, ownership and feature pages',async()=>{
+  assert.equal((await request(`/event/birthday/games?token=${token}`,{guest:guestA})).status,200);
+  assert.equal((await request(`/event/birthday/guestbook?token=${token}`,{guest:guestA})).status,200);
+  assert.equal((await request('/games.js')).status,200);
+  assert.equal((await request('/guestbook.js')).status,200);
+  let info=await request(`/api/event/birthday/info?token=${token}`,{guest:guestA});assert.equal(info.data.guestbookModeration,true);
+  const created=await request(`/api/event/birthday/guestbook?token=${token}`,{method:'POST',guest:guestA,body:{name:'Alex',message:'Ein schöner Tag!'}});
+  assert.equal(created.status,201);assert.equal(created.data.pending,true);
+  assert.equal((await request(`/api/event/birthday/guestbook?token=${token}`,{guest:guestB})).data.entries.length,0);
+  const ownerEntries=(await request('/api/event/birthday/guestbook',{user})).data.entries;assert.equal(ownerEntries.length,1);assert.equal(ownerEntries[0].approved,0);
+  assert.equal((await request(`/api/event/birthday/guestbook/${ownerEntries[0].id}`,{method:'PATCH',user:other,body:{approved:true}})).status,404);
+  assert.equal((await request(`/api/event/birthday/guestbook/${ownerEntries[0].id}`,{method:'PATCH',user,body:{approved:true}})).status,200);
+  assert.equal((await request(`/api/event/birthday/guestbook?token=${token}`,{guest:guestB})).data.entries[0].message,'Ein schöner Tag!');
+  assert.equal((await request('/api/event/birthday',{method:'PATCH',user,body:{guestbookModeration:false}})).status,200);
+  const instant=await request(`/api/event/birthday/guestbook?token=${token}`,{method:'POST',guest:guestB,body:{name:'',message:'Danke an alle!'}});assert.equal(instant.data.pending,false);
+  assert.equal((await request(`/api/event/birthday/guestbook?token=${token}`,{guest:guestA})).data.entries.length,2);
+  assert.equal((await request(`/api/event/birthday/guestbook/${ownerEntries[0].id}`,{method:'PATCH',user,body:{approved:false}})).status,200);
+  assert.equal((await request(`/api/event/birthday/guestbook?token=${token}`,{guest:guestA})).data.entries.length,1);
+  assert.equal((await request(`/api/event/birthday/guestbook?token=${token}`,{method:'POST',guest:guestA,body:{name:'X'.repeat(41),message:'Zu lang'}})).status,400);
+  assert.equal((await request(`/api/event/birthday/guestbook?token=${token}`,{method:'POST',guest:guestA,body:{name:'Alex',message:'x'.repeat(501)}})).status,400);
+  assert.equal((await request(`/api/event/birthday/guestbook/${ownerEntries[0].id}`,{method:'DELETE',user})).status,200);
+  assert.equal((await request(`/api/event/birthday/guestbook?token=${token}`,{method:'POST',guest:guestA,body:{name:'Alex',message:'Wird nach der Feier entfernt.'}})).status,201);
+});
 test('Rotating guest links, expiry and automatic deletion',async()=>{
   assert.equal((await request('/api/event/birthday/rotate-token',{method:'POST',user})).status,200);
   assert.equal((await request(`/event/birthday?token=${token}`)).status,403);
@@ -121,6 +144,7 @@ test('Rotating guest links, expiry and automatic deletion',async()=>{
   app.locals.db.prepare('UPDATE events SET expires_at=? WHERE id=?').run(Date.now()-91*86400000,'birthday');
   app.locals.cleanup();assert.equal(fs.existsSync(path.join(tmp,'uploads','birthday')),false);
   assert.equal(app.locals.db.prepare('SELECT COUNT(*) n FROM photos').get().n,0);
+  assert.equal(app.locals.db.prepare('SELECT COUNT(*) n FROM guestbook_entries WHERE event_id=?').get('birthday').n,0);
   assert.equal((await request(`/api/event/birthday/info?token=${rotatedToken}`,{guest:guestA})).status,402);
 });
 test('Live key blocked and old SQLite schema migrated without overwriting rows',()=>{

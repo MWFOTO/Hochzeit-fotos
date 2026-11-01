@@ -11,6 +11,7 @@ Lokale Umgebung: Node 24.19.0, Linux, temporäre SQLite-Dateien und Fotoverzeich
 | Veranstaltungen | Mehrere Events, eindeutige IDs, fremder Eigentümer, pending-Sperre für Gastseite/QR |
 | Stripe | Stabiler Checkout, signierte Payloads, falsche Signatur, unpaid, falscher Betrag, Live-Daten, asynchrone Bestätigung, wiederholte Webhooks ohne Laufzeitverlängerung, geschützter Bestellstatus |
 | Fotos und QR | Fake-Bild abgelehnt, wirkliche Bilddekodierung, Gastupload, manuelle Freigabe, Owner-Isolation, privater Dateizugriff, JPEG ohne EXIF, ZIP, QR-PNG, Fotoanzahl-Limit, Temp-Cleanup, Bildlöschung |
+| Gästebuch und Fotoaufgaben | Gastseiten und Assets, standardmäßige Gästebuch-Freigabe, Freigabe/Verbergen/Löschen nur durch den Eigentümer, sichtbare Einträge für andere Gäste, Eingabelimits, Löschung während der Aufbewahrungsbereinigung; Fotoaufgaben-Seite verfügbar |
 | Ablauf | Token-Erneuerung, alte Links gesperrt, sofortige Ablaufsperre, Bild-/Metadatenlöschung |
 | Alte Datenbank | Bestehendes Schema ergänzt, bezahlter Status und Session-ID bleiben erhalten, keine automatische Eigentümerzuordnung |
 | Altbilder | Dry-run ohne Eventänderung, Import mit DB-Backup, Originalbild unverändert, keine automatische Freischaltung, keine doppelte Registrierung |

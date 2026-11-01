@@ -42,6 +42,9 @@
       }
     }
     const back=document.getElementById('album-back');if(back)back.href=window.guestUrl(`/event/${encodeURIComponent(eventId)}/gallery`);
+    const games=document.getElementById('games-link');if(games)games.href=window.guestUrl(`/event/${encodeURIComponent(eventId)}/games`);
+    const guestbook=document.getElementById('guestbook-link');if(guestbook)guestbook.href=window.guestUrl(`/event/${encodeURIComponent(eventId)}/guestbook`);
+    document.querySelectorAll('.game-task .button').forEach(item=>{item.hidden=info.readOnly;});
     const manage=document.getElementById('manage-back');if(manage){manage.hidden=!info.canManage;manage.href=`/dashboard?event=${encodeURIComponent(eventId)}`;}
   }
   window.refreshEventQuota=refreshQuota;
