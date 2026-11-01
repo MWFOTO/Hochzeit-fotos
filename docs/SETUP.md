@@ -69,6 +69,7 @@ verwendet werden. Er bleibt bis zum geprüften Umzug ein bestehender Teststand.
 | --- | --- |
 | Git-Branch | `codex/germany-storage` |
 | Hosting | Render, Region Frankfurt (Deutschland) |
+| Öffentliche Adresse | `https://finalsnap.de` (mit automatischer `www`-Weiterleitung) |
 | Instanzen | 1 (SQLite wird nicht horizontal geteilt) |
 | Dauer-Volume-Mount | `/data` |
 | DB_PATH | `/data/events.db` |
@@ -80,7 +81,11 @@ verwendet werden. Er bleibt bis zum geprüften Umzug ein bestehender Teststand.
 | S3_MAX_STORAGE_BYTES | 900 GiB standardmäßig; stoppt Uploads vor dem 1-TB-Speicherkontingent |
 
 `render.yaml` beschreibt den neuen Dienst: Frankfurt, Starter-Plan, 10-GB-Datenträger,
-`/health` und zunächst deaktivierte automatische Deploys. Die Blueprint-Datei legt
+`finalsnap.de`, `/health` und zunächst deaktivierte automatische Deploys. Render
+stellt nach erfolgreicher DNS-Prüfung TLS bereit. Die DNS-Einträge müssen beim
+Domainanbieter auf den neuen Render-Dienst zeigen; vorhandene Website-Einträge erst
+ändern, wenn klar ist, dass `finalsnap.de` künftig FinalSnap ausliefern soll. Die
+Blueprint-Datei legt
 keinen Hetzner-Bucket an. Dafür zuerst einen privaten Bucket in `nbg1` oder `fsn1`
 und Zugangsdaten erstellen; die S3-Werte sowie den Brevo-Schlüssel beim Einrichten
 des Render-Blueprints als geheime Variablen setzen. Vor dem kostenpflichtigen
