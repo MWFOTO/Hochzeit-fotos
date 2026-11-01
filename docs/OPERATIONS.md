@@ -8,8 +8,8 @@ Stand: 1. November 2026. Arbeitsunterlage; der Live-Betrieb und externe Überwac
 - Im Render-Arbeitsbereich „test hochzeit“ läuft `Hochzeit-fotos` (`srv-da2ohr49v7es73cnb2j0`) in Ohio, USA. Er hängt an `https://hochzeit-fotos.onrender.com` und nutzt eine 1-GB-Persistent-Disk unter `/data`. Diese Umgebung erfüllt die Standortvorgabe nicht und darf nicht für den Verkauf mit Kundendaten weiterverwendet werden.
 - Im Render-Arbeitsbereich „hochzeit upload“ wurde kein Dienst gefunden. Dort ist nach jetzigem Stand nichts Laufendes zu löschen.
 - Render bietet Frankfurt als deutsche Region. Da Render die Region eines bestehenden Dienstes nicht nachträglich ändert, braucht es für den Umzug einen neuen Dienst in Frankfurt.
-- Das Zielsetup aus Render Frankfurt und privatem Hetzner Object Storage in Nürnberg oder Falkenstein ist vorbereitet, aber noch nicht eingerichtet oder bereitgestellt.
-- Der neue Render-Dienst, der Hetzner-Bucket, Datenbank-Backups und externe Alarmierung dürfen nicht als eingerichtet gelten, bis sie im jeweiligen Anbieter-Konto geprüft wurden.
+- Das Zielsetup aus Render Frankfurt und privatem Hetzner Object Storage ist vorbereitet. Der Betreiber meldet, den Bucket erstellt zu haben; Standort, Sichtbarkeit und Zugangsdaten sind noch nicht über die Anbieteroberfläche verifiziert.
+- Der neue Render-Dienst, Datenbank-Backups und externe Alarmierung sind noch nicht eingerichtet oder bereitgestellt.
 - Brevo dokumentiert EU-weite Verarbeitung und Datenspeicherung auch in Belgien; das erfüllt keine strikte Deutschland-only-Vorgabe. GitHub als Quellcode-/Build-Dienst und Stripe für spätere Zahlungen benötigen eine eigene Standortprüfung. Bis zur Klärung ist eine vollständige Deutschland-Zusage für alle Dienste nicht belegt.
 - Die App nutzt SQLite und ist auf eine Instanz ausgelegt. Keine zweite Instanz und keine horizontale Skalierung aktivieren, solange die Datenbank nicht umgestellt ist.
 - Zahlungen bleiben im Stripe-Testmodus.
@@ -27,6 +27,7 @@ Stand: 1. November 2026. Arbeitsunterlage; der Live-Betrieb und externe Überwac
 - Im Object-Storage-Betrieb stoppt die App Uploads standardmäßig bei 900 GiB gemeinsam genutzter Fotos. Das lässt Abstand zum 1-TB-Kontingent; es ist keine separate Warnung im Hostinganbieter.
 - Bei lokalem Speicher stoppt die App Uploads mit weniger als 100 MiB freiem Speicher. Der Veranstalterbereich zeigt den freien Speicher an.
 - Gespeicherte Bilder sind verkleinerte JPEGs; Originaldateien werden nicht aufbewahrt.
+- Hetzner Object Storage verschlüsselt Objekte nicht automatisch im Ruhezustand. Der Produktivcode verlangt für S3-Betrieb SSE-C mit `S3_SSE_C_KEY`; der 32-Byte-Schlüssel muss getrennt vom Hosting-Secret gesichert werden. Bei Schlüsselverlust sind die verschlüsselten Fotos nicht wiederherstellbar. Objektmetadaten werden durch SSE-C nicht verschlüsselt.
 - Der stündliche Löschlauf und der Startlauf entfernen App-Fotos nach Ende der Downloadphase. Der tatsächliche Ablauf muss vor Verkauf mit einem Testevent bestätigt werden.
 - Ein Hosting-Datenträger oder Object Storage ist kein geprüftes, unabhängiges Backup.
 

@@ -78,6 +78,7 @@ verwendet werden. Er bleibt bis zum geprüften Umzug ein bestehender Teststand.
 | S3_ENDPOINT | `https://nbg1.your-objectstorage.com` oder `https://fsn1.your-objectstorage.com` |
 | S3_REGION | passend zum Endpunkt: `nbg1` oder `fsn1` |
 | S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY | nur als geheime Hosting-Variablen eintragen |
+| S3_SSE_C_KEY | Base64-kodierter, zufälliger 32-Byte-Schlüssel; als Render-Secret und separat im Passwortmanager speichern |
 | S3_MAX_STORAGE_BYTES | 900 GiB standardmäßig; stoppt Uploads vor dem 1-TB-Speicherkontingent |
 
 `render.yaml` beschreibt den neuen Dienst: Frankfurt, Starter-Plan, 10-GB-Datenträger,
@@ -88,8 +89,12 @@ Domainanbieter auf den neuen Render-Dienst zeigen; vorhandene Website-Einträge 
 Blueprint-Datei legt
 keinen Hetzner-Bucket an. Dafür zuerst einen privaten Bucket in `nbg1` oder `fsn1`
 und Zugangsdaten erstellen; die S3-Werte sowie den Brevo-Schlüssel beim Einrichten
-des Render-Blueprints als geheime Variablen setzen. Vor dem kostenpflichtigen
-Blueprint-Sync den im Render-Dashboard angezeigten Gesamtpreis bestätigen.
+des Render-Blueprints als geheime Variablen setzen. Zusätzlich vor dem ersten
+Deploy einen zufälligen 32-Byte-SSE-C-Schlüssel erzeugen und sowohl als
+`S3_SSE_C_KEY` in Render als auch getrennt in einem Passwortmanager sichern.
+Hetzner speichert diesen Schlüssel nicht; geht er verloren, lassen sich die
+verschlüsselten Fotos nicht mehr lesen. Vor dem kostenpflichtigen Blueprint-Sync
+den im Render-Dashboard angezeigten Gesamtpreis bestätigen.
 
 Die App wird aus dem GitHub-Zweig auf Render bereitgestellt. Datenbank und
 temporäre Uploads liegen auf einem dauerhaften Volume am deutschen Standort.

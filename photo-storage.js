@@ -1,5 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 
 function createPhotoStorage(config = {}, dependencies = {}) {
   const bucket = String(config.S3_BUCKET || '').trim();
@@ -12,6 +13,7 @@ function createPhotoStorage(config = {}, dependencies = {}) {
     return {
       mode: 'local',
       root,
+      check: async () => fs.promises.access(root, fs.constants.R_OK | fs.constants.W_OK),
       put: async () => {},
       getStream: async (eventId, filename) => fs.createReadStream(path.join(root, eventId, filename)),
       deletePhoto: async (eventId, filename) => fs.promises.rm(path.join(root, eventId, filename), {force: true}),
@@ -29,9 +31,21 @@ function createPhotoStorage(config = {}, dependencies = {}) {
   const endpoint = String(config.S3_ENDPOINT).replace(/\/$/, '');
   const endpointRegion = /^https:\/\/(fsn1|nbg1)\.your-objectstorage\.com$/.exec(endpoint)?.[1];
   if (!endpointRegion || endpointRegion !== config.S3_REGION) throw new Error('Für den deutschen Fotospeicher muss S3_ENDPOINT zu S3_REGION fsn1 oder nbg1 passen.');
+  const encodedEncryptionKey = String(config.S3_SSE_C_KEY || '').trim();
+  if (config.NODE_ENV === 'production' && !encodedEncryptionKey) throw new Error('Im Produktivbetrieb benötigt der Fotospeicher einen S3_SSE_C_KEY für die Verschlüsselung.');
+  let encryption = {};
+  if (encodedEncryptionKey) {
+    const key = Buffer.from(encodedEncryptionKey, 'base64');
+    if (key.length !== 32 || key.toString('base64') !== encodedEncryptionKey) throw new Error('S3_SSE_C_KEY muss ein Base64-kodierter Schlüssel mit genau 32 Bytes sein.');
+    encryption = {
+      SSECustomerAlgorithm: 'AES256',
+      SSECustomerKey: key,
+      SSECustomerKeyMD5: crypto.createHash('md5').update(key).digest('base64'),
+    };
+  }
 
   const sdk = dependencies.sdk || require('@aws-sdk/client-s3');
-  const {S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, ListObjectsV2Command, HeadObjectCommand} = sdk;
+  const {S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, ListObjectsV2Command, HeadObjectCommand, HeadBucketCommand} = sdk;
   const client = dependencies.client || new S3Client({
     endpoint,
     region: config.S3_REGION,
@@ -43,8 +57,8 @@ function createPhotoStorage(config = {}, dependencies = {}) {
     },
   });
   const keyFor = (eventId, filename) => `events/${eventId}/${filename}`;
-  const send = async command => {
-    try { return await client.send(command); }
+  const send = async (command, options) => {
+    try { return await client.send(command, options); }
     catch (cause) {
       const error = new Error('Fotospeicher derzeit nicht erreichbar. Bitte später erneut versuchen.');
       error.code = 'PHOTO_STORAGE_UNAVAILABLE';error.cause = cause;throw error;
@@ -54,6 +68,7 @@ function createPhotoStorage(config = {}, dependencies = {}) {
   return {
     mode: 's3',
     bucket,
+    check: async () => send(new HeadBucketCommand({Bucket: bucket}), {abortSignal: AbortSignal.timeout(3000)}),
     put: async (eventId, filename, filePath) => {
       await send(new PutObjectCommand({
         Bucket: bucket,
@@ -61,10 +76,11 @@ function createPhotoStorage(config = {}, dependencies = {}) {
         Body: fs.createReadStream(filePath),
         ContentType: 'image/jpeg',
         CacheControl: 'private, no-store',
+        ...encryption,
       }));
     },
     getStream: async (eventId, filename) => {
-      const result = await send(new GetObjectCommand({Bucket: bucket, Key: keyFor(eventId, filename)}));
+      const result = await send(new GetObjectCommand({Bucket: bucket, Key: keyFor(eventId, filename), ...encryption}));
       if (!result.Body) throw new Error('Foto konnte aus dem Object Storage nicht gelesen werden.');
       return result.Body;
     },
@@ -84,7 +100,7 @@ function createPhotoStorage(config = {}, dependencies = {}) {
     },
     photoSize: async (eventId, filename) => {
       try {
-        const result=await send(new HeadObjectCommand({Bucket: bucket, Key: keyFor(eventId, filename)}));
+        const result=await send(new HeadObjectCommand({Bucket: bucket, Key: keyFor(eventId, filename), ...encryption}));
         return Number(result.ContentLength);
       } catch (error) {
         if (error?.cause?.$metadata?.httpStatusCode === 404 || error?.cause?.name === 'NotFound' || error?.cause?.name === 'NoSuchKey') return null;

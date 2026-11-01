@@ -36,5 +36,7 @@ services:
         sync: false
       - key: S3_SECRET_ACCESS_KEY
         sync: false
+      - key: S3_SSE_C_KEY
+        sync: false
       - key: BREVO_API_KEY
         sync: false
