@@ -412,3 +412,21 @@ h1, h2, .brand {
   .plans-section .plan-features { font-size: 1.0625rem; }
   .success-page { margin: 24px 16px 0 !important; }
 }
+
+/* One gentle entrance per section; content remains visible without JavaScript. */
+html { scroll-behavior: smooth; }
+.scroll-reveal {
+  opacity: 1;
+  transform: none;
+  transition: opacity .55s ease-out, transform .55s cubic-bezier(.2,.65,.3,1);
+}
+.scroll-reveal.reveal-pending { opacity: 0; transform: translateY(18px); }
+.steps article.scroll-reveal:nth-child(2) { transition-delay: 70ms; }
+.steps article.scroll-reveal:nth-child(3) { transition-delay: 140ms; }
+.scroll-reveal:focus-within { opacity: 1; transform: none; transition-delay: 0s; }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .scroll-reveal, .scroll-reveal.reveal-pending {
+    opacity: 1; transform: none; transition: none;
+  }
+}
