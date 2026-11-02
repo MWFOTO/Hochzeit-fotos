@@ -455,7 +455,7 @@ function createApp(options = {}) {
   app.get('/event/:eventId/admin',loginRequired,owner,(req,res)=>res.redirect('/dashboard'));
   for(const [suffix,file] of [['','gallery.html'],['/upload','upload.html'],['/gallery','gallery.html'],['/slideshow','slideshow.html'],['/games','games.html'],['/guestbook','guestbook.html']]) app.get(`/event/:eventId${suffix}`,access,(req,res)=>res.sendFile(path.join(pub,file)));
   // Only intended public assets; source code and generic HTML routes cannot bypass guards.
-  for(const file of ['style.css','upload.js','slideshow.js','guest-access.js','account.js','verify-email.js','password-recovery.js','games.js','guestbook.js','johanna-bastian.png','photographer.webp']) app.get(`/${file}`,(req,res)=>res.sendFile(path.join(pub,file)));
+  for(const file of ['style.css','upload.js','slideshow.js','guest-access.js','account.js','verify-email.js','password-recovery.js','games.js','guestbook.js','johanna-bastian.png','photographer.webp','event-wedding.jpg','event-birthday.jpg','event-summer.jpg','event-company.jpg']) app.get(`/${file}`,(req,res)=>res.sendFile(path.join(pub,file)));
   // Liveness stays cheap for the host's restart check. Readiness checks critical dependencies.
   app.get('/health',(req,res)=>res.json({ok:true}));
   app.get('/ready',async(req,res)=>{
