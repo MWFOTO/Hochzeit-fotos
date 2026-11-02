@@ -28,7 +28,7 @@ Stand: 1. November 2026. Arbeitsunterlage; der Live-Betrieb und externe Überwac
 - Bei lokalem Speicher stoppt die App Uploads mit weniger als 100 MiB freiem Speicher. Der Veranstalterbereich zeigt den freien Speicher an.
 - Gespeicherte Bilder sind verkleinerte JPEGs; Originaldateien werden nicht aufbewahrt.
 - Hetzner Object Storage verschlüsselt Objekte nicht automatisch im Ruhezustand. Der Produktivcode verlangt für S3-Betrieb SSE-C mit `S3_SSE_C_KEY`; der 32-Byte-Schlüssel muss getrennt vom Hosting-Secret gesichert werden. Bei Schlüsselverlust sind die verschlüsselten Fotos nicht wiederherstellbar. Objektmetadaten werden durch SSE-C nicht verschlüsselt.
-- Der stündliche Löschlauf und der Startlauf entfernen App-Fotos nach Ende der Downloadphase. Der tatsächliche Ablauf muss vor Verkauf mit einem Testevent bestätigt werden.
+- Datierte Alben laufen 90 Kalendertage ab Veranstaltungsdatum (Europe/Berlin), ohne zusätzliche Downloadphase. Der Zugriff endet an der Frist; der stündliche Löschlauf und der Startlauf entfernen die Fotos. Undatierte Altalben behalten ihre bisherige Frist. Der tatsächliche Ablauf muss vor Verkauf mit einem Testevent bestätigt werden.
 - Ein Hosting-Datenträger oder Object Storage ist kein geprüftes, unabhängiges Backup.
 
 ## Sicherungen und Wiederherstellung
@@ -54,7 +54,7 @@ Supportfälle mit Event-Kurzname, Zeitpunkt, Gerät/Browser und genauer Fehlerme
 - **QR-Code oder Gästelink funktioniert nicht:** Eventstatus und Fristen prüfen. Ein erneuerter Gästelink macht bereits gedruckte QR-Codes ungültig.
 - **Foto-Upload schlägt fehl:** Verbindung, Dateityp, Dateigröße, Testfoto-Limit, Eventlimit und gemeinsamen Speicher prüfen.
 - **Foto fehlt:** Veranstalterfreigabe, Uploadstatus und Eventfilter prüfen. Gäste sehen auf ihrem Gerät nur die dort hochgeladenen Fotos; der Veranstalter sieht alle.
-- **Downloadphase:** Neue Uploads und Gästebucheinträge sind geschlossen. Fotos bleiben nur bis zum angezeigten Ende der Downloadfrist verfügbar.
+- **Ablauf:** Datierte Alben sind nach 90 Tagen vollständig gesperrt und werden beim nächsten Löschlauf entfernt. Eine getrennte Downloadphase gilt nur noch für undatierte Altalben.
 
 ## Noch einzurichten
 
@@ -63,3 +63,12 @@ Supportfälle mit Event-Kurzname, Zeitpunkt, Gerät/Browser und genauer Fehlerme
 - Warnungen für niedrigen Datenträgerspeicher, Annäherung an das 900-GiB-Limit und ungewöhnlichen Anbieter-Verbrauch einrichten.
 - SQLite- und Foto-Backups an einem unabhängigen Ziel einrichten und Wiederherstellung nachweisen.
 - Alarmkontakt, Supportzeiten und Verantwortlichkeit bei Störungen festlegen.
+
+## Prüfung der 90-Tage-Frist (2026-11-02)
+
+`node --test test/retention.test.js` prüft Vorabbuchung, Datumsänderung,
+Zahlungsbestätigung, Sommer-/Winterzeit, bestehende datierte Alben sowie Zugriffssperre
+und Löschung am Fristende für lokalen und S3-Speicher. Die bestehende Gesamtsuite
+hat bereits im unveränderten Ausgangsstand acht Fehler (unter anderem alte
+Event-Erstellung ohne das inzwischen erforderliche Veranstaltungsdatum).
+Erinnerungsmails vor der Löschung sind noch nicht implementiert.

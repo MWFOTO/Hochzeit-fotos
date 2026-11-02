@@ -116,10 +116,14 @@ ausgeführt werden, damit neue Fotos seit dem ersten Lauf ebenfalls enthalten si
 Fotos ohne Datenbankeintrag werden nicht automatisch übernommen; solche Altordner
 müssen vorher geprüft und zugeordnet werden.
 
-Nach dem gebuchten Albumzeitraum beginnt eine 90-tägige Downloadphase. In dieser
-Zeit bleiben Galerie, Diashow und Downloads erreichbar; neue Uploads sind gesperrt.
-Danach löscht der Anwendungsprozess die Fotos und ihre Datenbankeinträge stündlich
-und beim Start. Der private Hetzner-Bucket erhält keine pauschale S3-Löschfrist,
+Für Veranstaltungen mit Datum endet die gesamte Nutzung 90 Kalendertage nach
+dem Veranstaltungsdatum (Mitternacht Europe/Berlin). Buchung und Zahlung vorab
+verkürzen diese Frist nicht. Es gibt keine zusätzliche Downloadphase. Ab dem
+Ablauf sind Upload, Galerie und Download gesperrt; der nächste stündliche Löschlauf
+oder App-Start entfernt die Fotos und ihre Datenbankeinträge. Bereits vorhandene
+datierte Alben werden ebenfalls auf diese Frist begrenzt. Kürzere explizite
+Ablaufdaten bleiben wirksam. Undatierte Altalben behalten ihre bestehende Frist,
+bis ein Veranstaltungsdatum geprüft und zugeordnet wurde. Der private Hetzner-Bucket erhält keine pauschale S3-Löschfrist,
 die ein noch gültiges Album vorzeitig entfernen könnte. Backups der SQLite-Datenbank,
 Provider-Logs und deren eigene Aufbewahrungsfristen müssen vor dem Produktivbetrieb
 separat eingerichtet und geprüft werden.

@@ -13,8 +13,19 @@ const path = require('node:path');
 const { openDatabase } = require('./db');
 const { createPhotoStorage } = require('./photo-storage');
 const scrypt = promisify(crypto.scrypt);
-const PLANS = { event:{label:'FinalSnap Fotoalbum',months:12,priceCents:3490}, '1m':{label:'1 Monat (alt)',months:1,priceCents:1900,legacy:true}, '3m':{label:'3 Monate (alt)',months:3,priceCents:2900,legacy:true}, '6m':{label:'6 Monate (alt)',months:6,priceCents:3900,legacy:true}, '12m':{label:'12 Monate (alt)',months:12,priceCents:5900,legacy:true} };
+const PLANS = { event:{label:'FinalSnap Fotoalbum',months:3,retentionDays:90,priceCents:3490}, '1m':{label:'1 Monat (alt)',months:1,priceCents:1900,legacy:true}, '3m':{label:'3 Monate (alt)',months:3,priceCents:2900,legacy:true}, '6m':{label:'6 Monate (alt)',months:6,priceCents:3900,legacy:true}, '12m':{label:'12 Monate (alt)',months:12,priceCents:5900,legacy:true} };
 const RETENTION_MS = 90*86400000;
+// Event deadlines use calendar days in Europe/Berlin, including DST changes.
+function eventDeadline(date) {
+  const day=new Date(`${date}T12:00:00Z`);
+  day.setUTCDate(day.getUTCDate()+90);
+  return berlinMidnight(day.toISOString().slice(0,10));
+}
+function retentionUntil(e) {
+  if(!e?.expires_at)return null;
+  // Undated legacy albums keep their existing expiry/download policy.
+  return e.event_date ? Math.min(e.expires_at,eventDeadline(e.event_date)) : e.expires_at+RETENTION_MS;
+}
 const TEST_PHOTO_LIMIT = 25;
 const TEST_STORAGE_BYTES = 250*1024**2;
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
@@ -54,8 +65,8 @@ const startAt = e => e?.event_date ? berlinMidnight(e.event_date) : Number(e?.cr
 const testMode = e => !!e && (e.status==='trial' || (e.status==='paid' && startAt(e)>Date.now()));
 const eventStorageLimit = (e,cfg) => testMode(e)?Math.min(TEST_STORAGE_BYTES,Number(cfg.MAX_EVENT_BYTES||25*1024**3)):Number(cfg.MAX_EVENT_BYTES||25*1024**3);
 const eventPhotoLimit = (e,cfg={}) => testMode(e)?TEST_PHOTO_LIMIT:e?.status==='pilot'?Number(cfg.MAX_EVENT_PHOTOS||2000):null;
-const active = e => e && ['paid','trial','pilot'].includes(e.status) && e.expires_at > Date.now() && !e.deleted_at;
-const readable = e => e && ['paid','trial','pilot'].includes(e.status) && e.expires_at+RETENTION_MS > Date.now() && !e.deleted_at;
+const active = e => e && ['paid','trial','pilot'].includes(e.status) && Math.min(e.expires_at,retentionUntil(e)) > Date.now() && !e.deleted_at;
+const readable = e => e && ['paid','trial','pilot'].includes(e.status) && retentionUntil(e) > Date.now() && !e.deleted_at;
 function createApp(options = {}) {
   const cfg = {...process.env, ...options};
   const mailer=options.mailer||require('./mailer').createMailer(cfg);
@@ -103,7 +114,7 @@ function createApp(options = {}) {
       if (session.currency !== 'eur' || session.amount_total !== payment.amount_cents || session.mode !== 'payment' || session.metadata?.paymentId !== payment.id || session.metadata?.eventId !== payment.event_id) throw new Error('Zahlungsdaten stimmen nicht überein');
       const e = lookup(payment.event_id);
       if (payment.status !== 'paid' && ['pending','trial'].includes(e.status) && !e.deleted_at) {
-        const eventEnd=e.event_date?berlinMidnight(addMonthsToDate(e.event_date,12)):e.expires_at||Date.now()+payment.months*30*86400000;
+        const eventEnd=e.event_date?eventDeadline(e.event_date):e.expires_at||Date.now()+payment.months*30*86400000;
         db.prepare("UPDATE events SET status='paid', expires_at=? WHERE id=?").run(eventEnd,e.id);
         db.prepare("UPDATE payments SET status='paid' WHERE id=?").run(payment.id);
       }
@@ -210,14 +221,14 @@ function createApp(options = {}) {
     const events=db.prepare(`SELECT e.*, COUNT(p.id) photoCount, COALESCE(SUM(p.bytes),0) storageBytes
       FROM events e LEFT JOIN photos p ON p.event_id=e.id
       WHERE e.owner_id=? AND e.deleted_at IS NULL GROUP BY e.id ORDER BY e.created_at DESC`).all(req.user.id);
-    res.json({events:events.map(e=>({...e,storageLimitBytes:eventStorageLimit(e,cfg),photoLimit:eventPhotoLimit(e,cfg),checkoutStarted:!!db.prepare('SELECT 1 FROM payments WHERE event_id=?').get(e.id),readOnly:!active(e)&&readable(e),retentionUntil:e.expires_at?e.expires_at+RETENTION_MS:null,startsAt:startAt(e),guestUrl:readable(e)?`${baseUrl.origin}/event/${e.id}?token=${e.guest_token}`:null}))});
+    res.json({events:events.map(e=>({...e,expires_at:e.event_date?retentionUntil(e):e.expires_at,storageLimitBytes:eventStorageLimit(e,cfg),photoLimit:eventPhotoLimit(e,cfg),checkoutStarted:!!db.prepare('SELECT 1 FROM payments WHERE event_id=?').get(e.id),readOnly:!active(e)&&readable(e),retentionUntil:retentionUntil(e),startsAt:startAt(e),guestUrl:readable(e)?`${baseUrl.origin}/event/${e.id}?token=${e.guest_token}`:null}))});
   });
   app.post('/api/events',loginRequired,(req,res)=>{
     const id=String(req.body.eventId||''); const plan=PLANS.event; const title=String(req.body.title||'').trim(),eventDate=String(req.body.eventDate||'');
     if(!/^[a-z0-9][a-z0-9_-]{2,63}$/.test(id) || !title || title.length>120 || !validEventDate(eventDate)) return fail(res,400,'Bitte Event-ID, Titel und ein Veranstaltungsdatum innerhalb der nächsten 24 Monate angeben.');
     if(lookup(id) || fs.existsSync(path.join(root,id))) return fail(res,409,'Event-ID bereits vergeben, auch für Bestandsdaten.');
     const trial=req.body.trial!==false&&!db.prepare('SELECT 1 FROM events WHERE owner_id=? AND trial_used=1').get(req.user.id);
-    const expiresAt=berlinMidnight(addMonthsToDate(eventDate,12));
+    const expiresAt=eventDeadline(eventDate);
     db.prepare('INSERT INTO events (id,email,plan,amount_cents,status,created_at,owner_id,title,event_date,guest_token,moderation,guestbook_moderation,expires_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)').run(id,req.user.email,'event',plan.priceCents,'pending',Date.now(),req.user.id,title,eventDate,random(),req.body.moderation===true?1:0,req.body.guestbookModeration===false?0:1,expiresAt);
     if(trial)db.prepare("UPDATE events SET status='trial', trial_used=1 WHERE id=?").run(id);
     res.status(201).json({eventId:id,trial:!!trial,eventDate});
@@ -256,7 +267,7 @@ function createApp(options = {}) {
   app.get('/api/checkout/:sessionId',loginRequired,(req,res)=>{
     const e=db.prepare('SELECT * FROM events WHERE stripe_session_id=?').get(req.params.sessionId);
     if(!own(req,e)) return fail(res,404,'Bestellung nicht gefunden.');
-    res.json({eventId:e.id,status:e.status,expiresAt:e.expires_at});
+    res.json({eventId:e.id,status:e.status,expiresAt:e.event_date?retentionUntil(e):e.expires_at});
   });
   function access(req,res,next) {
     const e=lookup(req.params.eventId);
@@ -270,7 +281,7 @@ function createApp(options = {}) {
       let guestToken=match?.[1];
       if(!guestToken) {
         guestToken=random();
-        res.cookie(cookieName,guestToken,{httpOnly:true,secure:baseUrl.protocol==='https:',sameSite:'lax',maxAge:Math.max(0,Math.min(500*86400000,e.expires_at+RETENTION_MS-Date.now())),path:'/'});
+        res.cookie(cookieName,guestToken,{httpOnly:true,secure:baseUrl.protocol==='https:',sameSite:'lax',maxAge:Math.max(0,Math.min(500*86400000,retentionUntil(e)-Date.now())),path:'/'});
       }
       req.guestTokenHash=hash(guestToken);
     }
@@ -281,7 +292,7 @@ function createApp(options = {}) {
     if(req.body.eventDate!==undefined) {
       if(startAt(req.event)<=Date.now())return fail(res,409,'Das Veranstaltungsdatum kann nach Beginn der Sammlung nicht mehr geändert werden.');
       if(!validEventDate(req.body.eventDate))return fail(res,400,'Bitte ein gültiges Veranstaltungsdatum innerhalb der nächsten 24 Monate angeben.');
-      updates.push(['event_date',req.body.eventDate]);updates.push(['expires_at',berlinMidnight(addMonthsToDate(req.body.eventDate,12))]);
+      updates.push(['event_date',req.body.eventDate]);updates.push(['expires_at',eventDeadline(req.body.eventDate)]);
     }
     if(typeof req.body.moderation==='boolean')updates.push(['moderation',req.body.moderation?1:0]);
     if(typeof req.body.guestbookModeration==='boolean')updates.push(['guestbook_moderation',req.body.guestbookModeration?1:0]);
@@ -348,7 +359,7 @@ function createApp(options = {}) {
     const photoCount=canManage
       ? db.prepare('SELECT COUNT(*) count FROM photos WHERE event_id=?').get(req.event.id).count
       : db.prepare('SELECT COUNT(*) count FROM photos WHERE event_id=? AND uploader_token_hash=?').get(req.event.id,req.guestTokenHash).count;
-    res.json({title:req.event.title,eventDate:req.event.event_date,startsAt:startAt(req.event),expiresAt:req.event.expires_at,retentionUntil:req.event.expires_at+RETENTION_MS,readOnly:!active(req.event),moderation:!!req.event.moderation,guestbookModeration:!!req.event.guestbook_moderation,trial:req.event.status==='trial',preEventTest:req.event.status==='paid'&&startAt(req.event)>Date.now(),testMode:testMode(req.event),photoCount,photoLimit:eventPhotoLimit(req.event,cfg),storageBytes:Number(db.prepare('SELECT COALESCE(SUM(bytes),0) bytes FROM photos WHERE event_id=?').get(req.event.id).bytes),storageLimitBytes:eventStorageLimit(req.event,cfg),pilot:req.event.status==='pilot',canManage});
+    res.json({title:req.event.title,eventDate:req.event.event_date,startsAt:startAt(req.event),expiresAt:req.event.event_date?retentionUntil(req.event):req.event.expires_at,retentionUntil:retentionUntil(req.event),readOnly:!active(req.event),moderation:!!req.event.moderation,guestbookModeration:!!req.event.guestbook_moderation,trial:req.event.status==='trial',preEventTest:req.event.status==='paid'&&startAt(req.event)>Date.now(),testMode:testMode(req.event),photoCount,photoLimit:eventPhotoLimit(req.event,cfg),storageBytes:Number(db.prepare('SELECT COALESCE(SUM(bytes),0) bytes FROM photos WHERE event_id=?').get(req.event.id).bytes),storageLimitBytes:eventStorageLimit(req.event,cfg),pilot:req.event.status==='pilot',canManage});
   });
   app.get('/api/event/:eventId/guestbook',access,(req,res)=>{
     const entries=own(req,req.event)
@@ -422,7 +433,7 @@ function createApp(options = {}) {
   }
   app.delete('/api/event/:eventId',loginRequired,owner,wrap(async(req,res)=>{if(!await erase(req.event)) return fail(res,409,'Upload läuft. Bitte erneut versuchen.');res.json({success:true});}));
   function cleanup() {
-    const expired=db.prepare("SELECT * FROM events WHERE owner_id IS NOT NULL AND deleted_at IS NULL AND status IN ('paid','trial','pilot') AND expires_at<=?").all(Date.now()-RETENTION_MS);
+    const expired=db.prepare("SELECT * FROM events WHERE owner_id IS NOT NULL AND deleted_at IS NULL AND status IN ('paid','trial','pilot') ").all().filter(e=>retentionUntil(e)<=Date.now());
     const pruneRecords=()=>{
       db.prepare('DELETE FROM sessions WHERE expires_at<=?').run(Date.now());
       db.prepare('DELETE FROM email_verifications WHERE expires_at<=?').run(Date.now());
@@ -494,4 +505,4 @@ if(require.main===module) {
   process.once('SIGTERM',()=>shutdown('SIGTERM'));
   process.once('SIGINT',()=>shutdown('SIGINT'));
 }
-module.exports={createApp};
+module.exports={createApp,eventDeadline,retentionUntil};

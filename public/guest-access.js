@@ -74,7 +74,7 @@
       const uploadLink=document.getElementById('upload-link');if(uploadLink)uploadLink.hidden=info.readOnly;
       for(const id of ['upload-trigger','camera-trigger']){const button=document.getElementById(id);if(button)button.hidden=info.readOnly;}
       const hint = document.getElementById('retention-hint');
-      if (hint && info.expiresAt) hint.textContent = `Der Albumzeitraum endet am ${new Date(info.expiresAt).toLocaleDateString('de-DE')}. Du kannst Fotos noch bis zum ${new Date(info.retentionUntil).toLocaleDateString('de-DE')} ansehen und herunterladen. Danach werden sie gelöscht.`;
+      if (hint && info.expiresAt) hint.textContent = info.eventDate ? `Fotos sind bis zum ${new Date(info.retentionUntil).toLocaleDateString('de-DE')} verfügbar: 90 Tage ab Veranstaltungsdatum. Bitte vorher herunterladen; am Ablaufdatum werden sie automatisch gelöscht.` : `Der Albumzeitraum endet am ${new Date(info.expiresAt).toLocaleDateString('de-DE')}. Du kannst Fotos noch bis zum ${new Date(info.retentionUntil).toLocaleDateString('de-DE')} ansehen und herunterladen. Danach werden sie gelöscht.`;
       const link = document.getElementById('gallery-link');
       if (link) link.href = window.guestUrl(`/event/${encodeURIComponent(eventId)}/gallery`);
     };
