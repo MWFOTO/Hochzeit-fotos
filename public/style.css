@@ -946,6 +946,10 @@ label { color: #e7e8ec; font-size: 1rem; }
 .quota-notice, .status.notice { color: var(--color-text); background: #dd75c914; border: 1px solid #dd75c933; }
 .quota-notice p, .status.notice { color: #e4d2e2; }
 .lightbox { background: #17191df5; }
+.slideshow-placeholder { font-size: 1.45rem; }
+.slideshow-placeholder .qr-hint, .slide-counter, .controls-hint,
+.new-photo-badge, .pause-badge { font-size: 1rem; line-height: 1.55; }
+.new-photo-badge, .pause-badge { padding: 8px 16px; }
 .lightbox-actions a { color: #111a1d; background: var(--color-accent); }
 .success-page { box-shadow: 0 18px 50px #0003; }
 .success-page .link-card { color: var(--color-text); background: var(--panel-raised); border-color: var(--line); }
