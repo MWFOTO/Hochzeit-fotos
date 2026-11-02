@@ -325,3 +325,90 @@ h1,h2,.brand{font-family:'Arial Black','Trebuchet MS','Segoe UI',sans-serif;font
 @media(max-width:760px){.plans-section{padding-top:42px}.plans-section .plan-grid{grid-template-columns:1fr}.plans-section .plan-card{padding:22px}.plans-heading{text-align:left}}
 .offer-summary{align-self:stretch;padding:16px 20px;background:#f2f6fc;border:1px solid #d8e0ea;border-radius:16px}.offer-summary p{margin:6px 0 0;font-size:.9rem}.service-addons .steps article{display:flex;flex-direction:column;align-items:flex-start;gap:8px}.service-addons .steps article .button{margin-top:auto}
 .timeline-preview{grid-column:1/-1}.timeline-preview ul{margin:8px 0 0;padding-left:22px}.timeline-preview li{margin:5px 0;color:var(--color-muted);font-size:.9rem}
+
+/* Readable booking information: prices, benefits and timing belong together. */
+body {
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+}
+h1, h2, .brand {
+  font-family: 'Trebuchet MS', system-ui, 'Segoe UI', sans-serif;
+  font-weight: 800;
+  letter-spacing: -.03em;
+}
+.landing-page {
+  font-size: 1.125rem;
+  line-height: 1.7;
+}
+.landing-page .hero-copy > p,
+.landing-page .plans-intro {
+  font-size: 1.1875rem;
+  color: #40516a;
+}
+.landing-page .small,
+.landing-page small {
+  font-size: 1.0625rem;
+  font-weight: 600;
+  line-height: 1.7;
+  color: #40516a;
+}
+.plans-section > .small {
+  max-width: 700px;
+  margin: 24px auto;
+  text-align: center;
+}
+.plans-section .plan-card {
+  padding: clamp(24px, 4vw, 40px);
+  gap: 4px;
+}
+.plans-section .plan-card h3 { font-size: 1.5rem; }
+.plans-section .plan-price {
+  font-size: clamp(2.75rem, 7vw, 3.5rem);
+  line-height: 1.15;
+  margin-top: 22px;
+}
+.plans-section .plan-billing {
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: #40516a;
+  margin: 8px 0 20px;
+}
+.plans-section .plan-details {
+  font-size: 1.125rem;
+  line-height: 1.65;
+  padding: 18px;
+}
+.plans-section .plan-features {
+  font-size: 1.125rem;
+  line-height: 1.65;
+  color: #34465f;
+}
+.plans-section .plan-features li { padding: 9px 0; }
+.plans-section .plan-period {
+  font-size: 1.0625rem;
+  font-weight: 650;
+  line-height: 1.65;
+  color: #40516a;
+}
+.landing-page .test-notice {
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.65;
+}
+.success-page {
+  font-size: 1.125rem;
+  line-height: 1.7;
+  box-shadow: 0 16px 44px rgba(22,47,82,.08);
+}
+.success-page h1 { font-size: clamp(2rem, 6vw, 2.75rem); }
+.success-page #status-text { font-weight: 650; color: #34465f; }
+.success-page .pending-msg,
+.success-page .link-card .link-desc,
+.success-page .link-card .link-url { font-size: 1.0625rem; }
+.success-page .link-card .link-title { font-size: 1.125rem; font-weight: 750; }
+.success-page .link-list > a { font-weight: 700; line-height: 1.7; }
+@media (max-width: 760px) {
+  .landing-page { font-size: 1.0625rem; }
+  .landing-page .hero-copy > p { font-size: 1.125rem; }
+  .plans-section .plan-features { font-size: 1.0625rem; }
+  .success-page { margin: 24px 16px 0 !important; }
+}
