@@ -95,6 +95,7 @@
         link(photoActions,'Fotoaufgaben',event.guestUrl.replace('?','/games?'));
         link(photoActions,'Gästebuch ansehen',event.guestUrl.replace('?','/guestbook?'));
         link(accessActions,'Gästebuch verwalten',`/event/${encodeURIComponent(event.id)}/guestbook`);
+        link(accessActions,'Design & Drucken',`/event/${encodeURIComponent(event.id)}/design`);
         link(accessActions,'QR-Code herunterladen',`/api/event/${event.id}/qr`);
         button(accessActions,'QR-Karte drucken',async()=>{
           const blob=await (await fetch(`/api/event/${event.id}/qr`)).blob();

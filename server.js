@@ -103,6 +103,21 @@ function createApp(options = {}) {
   app.use((req,res,next)=>{ res.set('Cache-Control','no-store'); next(); });
   const lookup = id => db.prepare('SELECT * FROM events WHERE id=?').get(id);
   const own = (req,e) => !!(req.user && e && e.owner_id === req.user.id);
+  const readDesign = e => {
+    try { return JSON.parse(e?.design_json || '{}'); }
+    catch { return {}; }
+  };
+  const publicDesign = e => {
+    const design=readDesign(e);
+    return {
+      title:typeof design.title==='string'?design.title:e?.title||'Veranstaltung',
+      occasion:['wedding','birthday','summer','company','jubilee','graduation','other'].includes(design.occasion)?design.occasion:'other',
+      theme:['afterglow','midnight','garden'].includes(design.theme)?design.theme:'afterglow',
+      accent:/^#[0-9a-f]{6}$/i.test(design.accent||'')?design.accent:'#e99a69',
+      font:['classic','palatino','modern','verdana','relaxed','typewriter'].includes(design.font)?design.font:'classic',
+      hasCover:typeof design.coverFilename==='string'&&/^[a-z0-9-]+\.jpg$/.test(design.coverFilename)
+    };
+  };
   function fulfill(notification) {
     const session = notification.data.object;
     if (notification.livemode !== false || session.livemode !== false) throw new Error('Live-Webhook gesperrt');
@@ -287,6 +302,24 @@ function createApp(options = {}) {
     }
     req.event=e; next();
   }
+  app.get('/api/event/:eventId/design',loginRequired,owner,(req,res)=>{
+    if(!readable(req.event))return fail(res,402,'Für dieses Event ist noch kein Gästezugang verfügbar.');
+    res.json({event:{id:req.event.id,title:req.event.title,eventDate:req.event.event_date},design:publicDesign(req.event)});
+  });
+  app.patch('/api/event/:eventId/design',loginRequired,owner,(req,res)=>{
+    if(!readable(req.event))return fail(res,402,'Für dieses Event ist noch kein Gästezugang verfügbar.');
+    const value=req.body?.design;
+    if(!value||typeof value!=='object'||Array.isArray(value))return fail(res,400,'Bitte ein gültiges Design senden.');
+    const title=String(value.title||'').trim();
+    const occasion=String(value.occasion||'');
+    const theme=String(value.theme||'');
+    const accent=String(value.accent||'');
+    const font=String(value.font||'');
+    if(!title||title.length>80||!['wedding','birthday','summer','company','jubilee','graduation','other'].includes(occasion)||!['afterglow','midnight','garden'].includes(theme)||!/^#[0-9a-f]{6}$/i.test(accent)||!['classic','palatino','modern','verdana','relaxed','typewriter'].includes(font))return fail(res,400,'Bitte prüfe Titel, Anlass, Vorlage, Farbe und Schrift.');
+    const design={...readDesign(req.event),title,occasion,theme,accent,font};
+    db.prepare('UPDATE events SET design_json=? WHERE id=?').run(JSON.stringify(design),req.event.id);
+    res.json({success:true,design:publicDesign(lookup(req.event.id))});
+  });
   app.patch('/api/event/:eventId',loginRequired,owner,(req,res)=>{
     const updates=[];
     if(req.body.eventDate!==undefined) {
@@ -309,6 +342,42 @@ function createApp(options = {}) {
   // Disk staging bounds RAM usage. Re-encoding validates content and strips EXIF/GPS.
   const temp=path.join(root,'.tmp');fs.mkdirSync(temp,{recursive:true});
   const upload=multer({dest:temp,limits:{fileSize:20*1024*1024,files:10,fields:0,parts:10}}).array('photos',10);
+  const designCoverUpload=multer({dest:temp,limits:{fileSize:8*1024*1024,files:1,fields:0,parts:1}}).single('cover');
+  app.get('/api/event/:eventId/design-cover',access,wrap(async(req,res)=>{
+    const filename=readDesign(req.event).coverFilename;
+    if(typeof filename!=='string'||!/^design-[a-z0-9-]+\.jpg$/.test(filename))return fail(res,404,'Kein Titelmotiv vorhanden.');
+    res.type('jpeg').set('Cache-Control','private, no-store');
+    if(photoStorage.mode==='local')return res.sendFile(path.join(root,req.event.id,filename));
+    const stream=await photoStorage.getStream(req.event.id,filename);
+    stream.on('error',()=>res.destroy());stream.pipe(res);
+  }));
+  app.post('/api/event/:eventId/design-cover',loginRequired,owner,uploadLimit,(req,res,next)=>designCoverUpload(req,res,err=>err?next(err):next()),wrap(async(req,res)=>{
+    if(!readable(req.event))return fail(res,402,'Für dieses Event ist noch kein Gästezugang verfügbar.');
+    if(!req.file)return fail(res,400,'Bitte wähle ein Titelmotiv aus.');
+    const processed=path.join(temp,`${random()}.jpg`);
+    const filename=`design-${crypto.randomUUID()}.jpg`;
+    let stored=false;
+    try {
+      await sharp(req.file.path).rotate().resize(2000,2000,{fit:'inside',withoutEnlargement:true}).jpeg({quality:84,mozjpeg:true}).toFile(processed);
+      if(photoStorage.mode==='local') {
+        const eventDirectory=path.join(root,req.event.id);
+        await fs.promises.mkdir(eventDirectory,{recursive:true});
+        await fs.promises.copyFile(processed,path.join(eventDirectory,filename));
+      } else await photoStorage.put(req.event.id,filename,processed);
+      stored=true;
+      const previous=readDesign(req.event).coverFilename;
+      const next={...readDesign(req.event),coverFilename:filename};
+      db.prepare('UPDATE events SET design_json=? WHERE id=?').run(JSON.stringify(next),req.event.id);
+      if(typeof previous==='string'&&/^design-[a-z0-9-]+\.jpg$/.test(previous))await photoStorage.deletePhoto(req.event.id,previous);
+      res.json({success:true,design:publicDesign(lookup(req.event.id))});
+    } catch(error) {
+      if(stored)try{await photoStorage.deletePhoto(req.event.id,filename);}catch(cleanupError){console.error('Designmotiv konnte nicht aufgeräumt werden:',cleanupError.message);}
+      throw error;
+    } finally {
+      fs.rmSync(req.file.path,{force:true});
+      fs.rmSync(processed,{force:true});
+    }
+  }));
   const busy=new Set();
   let remoteStorageReservedBytes=0;
   app.post('/api/event/:eventId/upload',uploadLimit,access,(req,res,next)=>{
@@ -359,7 +428,7 @@ function createApp(options = {}) {
     const photoCount=canManage
       ? db.prepare('SELECT COUNT(*) count FROM photos WHERE event_id=?').get(req.event.id).count
       : db.prepare('SELECT COUNT(*) count FROM photos WHERE event_id=? AND uploader_token_hash=?').get(req.event.id,req.guestTokenHash).count;
-    res.json({title:req.event.title,eventDate:req.event.event_date,startsAt:startAt(req.event),expiresAt:req.event.event_date?retentionUntil(req.event):req.event.expires_at,retentionUntil:retentionUntil(req.event),readOnly:!active(req.event),moderation:!!req.event.moderation,guestbookModeration:!!req.event.guestbook_moderation,trial:req.event.status==='trial',preEventTest:req.event.status==='paid'&&startAt(req.event)>Date.now(),testMode:testMode(req.event),photoCount,photoLimit:eventPhotoLimit(req.event,cfg),storageBytes:Number(db.prepare('SELECT COALESCE(SUM(bytes),0) bytes FROM photos WHERE event_id=?').get(req.event.id).bytes),storageLimitBytes:eventStorageLimit(req.event,cfg),pilot:req.event.status==='pilot',canManage});
+    res.json({title:req.event.title,eventDate:req.event.event_date,startsAt:startAt(req.event),expiresAt:req.event.event_date?retentionUntil(req.event):req.event.expires_at,retentionUntil:retentionUntil(req.event),readOnly:!active(req.event),moderation:!!req.event.moderation,guestbookModeration:!!req.event.guestbook_moderation,trial:req.event.status==='trial',preEventTest:req.event.status==='paid'&&startAt(req.event)>Date.now(),testMode:testMode(req.event),photoCount,photoLimit:eventPhotoLimit(req.event,cfg),storageBytes:Number(db.prepare('SELECT COALESCE(SUM(bytes),0) bytes FROM photos WHERE event_id=?').get(req.event.id).bytes),storageLimitBytes:eventStorageLimit(req.event,cfg),pilot:req.event.status==='pilot',canManage,design:publicDesign(req.event)});
   });
   app.get('/api/event/:eventId/guestbook',access,(req,res)=>{
     const entries=own(req,req.event)
@@ -453,9 +522,28 @@ function createApp(options = {}) {
   app.get('/dashboard',(req,res)=>req.user?res.sendFile(path.join(pub,'dashboard.html')):res.redirect('/login'));
   app.get('/success',(req,res)=>req.user?res.sendFile(path.join(pub,'success.html')):res.redirect('/login'));
   app.get('/event/:eventId/admin',loginRequired,owner,(req,res)=>res.redirect('/dashboard'));
+  app.get('/event/:eventId/design',loginRequired,owner,(req,res)=>{
+    if(!readable(req.event))return res.redirect(`/dashboard?event=${encodeURIComponent(req.event.id)}`);
+    // The editor's print window builds a self-contained page with inline layout styles.
+    // Allow those styles only on this authenticated editor page; other pages keep Helmet's policy.
+    res.set('Content-Security-Policy',[
+      "default-src 'self'",
+      "base-uri 'self'",
+      "font-src 'self' https: data:",
+      "form-action 'self'",
+      "frame-ancestors 'self'",
+      "img-src 'self' data: blob:",
+      "object-src 'none'",
+      "script-src 'self' 'unsafe-inline'",
+      "script-src-attr 'none'",
+      "style-src 'self' 'unsafe-inline'",
+      ...(baseUrl.protocol==='https:'?['upgrade-insecure-requests']:[])
+    ].join('; '));
+    res.sendFile(path.join(pub,'design-editor.html'));
+  });
   for(const [suffix,file] of [['','gallery.html'],['/upload','upload.html'],['/gallery','gallery.html'],['/slideshow','slideshow.html'],['/games','games.html'],['/guestbook','guestbook.html']]) app.get(`/event/:eventId${suffix}`,access,(req,res)=>res.sendFile(path.join(pub,file)));
   // Only intended public assets; source code and generic HTML routes cannot bypass guards.
-  for(const file of ['style.css','upload.js','slideshow.js','guest-access.js','account.js','verify-email.js','password-recovery.js','games.js','guestbook.js','johanna-bastian.png','photographer.webp','event-wedding.jpg','event-birthday.jpg','event-summer.jpg','event-company.jpg']) app.get(`/${file}`,(req,res)=>res.sendFile(path.join(pub,file)));
+  for(const file of ['style.css','design-editor.css','design-editor.js','upload.js','slideshow.js','guest-access.js','account.js','verify-email.js','password-recovery.js','games.js','guestbook.js','johanna-bastian.png','photographer.webp','event-wedding.jpg','event-birthday.jpg','event-summer.jpg','event-company.jpg']) app.get(`/${file}`,(req,res)=>res.sendFile(path.join(pub,file)));
   // Liveness stays cheap for the host's restart check. Readiness checks critical dependencies.
   app.get('/health',(req,res)=>res.json({ok:true}));
   app.get('/ready',async(req,res)=>{

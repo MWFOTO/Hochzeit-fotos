@@ -51,8 +51,18 @@
   document.addEventListener('DOMContentLoaded',()=>{refreshQuota().catch(()=>{});if(!location.pathname.endsWith('/slideshow'))setInterval(()=>refreshQuota().catch(()=>{}),10000);});
   const applyEventInfo = info => {
     const update = () => {
+      const design=info.design||{};
+      const eventFonts={classic:'Georgia,serif',palatino:'Palatino Linotype,Palatino,serif',modern:'Arial,sans-serif',verdana:'Verdana,sans-serif',relaxed:'Trebuchet MS,sans-serif',typewriter:'Courier New,monospace'};
+      if(design.accent)document.documentElement.style.setProperty('--color-accent',design.accent);
+      if(design.theme)document.body.dataset.designTheme=design.theme;
       const title = document.querySelector('.event-title');
-      if (title && info.title) title.textContent = info.title;
+      if (title && (design.title||info.title)) {title.textContent=design.title||info.title;title.style.fontFamily=eventFonts[design.font]||eventFonts.classic;}
+      const galleryHeader=document.querySelector('.gallery-header');
+      if(galleryHeader&&design.hasCover) {
+        let cover=galleryHeader.querySelector('.event-design-cover');
+        if(!cover){cover=document.createElement('img');cover.className='event-design-cover';cover.alt='Titelmotiv der Veranstaltung';const eyebrow=galleryHeader.querySelector('.eyebrow');galleryHeader.insertBefore(cover,eyebrow||galleryHeader.firstChild);}
+        cover.src=window.guestUrl(`/api/event/${encodeURIComponent(eventId)}/design-cover`);
+      }
       const subtitle = document.querySelector('.event-subtitle');
       if (subtitle) subtitle.textContent = info.readOnly
         ? `Der Albumzeitraum ist beendet. Fotos bleiben bis ${new Date(info.retentionUntil).toLocaleDateString('de-DE')} abrufbar.`
