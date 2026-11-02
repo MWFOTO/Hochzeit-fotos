@@ -27,13 +27,13 @@ services:
       - key: MAX_EVENT_BYTES
         value: "26843545600"
       - key: S3_BUCKET
-        sync: TFJ9AIRNWZNPAQYS55TO
+        value: finalsnap-foto
       - key: S3_ENDPOINT
-        sync: https://nbg1.your-objectstorage.com
+        value: "https://nbg1.your-objectstorage.com"
       - key: S3_REGION
-        sync: nbg1
+        value: "nbg1"
       - key: S3_ACCESS_KEY_ID
-        sync: rROMc6qgyy6MyhrB552JzOq3sWHMb7J6vGpsMPeC
+        sync: false
       - key: S3_SECRET_ACCESS_KEY
         sync: false
       - key: S3_SSE_C_KEY
