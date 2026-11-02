@@ -13,7 +13,7 @@ const path = require('node:path');
 const { openDatabase } = require('./db');
 const { createPhotoStorage } = require('./photo-storage');
 const scrypt = promisify(crypto.scrypt);
-const PLANS = { event:{label:'FinalSnap Fotoalbum',months:3,retentionDays:90,priceCents:3490}, '1m':{label:'1 Monat (alt)',months:1,priceCents:1900,legacy:true}, '3m':{label:'3 Monate (alt)',months:3,priceCents:2900,legacy:true}, '6m':{label:'6 Monate (alt)',months:6,priceCents:3900,legacy:true}, '12m':{label:'12 Monate (alt)',months:12,priceCents:5900,legacy:true} };
+const PLANS = { event:{label:'FinalSnap Fotoalbum',months:3,retentionDays:90,priceCents:4990}, '1m':{label:'1 Monat (alt)',months:1,priceCents:1900,legacy:true}, '3m':{label:'3 Monate (alt)',months:3,priceCents:2900,legacy:true}, '6m':{label:'6 Monate (alt)',months:6,priceCents:3900,legacy:true}, '12m':{label:'12 Monate (alt)',months:12,priceCents:5900,legacy:true} };
 const RETENTION_MS = 90*86400000;
 // Event deadlines use calendar days in Europe/Berlin, including DST changes.
 function eventDeadline(date) {

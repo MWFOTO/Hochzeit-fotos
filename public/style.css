@@ -413,7 +413,7 @@ h1, h2, .brand {
   .success-page { margin: 24px 16px 0 !important; }
 }
 
-/* One gentle entrance per section; content remains visible without JavaScript. */
+/* Gentle entrances repeat on re-entry; content stays visible without JavaScript. */
 html { scroll-behavior: smooth; }
 .scroll-reveal {
   opacity: 1;

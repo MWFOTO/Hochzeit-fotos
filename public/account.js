@@ -72,7 +72,7 @@
       const showPanel=index=>{panels.forEach((panel,i)=>panel.hidden=i!==index);tabs.querySelectorAll('button').forEach((b,i)=>b.setAttribute('aria-pressed',String(i===index)));document.getElementById('photo-manager').hidden=index!==0;if(index===0)return manage(event);};
       if(['pending','trial'].includes(event.status)&&!event.readOnly){
         const chooser=element('details');chooser.className='upgrade-panel';chooser.open=activeEvent===event.id;chooser.append(element('summary','Paket & Buchung'));
-        chooser.append(element('p','Ein Paket für die Veranstaltung. Die 25 Testfotos bleiben erhalten und zählen ab dem Veranstaltungsdatum zum Speicher. 34,90 € ist ein vorläufiger Arbeitswert; der endgültige Bruttopreis wird vor dem Verkaufsstart festgelegt. Hier ist ausschließlich eine Testzahlung möglich.'));
+        chooser.append(element('p','Ein Paket für die Veranstaltung. Die 25 Testfotos bleiben erhalten und zählen ab dem Veranstaltungsdatum zum Speicher. Das Paket kostet einmalig 49,90 € pro Veranstaltung. Hier ist ausschließlich eine Testzahlung möglich.'));
         const grid=element('div');grid.className='plan-grid';chooser.append(grid);
         for(const [key,plan] of Object.entries(availablePlans)){
           if(plan.legacy&&event.plan!==key)continue;
