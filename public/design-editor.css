@@ -7,3 +7,46 @@
 .tool-links{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:10px;color:#9d9da3;font-size:9px}.tool-links a{color:#d3b9d7;text-decoration:none;border:1px solid #594c60;border-radius:14px;padding:4px 8px}.tool-links a:hover{background:#382d3d;border-color:#bd8cc3}
 a.progress-step{color:#696b71;text-decoration:none;cursor:pointer}a.progress-step:hover{color:#ece8e3}.progress-step.active{color:#e8e4df}.next-step-button{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:10px 0 0;padding:11px 13px;border:1px solid #41444a;border-radius:8px;color:#d9d7d4;text-decoration:none;font-size:10px;font-weight:650;background:#202328}.next-step-button:hover{border-color:var(--accent);background:#25272d}.next-step-button span{font-size:16px;color:var(--accent)}.qr-step,.print-step{scroll-margin-top:24px}.qr-step{margin-top:30px;padding-bottom:5px}.print-step{margin-top:18px}.wizard-step{scroll-margin-top:24px}
 .qr-connect-card{display:flex;align-items:center;gap:13px;padding:12px;border:1px solid #383b41;border-radius:8px;background:#202328}.qr-connect-code{display:grid;place-items:center;flex:none;width:88px;height:88px;border-radius:6px;background:#fff;color:#222;font-weight:700}.qr-connect-code img{width:100%;height:100%;object-fit:contain;padding:4px}.qr-connect-code img[hidden]{display:none}.qr-connect-code span{font-size:9px}.qr-connect-card strong{font-size:10px}.qr-connect-card p.qr-file-status{margin:4px 0 0;font-size:9px;color:#98999e;line-height:1.4}
+
+/* Shared FinalSnap charcoal interface and readable controls. */
+:root{--bg:#22242a;--panel:#2a2d34;--panel-2:#30343c;--ink:#f4f5f7;--muted:#c0c3cb;--line:#ffffff24;--accent:#49d5e8;--accent-rgb:73,213,232}
+body{background:var(--bg);color:var(--ink);font-size:16px;line-height:1.6}
+.topbar{min-height:76px;border-color:var(--line)}
+.brand{font-size:19px;color:var(--ink)}
+.brand-mark{width:32px;height:32px;border:1px solid #49d5e866;border-radius:11px;background:#49d5e814;color:#49d5e8;font-size:17px}
+.topbar-note,.text-button{font-size:14px;color:#d0d2d7}
+.preview-tag{font-size:12px;color:#c0c3cb}
+.editor{max-width:760px}
+.eyebrow{font-size:13px;color:#49d5e8}
+.intro h1{font-size:clamp(38px,4.2vw,52px);line-height:1.08;letter-spacing:-1.6px}
+.intro p{font-size:16px;line-height:1.65;color:#c0c3cb;max-width:460px}
+.progress{font-size:13px;color:#b0b3bb;gap:11px}
+.progress-step b{width:25px;height:25px}
+.section-heading h2,.preview-header h2{font-size:18px;line-height:1.35}
+.section-heading p{font-size:14px;line-height:1.55;color:#c0c3cb}
+.section-number{font-size:13px}
+.field-label,.color-picker,.font-row .field-label{font-size:14px;color:#e0e1e5}
+.date-label span{font-size:13px}
+.editor input:not([type=color]):not([type=file]),.editor select{font-size:16px;min-height:48px}
+.template-card{padding:9px}
+.template-name{font-size:14px}
+.template-sub{font-size:12px;line-height:1.4;color:#c0c3cb}
+.upload-drop{min-height:68px}
+.upload-drop strong{font-size:14px}
+.upload-drop small,.upload-filename{font-size:13px;line-height:1.5;color:#c0c3cb}
+.upload-filename{min-height:20px}
+.save-button,.ai-brief-button,.download-button,.next-step-button{min-height:50px;font-size:15px}
+.save-row p,.download-status,.qr-file-status{font-size:13px;line-height:1.55;color:#c0c3cb}
+.tool-links,.tool-links a{font-size:13px;line-height:1.5}
+.tool-links a{padding:6px 10px}
+.ai-brief-section>div>p,.ai-brief-text{font-size:14px;line-height:1.6}
+.device-switch,.preview-caption{font-size:13px}
+.qr-card{padding:16px}
+.qr-copy strong,.qr-connect-card strong{font-size:14px}
+.qr-copy p,.qr-connect-card p.qr-file-status,.prototype-note{font-size:13px;line-height:1.55;color:#c0c3cb}
+.format-card strong{font-size:13px}
+.format-card small{font-size:12px}
+.download-button small{font-size:13px;line-height:1.45}
+.phone{flex:none}
+@media(max-width:800px){.editor{max-width:none}.progress{font-size:12px}.progress-step b{width:23px;height:23px}}
+@media(max-width:420px){.intro h1{font-size:36px}.template-name{font-size:13px}.template-sub{font-size:11px}.preview-header h2{font-size:16px}.qr-copy p,.prototype-note{font-size:12px}}
