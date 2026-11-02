@@ -785,3 +785,7 @@ html { scroll-behavior: smooth; }
   .phone-screen { min-height: 310px; }
   .landing-body .button { padding: 12px 14px; font-size: .9rem; }
 }
+body[data-design-theme="midnight"]{--color-bg:#17191d;--color-text:#f2f0ed;--color-muted:#a6a8ac}
+body[data-design-theme="garden"]{--color-bg:#eff1e9;--color-text:#25352d;--color-muted:#69786e}
+body[data-design-theme="afterglow"]{--color-bg:#faf7f4;--color-text:#312b29;--color-muted:#817c79}
+.event-design-cover{display:block;width:100%;max-height:240px;aspect-ratio:16/7;object-fit:cover;border-radius:16px;margin:0 0 1rem}
