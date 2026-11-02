@@ -32,9 +32,9 @@ services:
         value: "https://nbg1.your-objectstorage.com"
       - key: S3_REGION
         value: "nbg1"
-      - key: S3_ACCESS_KEY_ID
+      - key: S3_ACCESS_KEY_ID KDCN92ZIY16IH19M0DNJ
         sync: false
-      - key: S3_SECRET_ACCESS_KEY
+      - key: S3_SECRET_ACCESS_KEY Nl2laDQwl64zp2cg0QQrZkiV1prbCJH5sg46oXU3
         sync: false
       - key: S3_SSE_C_KEY
         sync: false
