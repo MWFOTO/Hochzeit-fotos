@@ -96,4 +96,12 @@
     if (token) parsed.searchParams.set('token', token);
     return parsed.href;
   };
+  const updateGuestBrand = () => {
+    const brand = document.querySelector('.site-header .brand');
+    if (!brand || !eventId) return;
+    brand.href = window.guestUrl(`/event/${encodeURIComponent(eventId)}/upload`);
+    brand.setAttribute('aria-label', 'Zur Gäste-Startseite');
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', updateGuestBrand, {once:true});
+  else updateGuestBrand();
 })();
