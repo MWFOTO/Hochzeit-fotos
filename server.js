@@ -565,6 +565,7 @@ function createApp(options = {}) {
   app.get(['/forgot-password','/reset-password'],(req,res)=>res.sendFile(path.join(pub,'password-recovery.html')));
   app.get('/verify-email',(req,res)=>res.sendFile(path.join(pub,'verify-email.html')));
   app.get('/impressum',(req,res)=>res.sendFile(path.join(pub,'impressum.html')));
+  app.get('/datenschutz',(req,res)=>res.sendFile(path.join(pub,'datenschutz.html')));
   app.get('/register',(req,res)=>req.user?res.redirect(['event','1m','3m','6m'].includes(req.query.plan)?`/dashboard?plan=${encodeURIComponent(req.query.plan)}`:'/dashboard'):res.sendFile(path.join(pub,'login.html')));
   app.get('/login',(req,res)=>res.sendFile(path.join(pub,'login.html')));
   app.get('/dashboard',(req,res)=>req.user?res.sendFile(path.join(pub,'dashboard.html')):res.redirect('/login'));
