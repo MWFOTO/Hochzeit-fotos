@@ -14,7 +14,7 @@ let creations=0;
 const sessions=new Map();
 const fake={webhooks:signer.webhooks,checkout:{sessions:{create:async(data,options)=>{
   creations++;const session={id:'cs_test_'+options.idempotencyKey,livemode:false,status:'open',payment_status:'unpaid',mode:data.mode,metadata:data.metadata,currency:'eur',amount_total:data.line_items[0].price_data.unit_amount,url:'https://checkout.stripe.com/test'};sessions.set(session.id,session);return session;
-},retrieve:async id=>sessions.get(id)}}};
+},retrieve:async id=>sessions.get(id),expire:async id=>{const session=sessions.get(id);session.status='expired';return session;}}}};
 const sentMail=[];
 const app=createApp({mailer:async message=>sentMail.push(message),DB_PATH:path.join(tmp,'events.db'),UPLOAD_DIR:path.join(tmp,'uploads'),BASE_URL:'http://localhost:3000',STRIPE_WEBHOOK_SECRET:signing,stripe:fake,MAX_EVENT_PHOTOS:2});
 const server=app.listen(0);
@@ -178,6 +178,32 @@ test('Sessions persist across application restart and logout invalidates them',a
   }finally{restarted.close();second.locals.db.close();}
   assert.equal((await request('/api/auth/logout',{method:'POST',user:other})).status,200);
   assert.equal((await request('/api/auth/me',{user:other})).status,401);
+});
+
+test('Account deletion verifies password, removes albums and separates retained payment records',async()=>{
+  const account=await register('delete-account@example.com');
+  for(const eventId of ['delete-free','delete-open','delete-paid']) assert.equal((await request('/api/events',{method:'POST',user:account,body:{eventId,title:'Private Event',plan:'event',trial:false}})).status,201);
+  const openCheckout=await request('/api/checkout',{method:'POST',user:account,body:{eventId:'delete-open'}});assert.equal(openCheckout.status,200);
+  const openPaymentId=app.locals.db.prepare('SELECT id FROM payments WHERE event_id=?').get('delete-open').id;
+  app.locals.db.prepare("INSERT INTO payments (id,event_id,amount_cents,months,status) VALUES (?,?,?,?,?)").run('paid-record','delete-paid',4990,3,'paid');
+  const photoFile=path.join(tmp,'uploads','delete-free','guest.jpg');fs.mkdirSync(path.dirname(photoFile),{recursive:true});fs.writeFileSync(photoFile,'guest photo');
+  app.locals.db.prepare('INSERT INTO photos (id,event_id,filename,bytes,approved,created_at) VALUES (?,?,?,?,?,?)').run('delete-photo','delete-free','guest.jpg',11,1,Date.now());
+  app.locals.db.prepare('INSERT INTO guestbook_entries (id,event_id,guest_name,message,approved,created_at) VALUES (?,?,?,?,?,?)').run('delete-entry','delete-free','Guest','A private message',1,Date.now());
+  assert.equal((await request('/api/auth/account',{method:'DELETE',user:account,body:{password:'wrong-password',confirm:'KONTO LÖSCHEN'}})).status,401);
+  assert.equal((await request('/api/auth/account',{method:'DELETE',user:account,body:{password:'a-good-long-password',confirm:'DELETE'}})).status,400);
+  const deleted=await request('/api/auth/account',{method:'DELETE',user:account,body:{password:'a-good-long-password',confirm:'KONTO LÖSCHEN'}});assert.equal(deleted.status,200);assert.equal(deleted.data.deletedEvents,3);assert.equal(deleted.data.retainedPayments,1);
+  assert.equal(sessions.get('cs_test_payment-'+openPaymentId).status,'expired');
+  assert.equal(app.locals.db.prepare('SELECT COUNT(*) n FROM users WHERE id=?').get(account.id).n,0);
+  assert.equal(app.locals.db.prepare('SELECT COUNT(*) n FROM sessions WHERE user_id=?').get(account.id).n,0);
+  assert.equal(app.locals.db.prepare('SELECT COUNT(*) n FROM photos WHERE event_id=?').get('delete-free').n,0);
+  assert.equal(app.locals.db.prepare('SELECT COUNT(*) n FROM guestbook_entries WHERE event_id=?').get('delete-free').n,0);
+  assert.equal(fs.existsSync(path.dirname(photoFile)),false);
+  assert.equal(app.locals.db.prepare('SELECT COUNT(*) n FROM events WHERE owner_id=?').get(account.id).n,0);
+  assert.equal(app.locals.db.prepare('SELECT COUNT(*) n FROM events WHERE id=?').get('delete-open').n,0);
+  const retained=app.locals.db.prepare('SELECT * FROM events WHERE id=?').get('delete-paid');assert.equal(retained.owner_id,null);assert.equal(retained.email,null);assert.equal(retained.title,'Gelöschtes Album');assert.equal(retained.guest_token,null);
+  assert.equal(app.locals.db.prepare('SELECT COUNT(*) n FROM payments WHERE event_id=?').get('delete-paid').n,1);
+  assert.equal(app.locals.db.prepare('SELECT COUNT(*) n FROM payments WHERE event_id=?').get('delete-open').n,0);
+  assert.equal((await request('/api/auth/me',{user:account})).status,401);
 });
 
 test('Free trial quota, compression, counters and upgrade preserve photos and guest link',async()=>{
