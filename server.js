@@ -86,6 +86,9 @@ function createApp(options = {}) {
   const storageLimit = Number(cfg.S3_MAX_STORAGE_BYTES || 900 * 1024 ** 3);
   if (!Number.isSafeInteger(storageLimit) || storageLimit <= 100 * 1024 ** 2) throw new Error('S3_MAX_STORAGE_BYTES muss größer als 100 MiB sein.');
   const db = openDatabase(cfg.DB_PATH || path.join(__dirname,'events.db'));
+  // Unpaid draft events from the earlier one-trial-per-account flow can now
+  // use the same free 25-photo test as newly created events.
+  db.prepare("UPDATE events SET status='trial', trial_used=1 WHERE status='pending' AND owner_id IS NOT NULL AND deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM payments WHERE payments.event_id=events.id)").run();
   // Operator-only pilot provisioning. No guest endpoint can enable a pilot.
   // The original capability and owner remain unchanged; deleted albums stay deleted.
   if (cfg.PILOT_EVENT_ID) {
@@ -242,7 +245,9 @@ function createApp(options = {}) {
     const id=String(req.body.eventId||''); const plan=PLANS.event; const title=String(req.body.title||'').trim(),eventDate=String(req.body.eventDate||'');
     if(!/^[a-z0-9][a-z0-9_-]{2,63}$/.test(id) || !title || title.length>120 || !validEventDate(eventDate)) return fail(res,400,'Bitte Event-ID, Titel und ein Veranstaltungsdatum innerhalb der nächsten 24 Monate angeben.');
     if(lookup(id) || fs.existsSync(path.join(root,id))) return fail(res,409,'Event-ID bereits vergeben, auch für Bestandsdaten.');
-    const trial=req.body.trial!==false&&!db.prepare('SELECT 1 FROM events WHERE owner_id=? AND trial_used=1').get(req.user.id);
+    // During the test-only phase each newly created event can use the 25-photo
+    // trial. Checkout remains a Stripe test checkout and can never charge live.
+    const trial=req.body.trial!==false;
     const expiresAt=eventDeadline(eventDate);
     db.prepare('INSERT INTO events (id,email,plan,amount_cents,status,created_at,owner_id,title,event_date,guest_token,moderation,guestbook_moderation,expires_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)').run(id,req.user.email,'event',plan.priceCents,'pending',Date.now(),req.user.id,title,eventDate,random(),req.body.moderation===true?1:0,req.body.guestbookModeration===false?0:1,expiresAt);
     if(trial)db.prepare("UPDATE events SET status='trial', trial_used=1 WHERE id=?").run(id);

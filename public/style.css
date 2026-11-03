@@ -958,6 +958,37 @@ label { color: #e7e8ec; font-size: 1rem; }
 .success-page .link-card .link-desc, .success-page .pending-msg { color: var(--color-muted); font-size: 1rem; }
 .legal-footer, footer { color: #aeb2bb; }
 .legal-footer a, footer a { color: #b9eaf0; }
+.account-page button.secondary,
+.account-page .button.secondary,
+.account-page .gallery-download-all {
+  color: var(--color-text);
+  background: #353941;
+  border-color: #ffffff32;
+}
+.account-page button.secondary:hover,
+.account-page .button.secondary:hover { background: #41454e; }
+.account-page .event-card h2 { font-size: clamp(1.8rem, 2.7vw, 2.25rem); overflow-wrap: anywhere; }
+.account-page .event-back { margin: 2px 0 12px; }
+.account-page .event-tabs button[aria-pressed="true"] { color: #101a1d; background: var(--color-accent); }
+.upgrade-panel {
+  color: var(--color-text);
+  background: linear-gradient(145deg, #30333a, #282a30);
+  border: 1px solid #49d5e84d;
+}
+.upgrade-panel summary { color: var(--color-text); font-size: 1.2rem; }
+.upgrade-panel > p { color: var(--color-muted); }
+.upgrade-panel .plan-card {
+  color: var(--color-text);
+  background: #22242a;
+  border: 1px solid #ffffff30;
+  border-top: 2px solid #49d5e878;
+}
+.upgrade-panel .plan-card h3 { color: var(--color-text); }
+.upgrade-panel .plan-card p { color: var(--color-muted); }
+.upgrade-panel .plan-card .primary { color: #101a1d; background: var(--color-accent); }
+#message:not(:empty) { color: var(--color-text); background: #30333a; border: 1px solid #ffffff25; }
+.privacy-note a, .upload-page a, .guest-feature-page a { color: #b9eaf0; }
+.login-page .auth-art img { transform: scaleX(-1); }
 body[data-design-theme="midnight"] { --color-bg: #1b2027; --color-text: #f2f3f5; --color-muted: #c0c6cd; }
 body[data-design-theme="garden"] { --color-bg: #222923; --color-text: #f2f5f0; --color-muted: #c3ccc2; }
 body[data-design-theme="afterglow"] { --color-bg: #262324; --color-text: #f5f1ef; --color-muted: #cac1bd; }
@@ -969,5 +1000,7 @@ body[data-design-theme="afterglow"] { --color-bg: #262324; --color-text: #f5f1ef
   .gallery-page { padding: 26px 18px 64px; }
   .guest-feature-page { padding: 24px 18px 64px; }
   .event-title { font-size: clamp(2.2rem, 10vw, 3rem); }
+  .account-page .event-card h2 { font-size: clamp(1.65rem, 8vw, 2rem); }
+  .upgrade-panel { padding: 16px; }
   .small, small { font-size: .98rem; }
 }

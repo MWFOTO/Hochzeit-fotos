@@ -6,7 +6,7 @@ Stand: 12. Oktober 2026. Die Anwendung bleibt im Stripe-Testmodus. Dieser Plan i
 - [x] Registrierung, Anmeldung und Veranstalterkonto.
 - [x] Brevo für Bestätigungsmails und Passwort-Zurücksetzen angebunden; vom Betreiber im echten Postfach getestet.
 - [x] QR-Gästezugang ohne Konto, Upload, Kamera-Auswahl, Galerie und Diashow.
-- [x] Kostenloser Einstieg: einmal pro Konto bis zu 25 Testfotos; vor dem Veranstaltungsdatum vorbereiten.
+- [x] In der aktuellen Testphase: je Veranstaltung bis zu 25 kostenlose Testfotos; vor dem Veranstaltungsdatum vorbereiten.
 - [x] Fotoverwaltung, Mehrfachauswahl, Moderation und Löschung.
 - [x] Bilder auf maximal 2.560 Pixel, JPEG-Qualität 82; keine unveränderten Originale.
 - [x] Stripe-Testcheckout, Webhook-Prüfung und Übergang vom Testalbum zur Zahlung.
