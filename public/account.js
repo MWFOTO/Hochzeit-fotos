@@ -15,6 +15,7 @@
     const registering=location.pathname==='/register';
     document.body.classList.toggle('login-page', !registering);
     const selectedPlan=new URLSearchParams(location.search).get('plan');
+    if(new URLSearchParams(location.search).get('deleted')==='1')message.textContent='Dein FinalSnap-Konto und deine Alben wurden gelöscht. Eine erneute Anmeldung ist nicht mehr möglich.';
     if(selectedPlan==='event'){document.getElementById('auth-description').textContent='Deine Paketauswahl wird übernommen. Jede neue Veranstaltung kannst du mit bis zu 25 Fotos kostenlos testen.';const switchLink=document.querySelector('#auth-switch a');if(switchLink)switchLink.href=`/${registering?'login':'register'}?plan=${encodeURIComponent(selectedPlan)}`;}
     const password=document.getElementById('password');
     const confirmation=document.getElementById('password-confirm');
@@ -120,6 +121,14 @@
   document.getElementById('close-manager').onclick=()=>{activeEvent=null;history.replaceState(null,'','/dashboard');document.getElementById('photo-manager').hidden=true;load().catch(report);};
   activeEvent=new URLSearchParams(location.search).get('event');
   document.getElementById('logout').onclick=()=>api('/api/auth/logout','POST').then(()=>location.href='/login').catch(report);
+  const deleteAccountForm=document.getElementById('delete-account-form');
+  deleteAccountForm.onsubmit=async e=>{
+    e.preventDefault();
+    if(document.getElementById('delete-account-confirm').value!=='KONTO LÖSCHEN'){report(new Error('Bitte „KONTO LÖSCHEN“ genau so eingeben.'));return;}
+    const submit=deleteAccountForm.querySelector('button');submit.disabled=true;
+    try{await api('/api/auth/account','DELETE',{password:document.getElementById('delete-account-password').value,confirm:'KONTO LÖSCHEN'});location.href='/login?deleted=1';}
+    catch(err){report(err);submit.disabled=false;}
+  };
   const eventIdInput=document.getElementById('event-id');
   const normalizeEventId=value=>value.trim().toLowerCase().replace(/ä/g,'ae').replace(/ö/g,'oe').replace(/ü/g,'ue').replace(/ß/g,'ss').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9_-]+/g,'-').replace(/^[-_]+|[-_]+$/g,'');
   eventIdInput.addEventListener('blur',()=>{eventIdInput.value=normalizeEventId(eventIdInput.value);});
