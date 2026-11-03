@@ -401,7 +401,7 @@ function createApp(options = {}) {
         if(photoLimit!==null&&total.count+req.files.length>photoLimit) throw new Error('Die 25 kostenlosen Testfotos sind genutzt. Nach bestätigter Buchung gilt das Eventpaket ab dem Veranstaltungsdatum.');
         let bytes=total.bytes;
         for(const file of req.files) {
-          const image=sharp(file.path,{limitInputPixels:40000000,animated:false});
+          const image=sharp(file.path,{limitInputPixels:60000000,animated:false});
           const meta=await image.metadata();
           if(!['jpeg','png','webp','heif'].includes(meta.format)) throw new Error('Nur JPEG, PNG, WebP und unterstützte HEIF-Bilder erlaubt.');
           const id=crypto.randomUUID(), filename=`${id}.jpg`, dest=path.join(dir,filename);
