@@ -106,6 +106,7 @@ function createApp(options = {}) {
   app.use((req,res,next)=>{ res.set('Cache-Control','no-store'); next(); });
   const lookup = id => db.prepare('SELECT * FROM events WHERE id=?').get(id);
   const own = (req,e) => !!(req.user && e && e.owner_id === req.user.id);
+  const deletingUsers = new Set();
   const readDesign = e => {
     try { return JSON.parse(e?.design_json || '{}'); }
     catch { return {}; }
@@ -166,7 +167,7 @@ function createApp(options = {}) {
   const authLimit=rateLimit({windowMs:15*60*1000,limit:20,standardHeaders:'draft-8',legacyHeaders:false});
   const uploadLimit=rateLimit({windowMs:60*1000,limit:20,standardHeaders:'draft-8',legacyHeaders:false});
   const guestbookLimit=rateLimit({windowMs:15*60*1000,limit:5,standardHeaders:'draft-8',legacyHeaders:false});
-  function loginRequired(req,res,next) { if(!req.user) return fail(res,401,'Bitte anmelden.'); next(); }
+  function loginRequired(req,res,next) { if(!req.user) return fail(res,401,'Bitte anmelden.'); if(deletingUsers.has(req.user.id)) return fail(res,409,'Kontolöschung läuft. Bitte kurz warten.'); next(); }
   async function passwordHash(password,salt=random()) {return `${salt}:${(await scrypt(password,salt,64)).toString('hex')}`;}
   function startSession(req,res,user) {
     const token=random(), csrf=random();
@@ -386,6 +387,7 @@ function createApp(options = {}) {
   const busy=new Set();
   let remoteStorageReservedBytes=0;
   app.post('/api/event/:eventId/upload',uploadLimit,access,(req,res,next)=>{
+    if(req.event.owner_id && deletingUsers.has(req.event.owner_id)) return fail(res,409,'Das Konto wird gerade gelöscht. Uploads sind gesperrt.');
     if(!active(req.event)) return fail(res,402,'Der Albumzeitraum ist beendet. Fotos können noch während der Downloadphase angesehen und heruntergeladen werden.');
     if(busy.has(req.event.id)) return fail(res,429,'Upload läuft bereits. Bitte kurz warten.');
     busy.add(req.event.id);
@@ -401,7 +403,7 @@ function createApp(options = {}) {
         if(photoLimit!==null&&total.count+req.files.length>photoLimit) throw new Error('Die 25 kostenlosen Testfotos sind genutzt. Nach bestätigter Buchung gilt das Eventpaket ab dem Veranstaltungsdatum.');
         let bytes=total.bytes;
         for(const file of req.files) {
-          const image=sharp(file.path,{limitInputPixels:60000000,animated:false});
+          const image=sharp(file.path,{limitInputPixels:40000000,animated:false});
           const meta=await image.metadata();
           if(!['jpeg','png','webp','heif'].includes(meta.format)) throw new Error('Nur JPEG, PNG, WebP und unterstützte HEIF-Bilder erlaubt.');
           const id=crypto.randomUUID(), filename=`${id}.jpg`, dest=path.join(dir,filename);
@@ -506,6 +508,47 @@ function createApp(options = {}) {
     return true;
   }
   app.delete('/api/event/:eventId',loginRequired,owner,wrap(async(req,res)=>{if(!await erase(req.event)) return fail(res,409,'Upload läuft. Bitte erneut versuchen.');res.json({success:true});}));
+  app.delete('/api/auth/account',authLimit,loginRequired,wrap(async(req,res)=>{
+    const password=req.body.password;
+    if(req.body.confirm!=='KONTO LÖSCHEN') return fail(res,400,'Bitte die Löschung mit „KONTO LÖSCHEN“ bestätigen.');
+    if(typeof password!=='string'||password.length>128) return fail(res,400,'Bitte dein Passwort eingeben.');
+    const user=db.prepare('SELECT * FROM users WHERE id=?').get(req.user.id);
+    const [salt,stored]=(user?.password_hash||`${'0'.repeat(64)}:${'0'.repeat(128)}`).split(':');
+    const derived=await scrypt(password,salt,64);
+    if(!user||!crypto.timingSafeEqual(Buffer.from(stored,'hex'),derived)) return fail(res,401,'Das Passwort stimmt nicht.');
+    const events=db.prepare('SELECT * FROM events WHERE owner_id=?').all(req.user.id);
+    if(events.some(event=>busy.has(event.id))) return fail(res,409,'Für eine Veranstaltung läuft gerade ein Foto-Upload. Bitte warte kurz und versuche es erneut.');
+    deletingUsers.add(req.user.id);
+    try {
+      // Prevent a still-open checkout from charging after the owner has deleted the albums.
+      for(const event of events) {
+        const payment=db.prepare('SELECT * FROM payments WHERE event_id=?').get(event.id);
+        if(!payment?.stripe_session_id||payment.status==='paid') continue;
+        if(!stripe) return fail(res,503,'Ein offener Zahlungs-Checkout kann gerade nicht geprüft werden. Bitte später erneut versuchen.');
+        const session=await stripe.checkout.sessions.retrieve(payment.stripe_session_id);
+        if(session.status==='open') await stripe.checkout.sessions.expire(session.id);
+        if(session.payment_status==='paid'&&payment.status!=='paid') db.prepare("UPDATE payments SET status='paid' WHERE id=?").run(payment.id);
+      }
+      for(const event of events) if(!await erase(event)) return fail(res,409,'Für eine Veranstaltung läuft gerade ein Foto-Upload. Bitte versuche es erneut.');
+      const retainedPayments=events.filter(event=>db.prepare("SELECT 1 FROM payments WHERE event_id=? AND status='paid'").get(event.id)).length;
+      db.transaction(()=>{
+        const updatePaid=db.prepare("UPDATE events SET owner_id=NULL,email=NULL,title='Gelöschtes Album',event_date=NULL,design_json='{}',guest_token=NULL,stripe_session_id=NULL,status='expired',deleted_at=?,upload_successes=0,upload_failures=0 WHERE id=?");
+        const deletePayments=db.prepare("DELETE FROM payments WHERE event_id=? AND status!='paid'");
+        const deleteUnpaid=db.prepare('DELETE FROM events WHERE id=?');
+        for(const event of events) {
+          deletePayments.run(event.id);
+          if(db.prepare("SELECT 1 FROM payments WHERE event_id=? AND status='paid'").get(event.id)) updatePaid.run(Date.now(),event.id);
+          else deleteUnpaid.run(event.id);
+        }
+        db.prepare('DELETE FROM sessions WHERE user_id=?').run(req.user.id);
+        db.prepare('DELETE FROM password_resets WHERE user_id=?').run(req.user.id);
+        db.prepare('DELETE FROM email_verifications WHERE user_id=?').run(req.user.id);
+        db.prepare('DELETE FROM users WHERE id=?').run(req.user.id);
+      })();
+      res.clearCookie('event_session',{path:'/'});
+      res.json({success:true,deletedEvents:events.length,retainedPayments});
+    } finally {deletingUsers.delete(req.user.id);}
+  }));
   function cleanup() {
     const expired=db.prepare("SELECT * FROM events WHERE owner_id IS NOT NULL AND deleted_at IS NULL AND status IN ('paid','trial','pilot') ").all().filter(e=>retentionUntil(e)<=Date.now());
     const pruneRecords=()=>{
