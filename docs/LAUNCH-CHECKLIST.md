@@ -82,7 +82,7 @@ Die konkreten Kontoschritte für Stripe Tax, Hetzner-Backups und die kontrollier
 - [x] App-interne Speicheralarme alle 15 Minuten ergänzt: Render-Datenträger sowie 75-%-/90-%-Schwellen der aus Fotometadaten erfassten Hetzner-Auslastung; Alarm und Erholung gehen an den Zahlungs-Alarmkontakt.
 - [x] Temporäre Render-Uploads begrenzt: höchstens zwei gleichzeitige Requests, einer je Album; bei weniger als 2 GiB freiem Platz werden neue Uploads vor Dateiannahme pausiert. Veranstalterkonto zeigt Hetzner-Fotospeicher und Render-Uploadpuffer getrennt.
 - [x] Inline-JavaScript aus Landingpage, Galerie, Zahlungserfolg und Admin-Seite in eigene Dateien ausgelagert; globale Skriptrichtlinie erlaubt nur FinalSnap-Dateien. Styles und Browserdarstellung separat prüfen.
-- [ ] Den ersten geplanten externen GitHub-Actions-Lauf für `/health` und `/ready` sowie den Empfang einer Fehlerbenachrichtigung bestätigen; Workflow ist eingerichtet, Ausführung und Benachrichtigungen sind noch nicht verifiziert.
+- [ ] Den GitHub-Actions-Lauf für `/health` und `/ready` bestätigen. Der Workflow startet bei Commits auf `codex/germany-storage` und alle fünf Minuten auf `main`; GitHub-Benachrichtigungen für fehlgeschlagene Läufe und den tatsächlichen E-Mail-Empfang in den Kontoeinstellungen prüfen.
 - [ ] Hetzner-Verbrauchs-/Kostenalarm im Anbieter-Konto einrichten; der App-Alarm ist eine Speicher-Schätzung und kein Rechnungsalarm.
 - [ ] Konsistente tägliche SQLite-Sicherung und Fotosicherung an einem unabhängigen Ort einrichten.
 - [ ] Wiederherstellung von Datenbank und Fotos nachweisen; danach regelmäßige Wiederherstellungstests dokumentieren.
