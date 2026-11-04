@@ -24,21 +24,23 @@ test('all new and previously quoted unpaid albums check out at 49.90 EUR',async(
   const base=`http://127.0.0.1:${server.address().port}`;
   const request=(url,body)=>fetch(base+url,{method:body?'POST':'GET',headers:{Cookie:`event_session=${token}`,'X-CSRF-Token':csrf,Origin:'http://localhost:3000','Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});
   try {
-    const plans=await (await request('/api/plans')).json();assert.equal(plans.event.priceCents,4990);
+    const plans=await (await request('/api/plans')).json();assert.deepEqual(Object.keys(plans),['event']);assert.equal(plans.event.priceCents,4990);
     const eventDate=new Date(Date.now()+30*86400000).toISOString().slice(0,10);
-    for(const id of ['new-price','existing-price']) {
+    for(const id of ['new-price','existing-price','legacy-price']) {
       assert.equal((await request('/api/events',{eventId:id,title:'Price test',eventDate,trial:false})).status,201);
       assert.equal(db.prepare('SELECT amount_cents FROM events WHERE id=?').get(id).amount_cents,4990);
     }
     // Simulate a quote created before the price update.
     db.prepare('UPDATE events SET amount_cents=3490 WHERE id=?').run('existing-price');
+    db.prepare("UPDATE events SET plan='6m',amount_cents=3900 WHERE id=?").run('legacy-price');
     db.prepare('INSERT INTO payments (id,event_id,amount_cents,months) VALUES (?,?,?,3)').run('old-payment','existing-price',3490);
     db.prepare('INSERT INTO payment_attempts (id,payment_id,stripe_session_id,attempt_no,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?)').run('old-attempt','old-payment','cs_stale',1,'open',Date.now(),Date.now());
-    for(const id of ['new-price','existing-price'])assert.equal((await request('/api/checkout',{termsAccepted:true,eventId:id})).status,200);
-    assert.deepEqual(amounts,[4990,4990]);
+    for(const id of ['new-price','existing-price','legacy-price'])assert.equal((await request('/api/checkout',{termsAccepted:true,eventId:id})).status,200);
+    assert.deepEqual(amounts,[4990,4990,4990]);
     assert.equal(sessions.get('cs_stale').status,'expired');
-    assert.match(checkoutMessages[0],/49,90 €/);assert.match(checkoutMessages[1],/49,90 €/);assert.match(checkoutMessages[1],/kein echtes Geld eingezogen/);
-    assert.deepEqual(db.prepare('SELECT amount_cents FROM payments ORDER BY amount_cents DESC').all().map(row=>row.amount_cents),[4990,4990]);
+    assert.match(checkoutMessages[0],/49,90 €/);assert.match(checkoutMessages[1],/49,90 €/);assert.match(checkoutMessages[2],/49,90 €/);assert.match(checkoutMessages[1],/kein echtes Geld eingezogen/);
+    assert.deepEqual(db.prepare('SELECT amount_cents FROM payments ORDER BY amount_cents DESC').all().map(row=>row.amount_cents),[4990,4990,4990]);
     assert.equal(db.prepare('SELECT amount_cents FROM events WHERE id=?').get('existing-price').amount_cents,4990);
+    assert.equal(db.prepare('SELECT amount_cents FROM events WHERE id=?').get('legacy-price').amount_cents,4990);
   } finally {await new Promise(resolve=>server.close(resolve));db.close();fs.rmSync(root,{recursive:true,force:true});}
 });

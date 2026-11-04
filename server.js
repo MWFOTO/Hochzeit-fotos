@@ -372,7 +372,7 @@ function createApp(options = {}) {
     }
     res.json({freeBytes:diskFreeBytes,totalBytes:diskTotalBytes,usedBytes:diskTotalBytes-diskFreeBytes,warning:uploadDisk.warning,uploadsPaused:uploadDisk.uploadsPaused,location:'server-disk',uploadDisk});
   });
-  app.get('/api/plans',(req,res)=>res.json(Object.fromEntries(Object.entries(PLANS).map(([key,plan])=>[key,{...plan,photoLimit:key==='event'?null:Number(cfg.MAX_EVENT_PHOTOS||2000),storageLimitMB:Math.floor(Number(cfg.MAX_EVENT_BYTES||25*1024**3)/1024**2),storageLimitGB:Number((Number(cfg.MAX_EVENT_BYTES||25*1024**3)/1024**3).toFixed(1))}]))));
+  app.get('/api/plans',(req,res)=>{const plan=PLANS.event;res.json({event:{...plan,photoLimit:null,storageLimitMB:Math.floor(Number(cfg.MAX_EVENT_BYTES||25*1024**3)/1024**2),storageLimitGB:Number((Number(cfg.MAX_EVENT_BYTES||25*1024**3)/1024**3).toFixed(1))}});});
   app.get('/api/events',loginRequired,(req,res)=>{
     const events=db.prepare(`SELECT e.*, COUNT(p.id) photoCount, COALESCE(SUM(p.bytes),0) storageBytes
       FROM events e LEFT JOIN photos p ON p.event_id=e.id
@@ -492,14 +492,14 @@ function createApp(options = {}) {
     const earlyStartAcknowledgedAt=earlyStartNeeded?earlyStartRequestedAt:null;
     if(req.body.plan!==undefined){const plan=PLANS[req.body.plan];if(!plan)return fail(res,400,'Bitte ein gültiges Paket wählen.');if(req.body.plan!==e.plan)return fail(res,409,'Das Paket und der Preis für dieses Album sind bereits festgelegt.');}
     let payment=db.prepare('SELECT * FROM payments WHERE event_id=?').get(e.id);
-    if(!payment){const plan=PLANS[e.plan];db.prepare('INSERT INTO payments (id,event_id,amount_cents,months) VALUES (?,?,?,?)').run(crypto.randomUUID(),e.id,plan.priceCents,plan.months);payment=db.prepare('SELECT * FROM payments WHERE event_id=?').get(e.id);}
+    if(!payment){const plan=PLANS.event;db.prepare('INSERT INTO payments (id,event_id,amount_cents,months) VALUES (?,?,?,?)').run(crypto.randomUUID(),e.id,plan.priceCents,plan.months);payment=db.prepare('SELECT * FROM payments WHERE event_id=?').get(e.id);}
     if(['refunded','disputed','disputed_lost'].includes(payment.status))return fail(res,409,'Für diese Zahlung ist aktuell kein neuer Checkout möglich. Bitte kontaktiere den Support.');
     let attempt=db.prepare('SELECT * FROM payment_attempts WHERE payment_id=? ORDER BY attempt_no DESC LIMIT 1').get(payment.id);
     let session=null;
     if(attempt&&attempt.status==='open'&&!attempt.stripe_session_id.startsWith('creating_')){
       try{session=await stripe.checkout.sessions.retrieve(attempt.stripe_session_id);}catch(error){if(error.code!=='resource_missing')throw error;db.prepare("UPDATE payment_attempts SET status='expired',updated_at=? WHERE id=?").run(Date.now(),attempt.id);attempt=null;}
       if(session&&session.livemode!==false)throw new Error('Live-Checkout gesperrt');
-      if(session?.status==='open'&&session.amount_total===PLANS[e.plan].priceCents&&payment.amount_cents===PLANS[e.plan].priceCents&&session.metadata?.customerType===customerType&&session.metadata?.earlyStartRequest===String(earlyStartNeeded))return res.json({url:session.url||`${baseUrl.origin}/success?session_id=${session.id}`,attempt:attempt.attempt_no});
+      if(session?.status==='open'&&session.amount_total===PLANS.event.priceCents&&payment.amount_cents===PLANS.event.priceCents&&session.metadata?.customerType===customerType&&session.metadata?.earlyStartRequest===String(earlyStartNeeded))return res.json({url:session.url||`${baseUrl.origin}/success?session_id=${session.id}`,attempt:attempt.attempt_no});
       if(session?.status==='open'){
         await stripe.checkout.sessions.expire(session.id);
         db.prepare("UPDATE payment_attempts SET status='expired',updated_at=? WHERE id=?").run(Date.now(),attempt.id);
@@ -511,8 +511,8 @@ function createApp(options = {}) {
       if(session?.status==='complete')db.prepare("UPDATE payment_attempts SET status='failed',updated_at=? WHERE id=?").run(Date.now(),attempt.id);
       if(session?.status==='expired'||session?.status==='complete')attempt=null;
     }
-    if(payment.status==='pending'&&payment.amount_cents!==PLANS[e.plan].priceCents){
-      const canonicalPrice=PLANS[e.plan].priceCents;
+    if(payment.status==='pending'&&(payment.amount_cents!==PLANS.event.priceCents||e.amount_cents!==PLANS.event.priceCents)){
+      const canonicalPrice=PLANS.event.priceCents;
       db.transaction(()=>{
         db.prepare('UPDATE payments SET amount_cents=? WHERE id=? AND status=\'pending\'').run(canonicalPrice,payment.id);
         db.prepare('UPDATE events SET amount_cents=? WHERE id=? AND status IN (\'pending\',\'trial\')').run(canonicalPrice,e.id);
@@ -526,7 +526,7 @@ function createApp(options = {}) {
       attempt=db.prepare('SELECT * FROM payment_attempts WHERE id=?').get(id);
     }
     const taxEnabled=String(cfg.STRIPE_TAX_ENABLED||'0')==='1';
-    const priceData={currency:'eur',unit_amount:payment.amount_cents,tax_behavior:'inclusive',product_data:{name:PLANS[e.plan].label}};
+    const priceData={currency:'eur',unit_amount:payment.amount_cents,tax_behavior:'inclusive',product_data:{name:PLANS.event.label}};
     const productTaxCode=String(cfg.STRIPE_PRODUCT_TAX_CODE||'').trim();
     if(taxEnabled&&!productTaxCode)return fail(res,503,'Die Steuerkategorie für den Test-Checkout ist noch nicht eingerichtet.');
     if(taxEnabled)priceData.product_data.tax_code=productTaxCode;
