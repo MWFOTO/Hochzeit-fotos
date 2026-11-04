@@ -62,6 +62,7 @@
     <p id="status-text">Wird geprüft …</p>
 
     <div class="link-list" id="link-list" style="display:none;"></div>
+    <a class="button primary" id="retry-link" href="/dashboard" hidden>Zurück zum Album und Zahlung erneut versuchen</a>
     <p class="pending-msg" id="pending-msg" style="display:none;">
       Die Zahlungsbestätigung kann ein paar Sekunden dauern. Diese Seite aktualisiert
       sich automatisch, sobald alles bereit ist.
@@ -74,6 +75,7 @@
     const statusText = document.getElementById('status-text');
     const linkList = document.getElementById('link-list');
     const pendingMsg = document.getElementById('pending-msg');
+    const retryLink = document.getElementById('retry-link');
 
     async function checkStatus() {
       if (!sessionId) {
@@ -99,6 +101,13 @@
           const dashboard = document.createElement('a');
           dashboard.href = '/dashboard'; dashboard.textContent = 'Zum Dashboard: Gästelinks, QR-Code und Fotos verwalten';
           linkList.append(dashboard);
+        } else if (data.status === 'retry_available' && data.retryAvailable) {
+          statusText.textContent = 'Diese Zahlungsseite ist abgelaufen oder die Zahlung wurde nicht abgeschlossen. Du kannst im Dashboard für dasselbe Album einen neuen Zahlversuch starten.';
+          pendingMsg.style.display = 'none';
+          retryLink.hidden = false;
+        } else if (data.status === 'refunded') {
+          statusText.textContent = 'Die Erstattung ist bestätigt. Der Zugang zu diesem Album wurde beendet.';
+          pendingMsg.style.display = 'none';
         } else {
           pendingMsg.style.display = 'block';
           setTimeout(checkStatus, 2000); // in 2 Sekunden erneut prüfen

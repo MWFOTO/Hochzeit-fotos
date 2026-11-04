@@ -149,11 +149,35 @@ deutsch behandelt werden.
 
 Im Stripe-Testmodus einen Webhook für
 `https://DEIN-TESTSERVICE/api/stripe/webhook` anlegen:
-`checkout.session.completed`, `checkout.session.async_payment_succeeded`.
+`checkout.session.completed`, `checkout.session.async_payment_succeeded`,
+`checkout.session.async_payment_failed`, `checkout.session.expired`,
+`refund.created`, `refund.updated`, `refund.failed`, `charge.refunded`,
+`charge.dispute.created`, `charge.dispute.updated`, `charge.dispute.closed`,
+`charge.dispute.funds_reinstated`, `charge.dispute.funds_withdrawn`,
+`invoice.finalized`, `invoice.finalization_failed`, `invoice.paid` und
+`invoice.payment_failed`.
 CLI- und Dashboard-Endpunkte besitzen unterschiedliche Webhook-Secrets.
 BASE_URL muss exakt zur aufgerufenen HTTPS-Origin passen (CSRF/Herkunftsprüfung).
 Keine CORS-Freigabe nötig. Der Anbieter darf nicht Querystrings mit Gasttokens in
 öffentlichen Logs exportieren. HTTPS und Referrer-Policy werden berücksichtigt.
+
+### Testmodus für Brutto-USt. und Belege
+
+`STRIPE_TAX_ENABLED=0` lässt die automatische Steuerberechnung ausdrücklich aus.
+Für einen echten Checkout-Test zuerst in Stripe „Testmodus“ einschalten und unter
+Tax die Unternehmensadresse sowie eine aktive deutsche Steuerregistrierung
+hinterlegen. Unter Tax/Products die zutreffende Produkt-Steuerkategorie festlegen;
+bei Code-Konfiguration dazu `STRIPE_PRODUCT_TAX_CODE` mit dem von der
+Steuerberatung bestätigten Stripe-Steuercode befüllen. Die Kategorie nicht aus
+einer allgemeinen SaaS-Vermutung ableiten.
+
+Danach `STRIPE_TAX_ENABLED=1` im Render-Service setzen und manuell deployen.
+`server.js` schaltet dann Checkout-Steuer inkl. im 49,90-€-Preis,
+Pflicht-Rechnungsanschrift, optionale USt-IdNr.-Erfassung und Rechnungserstellung ein. Im Testmodus
+je einen Kauf als Privatperson und mit deutscher USt-IdNr. durchführen; bei beiden
+muss der Gesamtbetrag 49,90 € bleiben und die Rechnung die Steuer ausweisen.
+Erst nach Prüfung der Rechnung-PDFs und Steuerangaben den Live-Steuersetup und
+die Preislogik für den Verkauf vorbereiten.
 
 ## Bestandsdaten erhalten
 
@@ -201,6 +225,36 @@ Foto-Kopie bereitstellen; Code-Rollback allein macht Schemaänderungen nicht rü
 Backups nach vereinbarter Frist löschen. Restore regelmäßig auf einer Kopie testen.
 
 ## Limits und Betrieb
+
+## Zahlungsversuche, Erstattungen und Streitfälle
+
+- Ein Album behält einen Zahlungsdatensatz. Nach Ablauf oder Fehlschlag eines
+  Checkout-Versuchs erzeugt der nächste Klick einen neuen Checkout-Link; offene
+  Links werden wiederverwendet, abgeschlossene Zahlungen nicht doppelt gestartet.
+- Zahlungs-Admins erhalten über `PAYMENT_ADMIN_EMAILS` Zugriff auf
+  `/ops/payments`. Dafür ist ein registriertes, per E-Mail bestätigtes Konto
+  erforderlich. `PAYMENT_ALERT_EMAIL` erhält Refund- und Streitfallalarme;
+  ohne diesen Wert wird die erste Admin-Adresse verwendet.
+- Refunds werden manuell im internen Zahlungsbereich entschieden. Grund,
+  Freitextbegründung, Betrag, Bearbeiter, Stripe-Status und Webhook-Verlauf
+  bleiben im lokalen Zahlungsjournal erhalten. Stripe-Dashboard bleibt
+  maßgeblich, falls der API-Aufruf in einen unklaren Status läuft.
+- Policy: bestätigter Vollrefund beendet sofort Gäste- und Veranstalterzugang;
+  die Fotos werden weiterhin spätestens zum ursprünglich ausgewiesenen
+  Löschtermin entfernt. Teilrefunds ändern den Albumzugang nicht. Während eines
+  offenen Kartenstreitfalls bleibt der Zugang bis zur Entscheidung bestehen;
+  bei verlorenem Streitfall endet er, bei gewonnenem Streitfall bleibt er aktiv.
+  Diese Vertragsregel muss in AGB/Widerrufsinformationen widerspruchsfrei erklärt
+  und vor Livebetrieb rechtlich geprüft werden.
+- Erforderliche Stripe-Test-Webhooks: `checkout.session.completed`,
+  `checkout.session.async_payment_succeeded`,
+  `checkout.session.async_payment_failed`, `checkout.session.expired`,
+  `refund.created`, `refund.updated`, `refund.failed`, `charge.refunded`,
+  `charge.dispute.created`, `charge.dispute.updated`, `charge.dispute.closed`,
+  `charge.dispute.funds_reinstated` und `charge.dispute.funds_withdrawn`.
+- Webhook-Ereignisse werden idempotent gespeichert und Zahlungsalarme werden
+  sofort per Brevo versandt. Nicht versandte Meldungen bleiben in einer
+  ausstehenden Queue und werden minütlich erneut versucht.
 
 20 MB pro Eingangsdatei, maximal 10 Dateien pro Request, maximal 40 Megapixel
 beim Dekodieren. Disk-Staging begrenzt den RAM-Verbrauch; Upload-Requests werden

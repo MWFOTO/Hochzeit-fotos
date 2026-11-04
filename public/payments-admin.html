@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Zahlungsverwaltung · FinalSnap</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="site-header"><a class="brand" href="/" aria-label="FinalSnap Startseite"><span class="brand-mark">ϟ</span><span>FinalSnap</span></a><a class="button secondary" href="/dashboard">Zum Konto</a></header>
+  <main class="account-page">
+    <div class="page-heading"><div><span class="eyebrow">INTERNER BEREICH</span><h1>Zahlungen und Erstattungen</h1><p>Testmodus · manuelle Erstattungen werden mit Grund und Entscheidung dokumentiert.</p></div><button class="secondary" id="refresh">Aktualisieren</button></div>
+    <p id="status" role="status" aria-live="polite"></p>
+    <section id="payments" aria-label="Zahlungen"></section>
+  </main>
+  <script src="/payments-admin.js"></script>
+  <footer class="legal-footer"><a href="/impressum">Impressum</a> · <a href="/datenschutz">Datenschutz</a></footer>
+</body>
+</html>
