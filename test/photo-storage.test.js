@@ -7,6 +7,7 @@ const {Readable}=require('node:stream');
 const {createPhotoStorage}=require('../photo-storage');
 const {createApp}=require('../server');
 const sharp=require('sharp');
+const eventDate=new Date(Date.now()+30*86400000).toISOString().slice(0,10);
 
 const temp=fs.mkdtempSync(path.join(os.tmpdir(),'finalsnap-storage-'));
 test.after(()=>fs.rmSync(temp,{recursive:true,force:true}));
@@ -97,7 +98,7 @@ test('the app authorizes S3 photo reads and expiry deletes stored objects',async
     assert.equal(register.status,200);
     const sessionCookie=register.headers.get('set-cookie').split(';')[0];
     const auth={...headers,Cookie:sessionCookie,'X-CSRF-Token':(await register.json()).csrf,'Content-Type':'application/json'};
-    const created=await fetch(`${origin}/api/events`,{method:'POST',headers:auth,body:JSON.stringify({eventId:'s3event',plan:'1m',title:'S3 Event'})});
+    const created=await fetch(`${origin}/api/events`,{method:'POST',headers:auth,body:JSON.stringify({eventId:'s3event',plan:'event',title:'S3 Event',eventDate})});
     assert.equal(created.status,201);
     const guestToken=app.locals.db.prepare('SELECT guest_token FROM events WHERE id=?').get('s3event').guest_token;
     const form=new FormData();form.append('photos',new Blob([await sharp({create:{width:16,height:16,channels:3,background:'#123456'}}).jpeg().toBuffer()],{type:'image/jpeg'}),'photo.jpg');

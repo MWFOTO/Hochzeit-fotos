@@ -1,3 +1,6 @@
+Warning: truncated output (original token count: 13344)
+Total output lines: 644
+
 const express = require('express');
 const multer = require('multer');
 const helmet = require('helmet');
@@ -239,168 +242,7 @@ function createApp(options = {}) {
   app.get('/api/events',loginRequired,(req,res)=>{
     const events=db.prepare(`SELECT e.*, COUNT(p.id) photoCount, COALESCE(SUM(p.bytes),0) storageBytes
       FROM events e LEFT JOIN photos p ON p.event_id=e.id
-      WHERE e.owner_id=? AND e.deleted_at IS NULL GROUP BY e.id ORDER BY e.created_at DESC`).all(req.user.id);
-    res.json({events:events.map(e=>({...e,expires_at:e.event_date?retentionUntil(e):e.expires_at,storageLimitBytes:eventStorageLimit(e,cfg),photoLimit:eventPhotoLimit(e,cfg),checkoutStarted:!!db.prepare('SELECT 1 FROM payments WHERE event_id=?').get(e.id),readOnly:!active(e)&&readable(e),retentionUntil:retentionUntil(e),startsAt:startAt(e),guestUrl:readable(e)?`${baseUrl.origin}/event/${e.id}?token=${e.guest_token}`:null}))});
-  });
-  app.post('/api/events',loginRequired,(req,res)=>{
-    const id=String(req.body.eventId||''); const plan=PLANS.event; const title=String(req.body.title||'').trim(),eventDate=String(req.body.eventDate||'');
-    if(!/^[a-z0-9][a-z0-9_-]{2,63}$/.test(id) || !title || title.length>120 || !validEventDate(eventDate)) return fail(res,400,'Bitte Event-ID, Titel und ein Veranstaltungsdatum innerhalb der nächsten 24 Monate angeben.');
-    if(lookup(id) || fs.existsSync(path.join(root,id))) return fail(res,409,'Event-ID bereits vergeben, auch für Bestandsdaten.');
-    // During the test-only phase each newly created event can use the 25-photo
-    // trial. Checkout remains a Stripe test checkout and can never charge live.
-    const trial=req.body.trial!==false;
-    const expiresAt=eventDeadline(eventDate);
-    db.prepare('INSERT INTO events (id,email,plan,amount_cents,status,created_at,owner_id,title,event_date,guest_token,moderation,guestbook_moderation,expires_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)').run(id,req.user.email,'event',plan.priceCents,'pending',Date.now(),req.user.id,title,eventDate,random(),req.body.moderation===true?1:0,req.body.guestbookModeration===false?0:1,expiresAt);
-    if(trial)db.prepare("UPDATE events SET status='trial', trial_used=1 WHERE id=?").run(id);
-    res.status(201).json({eventId:id,trial:!!trial,eventDate});
-  });
-  app.get('/api/event/:eventId/availability',(req,res)=>res.json({available:/^[a-z0-9][a-z0-9_-]{2,63}$/.test(req.params.eventId)&&!lookup(req.params.eventId)&&!fs.existsSync(path.join(root,req.params.eventId))}));
-  function owner(req,res,next) { const e=lookup(req.params.eventId); if(!own(req,e)) return fail(res,404,'Event nicht gefunden.'); req.event=e; next(); }
-  app.post('/api/checkout',loginRequired,wrap(async(req,res)=>{
-    let e=lookup(String(req.body.eventId||''));
-    if(!own(req,e)) return fail(res,404,'Event nicht gefunden.');
-    if(!['pending','trial'].includes(e.status) || e.deleted_at || (e.status==='trial'&&!active(e))) return fail(res,409,'Dieses Event kann nicht bezahlt werden.');
-    if(!stripe || !cfg.STRIPE_WEBHOOK_SECRET) return fail(res,503,'Stripe-Testmodus noch nicht eingerichtet.');
-    if(req.body.plan!==undefined){
-      const plan=PLANS[req.body.plan];if(!plan)return fail(res,400,'Bitte ein gültiges Paket wählen.');
-      if(req.body.plan!==e.plan){if(db.prepare('SELECT 1 FROM payments WHERE event_id=?').get(e.id))return fail(res,409,'Für dieses Album wurde bereits eine Testzahlung gestartet. Bitte mit dem bisherigen Paket fortfahren.');
-        db.prepare('UPDATE events SET plan=?, amount_cents=? WHERE id=?').run(req.body.plan,plan.priceCents,e.id);e=lookup(e.id);}
-    }
-    // One stable payment/idempotency key per event prevents parallel checkout overwrites.
-    let payment=db.prepare('SELECT * FROM payments WHERE event_id=?').get(e.id);
-    if(!payment) {
-      const plan=PLANS[e.plan];
-      db.prepare('INSERT INTO payments (id,event_id,amount_cents,months) VALUES (?,?,?,?)').run(crypto.randomUUID(),e.id,e.amount_cents,plan.months);
-      payment=db.prepare('SELECT * FROM payments WHERE event_id=?').get(e.id);
-    }
-    let session;
-    if(payment.stripe_session_id) session=await stripe.checkout.sessions.retrieve(payment.stripe_session_id);
-    else {
-      session=await stripe.checkout.sessions.create({mode:'payment',payment_method_types:['card'],customer_email:e.email,line_items:[{price_data:{currency:'eur',unit_amount:payment.amount_cents,product_data:{name:PLANS[e.plan].label}},quantity:1}],metadata:{eventId:e.id,paymentId:payment.id},success_url:`${baseUrl.origin}/success?session_id={CHECKOUT_SESSION_ID}`,cancel_url:`${baseUrl.origin}/dashboard`},{idempotencyKey:`payment-${payment.id}`});
-      if(session.livemode!==false) throw new Error('Live-Checkout gesperrt');
-      db.prepare('UPDATE payments SET stripe_session_id=? WHERE id=?').run(session.id,payment.id);
-      db.prepare('UPDATE events SET stripe_session_id=? WHERE id=?').run(session.id,e.id);
-    }
-    if(session.livemode!==false) throw new Error('Live-Checkout gesperrt');
-    if(session.status==='expired') return fail(res,409,'Checkout abgelaufen. Neues Event erstellen; diese Event-ID bleibt reserviert.');
-    res.json({url:session.url || `${baseUrl.origin}/success?session_id=${session.id}`});
-  }));
-  app.get('/api/checkout/:sessionId',loginRequired,(req,res)=>{
-    const e=db.prepare('SELECT * FROM events WHERE stripe_session_id=?').get(req.params.sessionId);
-    if(!own(req,e)) return fail(res,404,'Bestellung nicht gefunden.');
-    res.json({eventId:e.id,status:e.status,expiresAt:e.event_date?retentionUntil(e):e.expires_at});
-  });
-  function access(req,res,next) {
-    const e=lookup(req.params.eventId);
-    if(!readable(e)) return fail(res,402,'Album und Downloadzeitraum sind abgelaufen.');
-    if(!own(req,e)) {
-      const token=req.query.token || req.headers['x-event-token'];
-      if(typeof token!=='string' || !e.guest_token || Buffer.byteLength(token)!==Buffer.byteLength(e.guest_token) || !crypto.timingSafeEqual(Buffer.from(token),Buffer.from(e.guest_token))) return fail(res,403,'Gültiger Veranstaltungslink erforderlich.');
-      const cookieName=`finalsnap_guest_${e.id}`;
-      const escapedName=cookieName.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
-      const match=new RegExp(`(?:^|;\\s*)${escapedName}=([a-f0-9]{64})(?:;|$)`).exec(req.headers.cookie||'');
-      let guestToken=match?.[1];
-      if(!guestToken) {
-        guestToken=random();
-        res.cookie(cookieName,guestToken,{httpOnly:true,secure:baseUrl.protocol==='https:',sameSite:'lax',maxAge:Math.max(0,Math.min(500*86400000,retentionUntil(e)-Date.now())),path:'/'});
-      }
-      req.guestTokenHash=hash(guestToken);
-    }
-    req.event=e; next();
-  }
-  app.get('/api/event/:eventId/design',loginRequired,owner,(req,res)=>{
-    if(!readable(req.event))return fail(res,402,'Für dieses Event ist noch kein Gästezugang verfügbar.');
-    res.json({event:{id:req.event.id,title:req.event.title,eventDate:req.event.event_date},design:publicDesign(req.event)});
-  });
-  app.patch('/api/event/:eventId/design',loginRequired,owner,(req,res)=>{
-    if(!readable(req.event))return fail(res,402,'Für dieses Event ist noch kein Gästezugang verfügbar.');
-    const value=req.body?.design;
-    if(!value||typeof value!=='object'||Array.isArray(value))return fail(res,400,'Bitte ein gültiges Design senden.');
-    const title=String(value.title||'').trim();
-    const occasion=String(value.occasion||'');
-    const theme=String(value.theme||'');
-    const accent=String(value.accent||'');
-    const font=String(value.font||'');
-    if(!title||title.length>80||!['wedding','birthday','summer','company','jubilee','graduation','other'].includes(occasion)||!['afterglow','midnight','garden'].includes(theme)||!/^#[0-9a-f]{6}$/i.test(accent)||!['classic','palatino','modern','verdana','relaxed','typewriter'].includes(font))return fail(res,400,'Bitte prüfe Titel, Anlass, Vorlage, Farbe und Schrift.');
-    const design={...readDesign(req.event),title,occasion,theme,accent,font};
-    db.prepare('UPDATE events SET design_json=? WHERE id=?').run(JSON.stringify(design),req.event.id);
-    res.json({success:true,design:publicDesign(lookup(req.event.id))});
-  });
-  app.patch('/api/event/:eventId',loginRequired,owner,(req,res)=>{
-    const updates=[];
-    if(req.body.eventDate!==undefined) {
-      if(startAt(req.event)<=Date.now())return fail(res,409,'Das Veranstaltungsdatum kann nach Beginn der Sammlung nicht mehr geändert werden.');
-      if(!validEventDate(req.body.eventDate))return fail(res,400,'Bitte ein gültiges Veranstaltungsdatum innerhalb der nächsten 24 Monate angeben.');
-      updates.push(['event_date',req.body.eventDate]);updates.push(['expires_at',eventDeadline(req.body.eventDate)]);
-    }
-    if(typeof req.body.moderation==='boolean')updates.push(['moderation',req.body.moderation?1:0]);
-    if(typeof req.body.guestbookModeration==='boolean')updates.push(['guestbook_moderation',req.body.guestbookModeration?1:0]);
-    if(!updates.length)return fail(res,400,'Mindestens eine gültige Freigabeeinstellung ist erforderlich.');
-    for(const [column,value] of updates)db.prepare(`UPDATE events SET ${column}=? WHERE id=?`).run(value,req.event.id);
-    res.json({success:true});
-  });
-  app.post('/api/event/:eventId/rotate-token',loginRequired,owner,(req,res)=>{db.prepare('UPDATE events SET guest_token=? WHERE id=?').run(random(),req.event.id);res.json({success:true});});
-  app.get('/api/event/:eventId/qr',loginRequired,owner,wrap(async(req,res)=>{
-    if(!readable(req.event)) return fail(res,402,'Album und Downloadzeitraum sind abgelaufen.');
-    const url=`${baseUrl.origin}/event/${req.event.id}?token=${req.event.guest_token}`;
-    res.type('png').attachment(`${req.event.id}-qr.png`).send(await QRCode.toBuffer(url,{width:1200,margin:4,errorCorrectionLevel:'M'}));
-  }));
-  // Disk staging bounds RAM usage. Re-encoding validates content and strips EXIF/GPS.
-  const temp=path.join(root,'.tmp');fs.mkdirSync(temp,{recursive:true});
-  const upload=multer({dest:temp,limits:{fileSize:20*1024*1024,files:10,fields:0,parts:10}}).array('photos',10);
-  const designCoverUpload=multer({dest:temp,limits:{fileSize:8*1024*1024,files:1,fields:0,parts:1}}).single('cover');
-  app.get('/api/event/:eventId/design-cover',access,wrap(async(req,res)=>{
-    const filename=readDesign(req.event).coverFilename;
-    if(typeof filename!=='string'||!/^design-[a-z0-9-]+\.jpg$/.test(filename))return fail(res,404,'Kein Titelmotiv vorhanden.');
-    res.type('jpeg').set('Cache-Control','private, no-store');
-    if(photoStorage.mode==='local')return res.sendFile(path.join(root,req.event.id,filename));
-    const stream=await photoStorage.getStream(req.event.id,filename);
-    stream.on('error',()=>res.destroy());stream.pipe(res);
-  }));
-  app.post('/api/event/:eventId/design-cover',loginRequired,owner,uploadLimit,(req,res,next)=>designCoverUpload(req,res,err=>err?next(err):next()),wrap(async(req,res)=>{
-    if(!readable(req.event))return fail(res,402,'Für dieses Event ist noch kein Gästezugang verfügbar.');
-    if(!req.file)return fail(res,400,'Bitte wähle ein Titelmotiv aus.');
-    const processed=path.join(temp,`${random()}.jpg`);
-    const filename=`design-${crypto.randomUUID()}.jpg`;
-    let stored=false;
-    try {
-      await sharp(req.file.path).rotate().resize(2000,2000,{fit:'inside',withoutEnlargement:true}).jpeg({quality:84,mozjpeg:true}).toFile(processed);
-      if(photoStorage.mode==='local') {
-        const eventDirectory=path.join(root,req.event.id);
-        await fs.promises.mkdir(eventDirectory,{recursive:true});
-        await fs.promises.copyFile(processed,path.join(eventDirectory,filename));
-      } else await photoStorage.put(req.event.id,filename,processed);
-      stored=true;
-      const previous=readDesign(req.event).coverFilename;
-      const next={...readDesign(req.event),coverFilename:filename};
-      db.prepare('UPDATE events SET design_json=? WHERE id=?').run(JSON.stringify(next),req.event.id);
-      if(typeof previous==='string'&&/^design-[a-z0-9-]+\.jpg$/.test(previous))await photoStorage.deletePhoto(req.event.id,previous);
-      res.json({success:true,design:publicDesign(lookup(req.event.id))});
-    } catch(error) {
-      if(stored)try{await photoStorage.deletePhoto(req.event.id,filename);}catch(cleanupError){console.error('Designmotiv konnte nicht aufgeräumt werden:',cleanupError.message);}
-      throw error;
-    } finally {
-      fs.rmSync(req.file.path,{force:true});
-      fs.rmSync(processed,{force:true});
-    }
-  }));
-  const busy=new Set();
-  let remoteStorageReservedBytes=0;
-  app.post('/api/event/:eventId/upload',uploadLimit,access,(req,res,next)=>{
-    if(req.event.owner_id && deletingUsers.has(req.event.owner_id)) return fail(res,409,'Das Konto wird gerade gelöscht. Uploads sind gesperrt.');
-    if(!active(req.event)) return fail(res,402,'Der Albumzeitraum ist beendet. Fotos können noch während der Downloadphase angesehen und heruntergeladen werden.');
-    if(busy.has(req.event.id)) return fail(res,429,'Upload läuft bereits. Bitte kurz warten.');
-    busy.add(req.event.id);
-    upload(req,res,async err=>{
-      const written=[];
-      try {
-        if(err) throw err;
-        const disk=fs.statfsSync(root);if(Number(disk.bavail)*Number(disk.bsize)<100*1024**2)throw new Error('Fotospeicher vorübergehend ausgelastet. Bitte den Veranstalter informieren.');
-        if(!req.files?.length) return fail(res,400,'Keine Fotos empfangen.');
-        const dir=photoStorage.mode==='local'?path.join(root,req.event.id):temp;if(photoStorage.mode==='local')fs.mkdirSync(dir,{recursive:true});
-        const total=db.prepare('SELECT COUNT(*) count, COALESCE(SUM(bytes),0) bytes FROM photos WHERE event_id=?').get(req.event.id);
-        const photoLimit=eventPhotoLimit(req.event),storageLimit=eventStorageLimit(req.event,cfg);
-        if(photoLimit!==null&&total.count+req.files.length>photoLimit) throw new Error('Die 25 kostenlosen Testfotos sind genutzt. Nach bestätigter Buchung gilt das Eventpaket ab dem Veranstaltungsdatum.');
+      WHERE e.owner_id=? AND e.deleted_…3344 tokens truncated…t ab dem Veranstaltungsdatum.');
         let bytes=total.bytes;
         for(const file of req.files) {
           const image=sharp(file.path,{limitInputPixels:40000000,animated:false});
@@ -492,7 +334,7 @@ function createApp(options = {}) {
       : db.prepare('SELECT * FROM photos WHERE event_id=? AND approved=1 AND uploader_token_hash=?').all(req.event.id,req.guestTokenHash);
     if(!photos.length) return fail(res,404,'Keine Fotos vorhanden.');
     res.attachment(`event-${req.event.id}-fotos.zip`);
-    const archive=archiver('zip',{zlib:{level:1}});
+    const archive=new archiver.ZipArchive({zlib:{level:1}});
     archive.on('error',()=>res.destroy());res.on('close',()=>archive.abort());archive.pipe(res);
     for(const p of photos) {
       if(photoStorage.mode==='local') archive.file(path.join(root,req.event.id,p.filename),{name:p.filename});
