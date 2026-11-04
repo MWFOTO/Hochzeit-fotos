@@ -1,0 +1,66 @@
+// Event-ID aus der URL lesen: /event/123/gallery -> "123"
+    const pathParts = window.location.pathname.split('/').filter(Boolean);
+    const eventId = pathParts[1] || 'default';
+
+    document.getElementById('upload-link').href = guestUrl(`/event/${encodeURIComponent(eventId)}/upload`);
+    document.getElementById('slideshow-link').href = guestUrl(`/event/${encodeURIComponent(eventId)}/slideshow`);
+    document.getElementById('games-link').href = guestUrl(`/event/${encodeURIComponent(eventId)}/games`);
+    document.getElementById('guestbook-link').href = guestUrl(`/event/${encodeURIComponent(eventId)}/guestbook`);
+    const grid = document.getElementById('grid');
+    const emptyMsg = document.getElementById('empty-msg');
+    const downloadAllBtn = document.getElementById('download-all-btn');
+    const lightbox = document.getElementById('lightbox');
+    const lightboxImg = document.getElementById('lightbox-img');
+    const lightboxDownload = document.getElementById('lightbox-download');
+    const lightboxClose = document.getElementById('lightbox-close');
+
+    async function loadPhotos() {
+      try {
+        const res = await fetch(`/api/event/${encodeURIComponent(eventId)}/photos`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Galerie konnte nicht geladen werden.');
+        const photos = data.photos || [];
+        if (lightbox.classList.contains('open') && !photos.some(p => new URL(p.url, location.origin).href === lightboxImg.src)) {
+          lightbox.classList.remove('open'); lightboxImg.src = ''; lightboxDownload.href = '';
+        }
+        renderPhotos(photos);
+      } catch (err) {
+        emptyMsg.textContent = err.message; emptyMsg.style.display = 'block';
+      }
+    }
+
+    function renderPhotos(photos) {
+      document.getElementById('photo-count').textContent = `${photos.length} ${photos.length === 1 ? 'Foto' : 'Fotos'} · Wird automatisch aktualisiert`;
+      grid.innerHTML = '';
+      emptyMsg.style.display = photos.length === 0 ? 'block' : 'none';
+
+      // neueste zuerst anzeigen
+      [...photos].reverse().forEach((photo) => {
+        const img = document.createElement('img');
+        img.src = photo.url; img.alt = 'Geteiltes Veranstaltungsfoto'; img.tabIndex = 0; img.setAttribute('role','button'); img.setAttribute('aria-label','Foto groß ansehen'); img.onkeydown = e => {if(e.key==='Enter' || e.key===' '){e.preventDefault();openLightbox(photo.url);}};
+        img.loading = 'lazy';
+        img.addEventListener('click', () => openLightbox(photo.url));
+        grid.appendChild(img);
+      });
+    }
+
+    function openLightbox(url) {
+      lightboxImg.src = url;
+      lightboxDownload.href = url;
+      // Dateinamen fürs Download-Attribut aus der URL ableiten
+      lightboxDownload.download = url.split('/').pop();
+      lightbox.classList.add('open');
+    }
+
+    lightboxClose.addEventListener('click', () => lightbox.classList.remove('open'));
+    lightbox.addEventListener('click', (e) => {
+      if (e.target === lightbox) lightbox.classList.remove('open');
+    });
+
+    downloadAllBtn.addEventListener('click', () => {
+      window.location.href = guestUrl(`/api/event/${encodeURIComponent(eventId)}/download`);
+    });
+
+    document.addEventListener('keydown', e => { if(e.key==='Escape') lightbox.classList.remove('open'); });
+    loadPhotos();
+    setInterval(loadPhotos, 5000); // Galerie hält sich ebenfalls automatisch aktuell

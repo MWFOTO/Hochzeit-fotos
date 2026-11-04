@@ -109,8 +109,7 @@ function createApp(options = {}) {
   const paymentAdminEmails=new Set(String(cfg.PAYMENT_ADMIN_EMAILS||'').split(',').map(email=>email.trim().toLowerCase()).filter(Boolean));
   const app = express();
   if (cfg.TRUST_PROXY === '1') app.set('trust proxy', 1);
-  // Inline scripts in the existing HTML are retained until the design phase.
-  app.use(helmet({contentSecurityPolicy:{directives:{'script-src':["'self'", "'unsafe-inline'"], 'img-src':["'self'",'data:','blob:'], 'upgrade-insecure-requests': baseUrl.protocol === 'https:' ? [] : null}}}));
+  app.use(helmet({contentSecurityPolicy:{directives:{'script-src':["'self'"], 'script-src-attr':["'none'"], 'img-src':["'self'",'data:','blob:'], 'upgrade-insecure-requests': baseUrl.protocol === 'https:' ? [] : null}}}));
   app.use((req,res,next)=>{ res.set('Cache-Control','no-store'); next(); });
   const lookup = id => db.prepare('SELECT * FROM events WHERE id=?').get(id);
   const own = (req,e) => !!(req.user && e && e.owner_id === req.user.id);
@@ -761,7 +760,7 @@ function createApp(options = {}) {
       "frame-ancestors 'self'",
       "img-src 'self' data: blob:",
       "object-src 'none'",
-      "script-src 'self' 'unsafe-inline'",
+      "script-src 'self'",
       "script-src-attr 'none'",
       "style-src 'self' 'unsafe-inline'",
       ...(baseUrl.protocol==='https:'?['upgrade-insecure-requests']:[])
@@ -770,7 +769,7 @@ function createApp(options = {}) {
   });
   for(const [suffix,file] of [['','gallery.html'],['/upload','upload.html'],['/gallery','gallery.html'],['/slideshow','slideshow.html'],['/games','games.html'],['/guestbook','guestbook.html']]) app.get(`/event/:eventId${suffix}`,access,(req,res)=>res.sendFile(path.join(pub,file)));
   // Only intended public assets; source code and generic HTML routes cannot bypass guards.
-  for(const file of ['style.css','design-editor.css','design-editor.js','upload.js','slideshow.js','guest-access.js','account.js','verify-email.js','password-recovery.js','games.js','guestbook.js','payments-admin.js','johanna-bastian.png','photographer.webp','event-wedding.jpg','event-birthday.jpg','event-summer.jpg','event-company.jpg']) app.get(`/${file}`,(req,res)=>res.sendFile(path.join(pub,file)));
+  for(const file of ['style.css','design-editor.css','design-editor.js','upload.js','slideshow.js','guest-access.js','account.js','verify-email.js','password-recovery.js','games.js','guestbook.js','payments-admin.js','landing.js','success.js','gallery-init.js','admin.js','johanna-bastian.png','photographer.webp','event-wedding.jpg','event-birthday.jpg','event-summer.jpg','event-company.jpg']) app.get(`/${file}`,(req,res)=>res.sendFile(path.join(pub,file)));
   // Liveness stays cheap for the host's restart check. Readiness checks critical dependencies.
   app.get('/health',(req,res)=>res.json({ok:true}));
   app.get('/ready',async(req,res)=>{

@@ -37,6 +37,10 @@ async function webhook(session,{type='checkout.session.completed',id='evt_'+Math
 let user,other,paidSession,token,photo;
 const guestA={},guestB={};
 test('Registration, login, session, CSRF and protected dashboard',async()=>{
+  const landing=await request('/');assert.equal(landing.status,200);
+  const policy=landing.res.headers.get('content-security-policy');assert.match(policy,/script-src 'self'/);assert.doesNotMatch(policy,/script-src[^;]*unsafe-inline/);
+  assert.match(Buffer.from(landing.data).toString(),/src="\/landing\.js"/);
+  for(const file of ['landing.js','success.js','gallery-init.js','admin.js'])assert.equal((await request(`/${file}`)).status,200);
   assert.equal((await request('/dashboard')).status,302);
   user=await register('owner@example.com');other=await register('other@example.com');
   assert.equal((await request('/api/auth/login',{method:'POST',body:{email:'owner@example.com',password:'wrong-password'}})).status,401);
