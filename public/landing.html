@@ -109,7 +109,7 @@
       </details>
       <details>
         <summary>Wann ist die Veranstaltung freigeschaltet?</summary>
-        <p>Mit bis zu 25 Testfotos kannst du dein Album vorab ausprobieren. Das volle Paket kostet einmalig 49,90 € und startet am Veranstaltungsdatum.</p>
+        <p>Mit bis zu 25 Testfotos kannst du dein Album vorab ausprobieren. Das volle Paket kostet einmalig 49,90 € inkl. 19 % USt. pro Veranstaltung und startet am Veranstaltungsdatum.</p>
       </details>
       <details>
         <summary>Wie lange bleiben die Fotos verfügbar?</summary>
@@ -141,6 +141,9 @@
         const price = document.createElement('p');
         price.className = 'plan-price';
         price.textContent = new Intl.NumberFormat('de-DE', {style:'currency', currency:'EUR'}).format(plan.priceCents / 100);
+        const tax = document.createElement('p');
+        tax.className = 'plan-tax';
+        tax.textContent = 'inkl. 19 % USt. · Endpreis für Privat- und Geschäftskunden';
         const billing = document.createElement('p');
         billing.className = 'plan-billing';
         billing.textContent = 'einmalig pro Veranstaltung';
@@ -161,7 +164,7 @@
         choose.className = 'button primary';
         choose.href = '/register?plan=' + encodeURIComponent(key);
         choose.textContent = 'Event anlegen';
-        card.append(title, price, billing, details, features, period, choose);
+        card.append(title, price, tax, billing, details, features, period, choose);
         document.getElementById('plan-grid').append(card);
       }
     }).catch(() => {});
