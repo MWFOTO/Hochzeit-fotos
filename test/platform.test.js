@@ -19,7 +19,8 @@ const fake={webhooks:signer.webhooks,checkout:{sessions:{create:async(data,optio
   creations++;const session={id:'cs_test_'+options.idempotencyKey,livemode:false,status:'open',payment_status:'unpaid',mode:data.mode,metadata:data.metadata,currency:'eur',amount_total:data.line_items[0].price_data.unit_amount,url:'https://checkout.stripe.com/test'};sessions.set(session.id,session);return session;
 },retrieve:async id=>sessions.get(id),expire:async id=>{const session=sessions.get(id);session.status='expired';return session;}}}};
 const sentMail=[];
-const app=createApp({mailer:async message=>sentMail.push(message),DB_PATH:path.join(tmp,'events.db'),UPLOAD_DIR:path.join(tmp,'uploads'),BASE_URL:'http://localhost:3000',STRIPE_WEBHOOK_SECRET:signing,stripe:fake,MAX_EVENT_PHOTOS:2,TRUST_PROXY:'1',uploadCapacityStatfs:()=>({bavail:simulatedUploadFreeBytes,bsize:1})});
+let failNextContractConfirmation=false;
+const app=createApp({mailer:async message=>{if(message.subject.includes('Vertragsbestätigung')&&failNextContractConfirmation){failNextContractConfirmation=false;throw new Error('temporary delivery failure');}sentMail.push(message);},DB_PATH:path.join(tmp,'events.db'),UPLOAD_DIR:path.join(tmp,'uploads'),BASE_URL:'http://localhost:3000',STRIPE_WEBHOOK_SECRET:signing,stripe:fake,MAX_EVENT_PHOTOS:2,TRUST_PROXY:'1',uploadCapacityStatfs:()=>({bavail:simulatedUploadFreeBytes,bsize:1})});
 const server=app.listen(0);
 const origin=`http://127.0.0.1:${server.address().port}`;
 after(()=>{server.close();app.locals.db.close();fs.rmSync(tmp,{recursive:true,force:true});});
@@ -65,9 +66,13 @@ test('Checkout idempotency, signature, unpaid/amount/live rejection and delayed 
   const paid={...paidSession,payment_status:'paid'};
   assert.equal(await webhook({...paid,amount_total:1}),500);
   assert.equal(await webhook({...paid,livemode:true}),500);
+  failNextContractConfirmation=true;
   assert.equal(await webhook(paid,{type:'checkout.session.async_payment_succeeded',id:'evt_paid'}),200);
   const confirmation=app.locals.db.prepare('SELECT * FROM contract_confirmations WHERE payment_id=(SELECT id FROM payments WHERE event_id=?)').get('birthday');
-  assert.equal(confirmation.status,'sent');
+  assert.equal(confirmation.status,'pending');assert.equal(confirmation.attempts,1);assert.ok(confirmation.recipient);
+  await app.locals.flushContractConfirmations();
+  const deliveredConfirmation=app.locals.db.prepare('SELECT * FROM contract_confirmations WHERE payment_id=?').get(confirmation.payment_id);
+  assert.equal(deliveredConfirmation.status,'sent');assert.equal(deliveredConfirmation.attempts,2);assert.equal(deliveredConfirmation.recipient,'');
   const contractMail=sentMail.find(message=>message.subject.includes('Vertragsbestätigung'));
   assert.ok(contractMail);assert.match(contractMail.text,/49,90 EUR/);assert.match(contractMail.text,/Widerrufsinformation/);assert.match(contractMail.text,/Muster-Widerrufsformular/);
   const expiry=app.locals.db.prepare('SELECT expires_at FROM events WHERE id=?').get('birthday').expires_at;
