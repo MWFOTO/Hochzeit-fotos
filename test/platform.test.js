@@ -13,12 +13,13 @@ const signer=new Stripe('sk_test_local_test_only');
 const eventDate=new Date(Date.now()+30*86400000).toISOString().slice(0,10);
 let registrationIp=1;
 let creations=0;
+let simulatedUploadFreeBytes=10*1024**3;
 const sessions=new Map();
 const fake={webhooks:signer.webhooks,checkout:{sessions:{create:async(data,options)=>{
   creations++;const session={id:'cs_test_'+options.idempotencyKey,livemode:false,status:'open',payment_status:'unpaid',mode:data.mode,metadata:data.metadata,currency:'eur',amount_total:data.line_items[0].price_data.unit_amount,url:'https://checkout.stripe.com/test'};sessions.set(session.id,session);return session;
 },retrieve:async id=>sessions.get(id),expire:async id=>{const session=sessions.get(id);session.status='expired';return session;}}}};
 const sentMail=[];
-const app=createApp({mailer:async message=>sentMail.push(message),DB_PATH:path.join(tmp,'events.db'),UPLOAD_DIR:path.join(tmp,'uploads'),BASE_URL:'http://localhost:3000',STRIPE_WEBHOOK_SECRET:signing,stripe:fake,MAX_EVENT_PHOTOS:2,TRUST_PROXY:'1'});
+const app=createApp({mailer:async message=>sentMail.push(message),DB_PATH:path.join(tmp,'events.db'),UPLOAD_DIR:path.join(tmp,'uploads'),BASE_URL:'http://localhost:3000',STRIPE_WEBHOOK_SECRET:signing,stripe:fake,MAX_EVENT_PHOTOS:2,TRUST_PROXY:'1',uploadCapacityStatfs:()=>({bavail:simulatedUploadFreeBytes,bsize:1})});
 const server=app.listen(0);
 const origin=`http://127.0.0.1:${server.address().port}`;
 after(()=>{server.close();app.locals.db.close();fs.rmSync(tmp,{recursive:true,force:true});});
@@ -79,8 +80,12 @@ test('Checkout idempotency, signature, unpaid/amount/live rejection and delayed 
 });
 async function upload(buffer,name='photo.jpg',guest=guestA) {const form=new FormData();form.append('photos',new Blob([buffer],{type:'image/jpeg'}),name);return request(`/api/event/birthday/upload?token=${token}`,{method:'POST',form,guest});}
 test('Content validation, guest upload, moderation, protected files, QR, quota and ZIP',async()=>{
-  assert.equal((await upload(Buffer.from('<script>evil</script>'))).status,400);
   const image=await sharp({create:{width:20,height:20,channels:3,background:'red'}}).jpeg().toBuffer();
+  simulatedUploadFreeBytes=1024**3;
+  const paused=await upload(image);assert.equal(paused.status,503);assert.match(paused.data.error,/temporäre Uploadspeicher/);
+  assert.equal(fs.readdirSync(path.join(tmp,'uploads','.tmp')).length,0);
+  simulatedUploadFreeBytes=10*1024**3;
+  assert.equal((await upload(Buffer.from('<script>evil</script>'))).status,400);
   assert.equal((await upload(image)).status,200);
   assert.equal((await request(`/api/event/birthday/photos?token=${token}`,{guest:guestA})).data.photos.length,0);
   const stats=(await request('/api/events',{user})).data.events.find(e=>e.id==='birthday');

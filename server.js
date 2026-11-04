@@ -92,7 +92,7 @@ function createApp(options = {}) {
   const db = openDatabase(cfg.DB_PATH || path.join(__dirname,'events.db'));
   const backupService=createBackupService({config:cfg,db,mailer});
   const operationsMonitor=createOperationsMonitor({config:cfg,db,mailer});
-  const uploadCapacity=createUploadCapacity({root,maxConcurrent:2});
+  const uploadCapacity=createUploadCapacity({root,maxConcurrent:2,statfs:options.uploadCapacityStatfs});
   // Unpaid draft events from the earlier one-trial-per-account flow can now
   // use the same free 25-photo test as newly created events.
   db.prepare("UPDATE events SET status='trial', trial_used=1 WHERE status='pending' AND owner_id IS NOT NULL AND deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM payments WHERE payments.event_id=events.id)").run();
@@ -824,3 +824,4 @@ if(require.main===module) {
   process.once('SIGTERM',()=>shutdown('SIGTERM'));
   process.once('SIGINT',()=>shutdown('SIGINT'));
 }
+module.exports={createApp,eventDeadline,retentionUntil};
