@@ -41,3 +41,11 @@ Nach Stripe-Tax-Einrichtung:
 6. Eine Testerstattung und einen Stripe-Teststreitfall durchführen; Status, Alarm und Albumzugang kontrollieren.
 
 Bis diese Prüfungen und der Backup-Wiederherstellungstest bestanden sind, bleibt der öffentliche Verkauf gesperrt. Die Rechtstexte benötigen zusätzlich eine fachkundige Prüfung.
+
+## 4. Alarmierung praktisch abnehmen
+
+1. Im [GitHub-Workflow „FinalSnap availability“](https://github.com/MWFOTO/Hochzeit-fotos/actions/workflows/finalsnap-availability.yml) einmal **Run workflow** starten. In den Actions-Läufen ist derzeit noch kein Lauf aufgezeichnet.
+2. Prüfen, dass `/health` und `/ready` beide erfolgreich geprüft werden.
+3. Im GitHub-Konto E-Mail-Benachrichtigungen für fehlgeschlagene Workflow-Läufe aktivieren und den Empfang eines Fehlalarms kontrolliert bestätigen.
+4. `PAYMENT_ALERT_EMAIL` in Render auf ein überwachtes Postfach setzen und Zustellung für Speicherwarnung, Refund/Streitfall und fehlgeschlagene Sicherung praktisch bestätigen.
+5. Zusätzlich Hetzner-Verbrauchs- und Kostenwarnungen im Hetzner-Konto konfigurieren. Die FinalSnap-App kennt nur die von ihr erfassten Fotodaten, nicht Hetzners Abrechnung.
