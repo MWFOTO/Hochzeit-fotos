@@ -41,6 +41,14 @@ function openDatabase(filename) {
     CREATE TABLE IF NOT EXISTS payment_alerts (
       event_id TEXT PRIMARY KEY REFERENCES payment_events(id), status TEXT NOT NULL DEFAULT 'pending',
       attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, created_at INTEGER NOT NULL, sent_at INTEGER);
+    CREATE TABLE IF NOT EXISTS backup_runs (
+      id TEXT PRIMARY KEY, started_at INTEGER NOT NULL, completed_at INTEGER,
+      status TEXT NOT NULL, db_object_key TEXT, photo_objects INTEGER, photo_bytes INTEGER,
+      error TEXT);
+    CREATE TABLE IF NOT EXISTS backup_photo_deletes (
+      event_id TEXT NOT NULL, filename TEXT NOT NULL, created_at INTEGER NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT,
+      PRIMARY KEY(event_id,filename));
     CREATE TABLE IF NOT EXISTS webhook_receipts (id TEXT PRIMARY KEY, created_at INTEGER NOT NULL);`);
   const paymentColumns=new Set(db.prepare('PRAGMA table_info(payments)').all().map(x=>x.name));
   if(!paymentColumns.has('stripe_payment_intent_id'))db.exec('ALTER TABLE payments ADD COLUMN stripe_payment_intent_id TEXT');
@@ -59,7 +67,7 @@ function openDatabase(filename) {
   const photoColumns=new Set(db.prepare('PRAGMA table_info(photos)').all().map(x=>x.name));
   if(!photoColumns.has('uploader_token_hash'))db.exec('ALTER TABLE photos ADD COLUMN uploader_token_hash TEXT');
   db.exec(`CREATE TABLE IF NOT EXISTS guestbook_entries (id TEXT PRIMARY KEY, event_id TEXT NOT NULL REFERENCES events(id), guest_name TEXT NOT NULL DEFAULT '', message TEXT NOT NULL, approved INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS password_resets (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS email_verifications (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL);`);
-  db.exec('CREATE INDEX IF NOT EXISTS photos_event ON photos(event_id); CREATE INDEX IF NOT EXISTS guestbook_event ON guestbook_entries(event_id,created_at); CREATE INDEX IF NOT EXISTS events_owner ON events(owner_id); CREATE UNIQUE INDEX IF NOT EXISTS payments_event ON payments(event_id); CREATE INDEX IF NOT EXISTS payment_attempts_payment ON payment_attempts(payment_id,attempt_no); CREATE INDEX IF NOT EXISTS payment_events_payment ON payment_events(payment_id,created_at); CREATE INDEX IF NOT EXISTS payment_alerts_status ON payment_alerts(status,created_at);');
+  db.exec('CREATE INDEX IF NOT EXISTS photos_event ON photos(event_id); CREATE INDEX IF NOT EXISTS guestbook_event ON guestbook_entries(event_id,created_at); CREATE INDEX IF NOT EXISTS events_owner ON events(owner_id); CREATE UNIQUE INDEX IF NOT EXISTS payments_event ON payments(event_id); CREATE INDEX IF NOT EXISTS payment_attempts_payment ON payment_attempts(payment_id,attempt_no); CREATE INDEX IF NOT EXISTS payment_events_payment ON payment_events(payment_id,created_at); CREATE INDEX IF NOT EXISTS payment_alerts_status ON payment_alerts(status,created_at); CREATE INDEX IF NOT EXISTS backup_runs_status ON backup_runs(status,completed_at); CREATE INDEX IF NOT EXISTS backup_photo_deletes_created ON backup_photo_deletes(created_at);');
   return db;
 }
 module.exports = { openDatabase };

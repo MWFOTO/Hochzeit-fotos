@@ -79,6 +79,10 @@ verarbeitet werden. Diese Anbieter- und Datenflüsse sind separat zu prüfen.
 | S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY | nur als geheime Hosting-Variablen eintragen |
 | S3_SSE_C_KEY | Base64-kodierter, zufälliger 32-Byte-Schlüssel; als Render-Secret und separat im Passwortmanager speichern |
 | S3_MAX_STORAGE_BYTES | 900 GiB standardmäßig; stoppt Uploads vor dem 1-TB-Speicherkontingent |
+| BACKUP_ENABLED | bleibt `0`, bis separater Backup-Bucket, Zugang, Versioning und Lifecycle-Regel geprüft sind |
+| BACKUP_S3_BUCKET | privater Hetzner-Sicherungs-Bucket, getrennt vom Fotobucket und in Falkenstein (`fsn1`) |
+| BACKUP_S3_ACCESS_KEY_ID / BACKUP_S3_SECRET_ACCESS_KEY | eigener Schlüssel mit Zugriff nur auf den Sicherungs-Bucket |
+| BACKUP_S3_SSE_C_KEY | eigener Base64-kodierter 32-Byte-Schlüssel, separat vom Fotoschlüssel verwahren |
 
 `render.yaml` beschreibt den neuen Dienst: Frankfurt, Starter-Plan, 10-GB-Datenträger,
 `finalsnap.de`, `/health` und zunächst deaktivierte automatische Deploys. Render
@@ -86,7 +90,7 @@ stellt nach erfolgreicher DNS-Prüfung TLS bereit. Die DNS-Einträge müssen bei
 Domainanbieter auf den neuen Render-Dienst zeigen; vorhandene Website-Einträge erst
 ändern, wenn klar ist, dass `finalsnap.de` künftig FinalSnap ausliefern soll. Die
 Blueprint-Datei legt
-keinen Hetzner-Bucket an. Dafür zuerst einen privaten Bucket in `nbg1` oder `fsn1`
+keinen Hetzner-Bucket an. Für Fotos zuerst einen privaten Bucket in `nbg1` oder `fsn1`
 und Zugangsdaten erstellen; die S3-Werte sowie den Brevo-Schlüssel beim Einrichten
 des Render-Blueprints als geheime Variablen setzen. Zusätzlich vor dem ersten
 Deploy einen zufälligen 32-Byte-SSE-C-Schlüssel erzeugen und sowohl als
@@ -94,6 +98,16 @@ Deploy einen zufälligen 32-Byte-SSE-C-Schlüssel erzeugen und sowohl als
 Hetzner speichert diesen Schlüssel nicht; geht er verloren, lassen sich die
 verschlüsselten Fotos nicht mehr lesen. Vor dem kostenpflichtigen Blueprint-Sync
 den im Render-Dashboard angezeigten Gesamtpreis bestätigen.
+
+Für Sicherungen einen weiteren privaten Bucket in der anderen deutschen Region
+(`fsn1`, getrennt vom Fotospeicher) anlegen. Versioning muss aktiviert sein; eine
+Lifecycle-Regel nur für `photos/` muss nicht aktuelle Versionen nach höchstens 7
+Tagen löschen und aktive Versionen behalten. Einen eigenen beschränkten S3-Schlüssel
+und separaten SSE-C-Schlüssel dafür erzeugen. Erst nach Prüfung im Hetzner-Dashboard
+die Backup-Zugangsdaten in Render setzen und `BACKUP_ENABLED=1` aktivieren. Die App
+prüft Versioning und die Foto-Lifecycle-Regel vor jedem Sicherungslauf; ohne passende
+Einstellungen wird der Lauf als fehlgeschlagen protokolliert und nicht als Erfolg
+gewertet. Datenbankkopien werden nach 30 Tagen aus dem Bucket entfernt.
 
 Die App wird aus dem GitHub-Zweig auf Render bereitgestellt. Datenbank und
 temporäre Uploads liegen auf einem dauerhaften Volume am deutschen Standort.

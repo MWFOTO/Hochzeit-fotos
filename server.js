@@ -12,6 +12,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { openDatabase } = require('./db');
 const { createPhotoStorage } = require('./photo-storage');
+const { createBackupService } = require('./backup-service');
 const scrypt = promisify(crypto.scrypt);
 const PLANS = { event:{label:'FinalSnap Fotoalbum',months:3,retentionDays:90,priceCents:4990}, '1m':{label:'1 Monat (alt)',months:1,priceCents:1900,legacy:true}, '3m':{label:'3 Monate (alt)',months:3,priceCents:2900,legacy:true}, '6m':{label:'6 Monate (alt)',months:6,priceCents:3900,legacy:true}, '12m':{label:'12 Monate (alt)',months:12,priceCents:5900,legacy:true} };
 const RETENTION_MS = 90*86400000;
@@ -86,6 +87,7 @@ function createApp(options = {}) {
   const storageLimit = Number(cfg.S3_MAX_STORAGE_BYTES || 900 * 1024 ** 3);
   if (!Number.isSafeInteger(storageLimit) || storageLimit <= 100 * 1024 ** 2) throw new Error('S3_MAX_STORAGE_BYTES muss größer als 100 MiB sein.');
   const db = openDatabase(cfg.DB_PATH || path.join(__dirname,'events.db'));
+  const backupService=createBackupService({config:cfg,db,mailer});
   // Unpaid draft events from the earlier one-trial-per-account flow can now
   // use the same free 25-photo test as newly created events.
   db.prepare("UPDATE events SET status='trial', trial_used=1 WHERE status='pending' AND owner_id IS NOT NULL AND deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM payments WHERE payments.event_id=events.id)").run();
@@ -522,10 +524,10 @@ function createApp(options = {}) {
       const previous=readDesign(req.event).coverFilename;
       const next={...readDesign(req.event),coverFilename:filename};
       db.prepare('UPDATE events SET design_json=? WHERE id=?').run(JSON.stringify(next),req.event.id);
-      if(typeof previous==='string'&&/^design-[a-z0-9-]+\.jpg$/.test(previous))await photoStorage.deletePhoto(req.event.id,previous);
+      if(typeof previous==='string'&&/^design-[a-z0-9-]+\.jpg$/.test(previous)){await photoStorage.deletePhoto(req.event.id,previous);await backupService.deletePhoto(req.event.id,previous);}
       res.json({success:true,design:publicDesign(lookup(req.event.id))});
     } catch(error) {
-      if(stored)try{await photoStorage.deletePhoto(req.event.id,filename);}catch(cleanupError){console.error('Designmotiv konnte nicht aufgeräumt werden:',cleanupError.message);}
+      if(stored)try{await photoStorage.deletePhoto(req.event.id,filename);await backupService.deletePhoto(req.event.id,filename);}catch(cleanupError){console.error('Designmotiv konnte nicht aufgeräumt werden:',cleanupError.message);}
       throw error;
     } finally {
       fs.rmSync(req.file.path,{force:true});
@@ -573,7 +575,7 @@ function createApp(options = {}) {
         db.transaction(()=>{for(const f of written) db.prepare('INSERT INTO photos (id,event_id,filename,bytes,approved,created_at,uploader_token_hash) VALUES (?,?,?,?,?,?,?)').run(f.id,req.event.id,f.filename,f.bytes,req.event.moderation?0:1,Date.now(),req.guestTokenHash||null);})();
         db.prepare('UPDATE events SET upload_successes=upload_successes+1 WHERE id=?').run(req.event.id);
         res.json({success:true,count:written.length,pending:!!req.event.moderation});
-      } catch(error) {db.prepare('UPDATE events SET upload_failures=upload_failures+1 WHERE id=?').run(req.event.id);for(const f of written){try{if(photoStorage.mode==='s3')await photoStorage.deletePhoto(req.event.id,f.filename);else fs.rmSync(f.dest,{force:true});}catch(cleanupError){console.error('Upload-Aufräumen fehlgeschlagen:',cleanupError.message);}}if(error.code==='PHOTO_STORAGE_UNAVAILABLE')console.error('Hetzner Object Storage:',error.cause?.message||error.message);fail(res,error.code==='PHOTO_STORAGE_UNAVAILABLE'?503:400,error.message);}
+      } catch(error) {db.prepare('UPDATE events SET upload_failures=upload_failures+1 WHERE id=?').run(req.event.id);for(const f of written){try{if(photoStorage.mode==='s3'){await photoStorage.deletePhoto(req.event.id,f.filename);await backupService.deletePhoto(req.event.id,f.filename);}else fs.rmSync(f.dest,{force:true});}catch(cleanupError){console.error('Upload-Aufräumen fehlgeschlagen:',cleanupError.message);}}if(error.code==='PHOTO_STORAGE_UNAVAILABLE')console.error('Hetzner Object Storage:',error.cause?.message||error.message);fail(res,error.code==='PHOTO_STORAGE_UNAVAILABLE'?503:400,error.message);}
       finally {for(const f of req.files||[]) fs.rmSync(f.path,{force:true});if(photoStorage.mode==='s3')for(const f of written)fs.rmSync(f.dest,{force:true});busy.delete(req.event.id);}
     });
   });
@@ -632,7 +634,7 @@ function createApp(options = {}) {
   app.delete('/api/event/:eventId/photos/:photoId',loginRequired,owner,wrap(async(req,res)=>{
     const p=db.prepare('SELECT * FROM photos WHERE id=? AND event_id=?').get(req.params.photoId,req.event.id);
     if(!p) return fail(res,404,'Foto nicht gefunden.');
-    await photoStorage.deletePhoto(req.event.id,p.filename);db.prepare('DELETE FROM photos WHERE id=?').run(p.id);res.json({success:true});
+    await photoStorage.deletePhoto(req.event.id,p.filename);await backupService.deletePhoto(req.event.id,p.filename);db.prepare('DELETE FROM photos WHERE id=?').run(p.id);res.json({success:true});
   }));
   app.get('/api/event/:eventId/download',access,wrap(async(req,res)=>{
     const photos=own(req,req.event)
@@ -652,6 +654,7 @@ function createApp(options = {}) {
     if(busy.has(e.id)) return false;
     // Legacy unowned events are never removed automatically: review/import first.
     await photoStorage.deleteEvent(e.id);
+    await backupService.deleteEvent(e.id);
     db.transaction(()=>{db.prepare('DELETE FROM photos WHERE event_id=?').run(e.id);db.prepare('DELETE FROM guestbook_entries WHERE event_id=?').run(e.id);db.prepare("UPDATE events SET status='expired', deleted_at=?, guest_token=NULL WHERE id=?").run(Date.now(),e.id);})();
     return true;
   }
@@ -758,11 +761,12 @@ function createApp(options = {}) {
   });
   app.use((req,res)=>fail(res,404,'Nicht gefunden.'));
   app.use((err,req,res,next)=>{console.error(err.message);if(!res.headersSent) fail(res,500,'Interner Fehler.');});
-  app.locals.db=db;app.locals.cleanup=cleanup;app.locals.fulfill=fulfill;app.locals.flushPaymentAlerts=flushPaymentAlerts;app.locals.photoStorage=photoStorage;
+  app.locals.db=db;app.locals.cleanup=cleanup;app.locals.fulfill=fulfill;app.locals.flushPaymentAlerts=flushPaymentAlerts;app.locals.photoStorage=photoStorage;app.locals.backupService=backupService;
   return app;
 }
 if(require.main===module) {
   const app=createApp();
+  app.locals.backupService.start();
   Promise.resolve(app.locals.cleanup()).catch(err=>console.error('Löschung fehlgeschlagen:',err.message));
   const disk=fs.statfsSync(path.resolve(process.env.UPLOAD_DIR || path.join(__dirname,'uploads')));
   console.info(app.locals.photoStorage.mode==='s3'?'Temporärer Upload-Speicher verfügbar (MiB):':'Fotospeicher verfügbar (MiB):',Math.floor(Number(disk.bavail)*Number(disk.bsize)/1024**2));
@@ -775,6 +779,7 @@ if(require.main===module) {
     shuttingDown=true;
     console.info(`${signal}: Beende laufende Anfragen.`);
     clearInterval(cleanupTimer);
+    app.locals.backupService.stop();
     const timeout=setTimeout(()=>{
       console.error('Geordnetes Herunterfahren dauerte zu lange; offene Verbindungen werden geschlossen.');
       server.closeAllConnections?.();

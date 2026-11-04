@@ -23,6 +23,8 @@ Stand: 4. November 2026. Der deutsche Dienst ist live; Stripe bleibt im Testmodu
 - [x] 27 automatisierte Tests bestanden beim letzten Code-Deploy. Mobile End-to-End- und Lasttests bleiben offen.
 
 ## Als Nächstes: Praxistests und Infrastruktur
+- [ ] Deutsche Steuerregistrierung in Stripe Tax im Testmodus einrichten. Betreiber hat bestätigt, dass sie derzeit fehlt; Live-Modus bleibt gesperrt.
+- [ ] `STRIPE_TAX_ENABLED=1` erst nach bestätigter Testmodus-Registrierung einschalten und automatische Steuerberechnung prüfen.
 - [ ] Ein bis zwei geschlossene Testveranstaltungen durchführen; mehrere Mobilgeräte, getrennte Gästegalerien und Löschtermine prüfen.
 - [ ] Im Stripe-Testmodus Privat- und Geschäftskauf aus FinalSnap durchführen; Rechnungs-PDF, ausgewiesene 19 % USt., Endpreis 49,90 € und Kundenbestätigung prüfen.
 - [ ] Stripe-Testerstattung und Teststreitfall auslösen; Status, Albumzugang, Protokoll und Alarmmail prüfen.
@@ -31,8 +33,8 @@ Stand: 4. November 2026. Der deutsche Dienst ist live; Stripe bleibt im Testmodu
 - [ ] Gleichzeitige Uploads prüfen; derzeit wird pro Event nur ein Uploadauftrag gleichzeitig verarbeitet.
 - [ ] 10-GB-Render-Disk und Hetzner-Speicherverbrauch in den Anbieter-Dashboards beobachten.
 - [ ] Anbieter- und Datenflüsse für Render, Hetzner, Brevo, Stripe und GitHub vollständig prüfen und dokumentieren.
-- [ ] Unabhängige Datenbank- und Fotosicherungen einrichten und Wiederherstellung testen.
-- [ ] Fristen aus `docs/BACKUP-RESTORE-PLAN.md` festlegen; Sicherungen erst nach Bestätigung der Foto-Nachlaufzeit aktivieren.
+- [ ] Separaten Hetzner-Sicherungs-Bucket in Falkenstein anlegen, Zugang/Schlüssel setzen, Versioning und Lifecycle-Regel prüfen; dann `BACKUP_ENABLED=1` aktivieren.
+- [ ] Täglichen Backup-Lauf und dokumentierten Wiederherstellungstest prüfen. Bestätigte Fristen: Datenbank 30 Tage, Fotos maximal 7 Tage nach aktiver Löschung.
 - [ ] Vor größeren Datenbankänderungen einen konsistenten Sicherungs- und Rückweg nachweisen.
 
 ## Angebot – Arbeitsmodell, vor Verkauf noch bestätigen
