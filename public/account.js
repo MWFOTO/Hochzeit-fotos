@@ -1,547 +1,190 @@
-Y™Áäx≥¨uÁ%j∑ù¬+arâÏ∂ÎïÎ_¢∫ﬁjÀ"ÇvõïÎ⁄Æ&õïÎ
+(() => {
+  const TERMS_VERSION='2026-11-04-2';
+  let csrf;
+  const message = document.getElementById('message');
+  const report = error => {message.textContent = error.message;};
+  async function api(url, method='GET', body) {
+    if(method!=='GET'&&!csrf){const me=await fetch('/api/auth/me');if(me.ok)csrf=(await me.json()).csrf;}
+    const res=await fetch(url,{method,headers:{'Content-Type':'application/json',...(csrf?{'X-CSRF-Token':csrf}:{})},...(body?{body:JSON.stringify(body)}:{})});
+    const data=await res.json();
+    if(!res.ok) throw new Error(data.error||'Anfrage fehlgeschlagen.');
+    if(data.csrf) csrf=data.csrf;
+    return data;
+  }
+  const login=document.getElementById('login-form');
+  if(login) {
+    const registering=location.pathname==='/register';
+    document.body.classList.toggle('login-page', !registering);
+    const selectedPlan=new URLSearchParams(location.search).get('plan');
+    if(new URLSearchParams(location.search).get('deleted')==='1')message.textContent='Dein FinalSnap-Konto und deine Alben wurden gel√∂scht. Eine erneute Anmeldung ist nicht mehr m√∂glich.';
+    if(selectedPlan==='event'){document.getElementById('auth-description').textContent='Deine Paketauswahl wird √ºbernommen. Jede neue Veranstaltung kannst du mit bis zu 25 Fotos kostenlos testen.';const switchLink=document.querySelector('#auth-switch a');if(switchLink)switchLink.href=`/${registering?'login':'register'}?plan=${encodeURIComponent(selectedPlan)}`;}
+    const password=document.getElementById('password');
+    const confirmation=document.getElementById('password-confirm');
+    if(registering){
+      document.getElementById('auth-eyebrow').textContent='DEIN ERSTES GEMEINSAMES ALBUM';
+      document.getElementById('auth-title').textContent='Konto erstellen';
+      document.getElementById('auth-description').textContent='Mit deinem Konto legst du Veranstaltungen an, erh√§ltst den QR-Code und verwaltest alle Fotos.';
+      document.getElementById('password-hint').hidden=false;
+      document.getElementById('confirm-label').hidden=false;confirmation.required=true;
+      password.autocomplete='new-password';
+      document.getElementById('auth-submit').textContent='Konto erstellen & Event anlegen';
+      const switcher=document.getElementById('auth-switch');switcher.replaceChildren(document.createTextNode('Schon ein Konto? '));const a=document.createElement('a');a.href=selectedPlan==='event'?`/login?plan=${encodeURIComponent(selectedPlan)}`:'/login';a.textContent='Anmelden';switcher.append(a);
+    }
+    login.onsubmit=async e=>{
+      e.preventDefault();
+      if(registering && password.value!==confirmation.value){report(new Error('Die Passw√∂rter stimmen nicht √ºberein.'));confirmation.focus();return;}
+      const button=document.getElementById('auth-submit');button.disabled=true;
+      try{await api(`/api/auth/${registering?'register':'login'}`,'POST',{email:document.getElementById('email').value,password:password.value});const event=new URLSearchParams(location.search).get('event');location.href=event?`/dashboard?event=${encodeURIComponent(event)}`:selectedPlan==='event'?`/dashboard?plan=${encodeURIComponent(selectedPlan)}`:'/dashboard';}catch(err){report(err);button.disabled=false;}
+    };return;
+  }
 
+  const element=(tag,text)=>{const el=document.createElement(tag);if(text)el.textContent=text;return el;};
+  const button=(parent,label,action)=>{const el=element('button',label);el.className='secondary';el.onclick=()=>Promise.resolve(action()).catch(report);parent.append(el);return el;};
+  const link=(parent,label,url)=>{const el=element('a',label);el.href=url;el.className='button secondary';parent.append(el);};
+  let availablePlans={};
+  let activeEvent=null;
+  async function manage(event) {
+    const section=document.getElementById('photo-manager');section.hidden=false;
+    document.getElementById('manager-title').textContent=`Fotos: ${event.title}`;
+    if(!section.dataset.opened){section.scrollIntoView({behavior:'smooth',block:'start'});section.dataset.opened='1';}
+    const {photos}=await api(`/api/event/${event.id}/photos?manage=1`);
+    const list=document.getElementById('managed-photos');list.replaceChildren();
+    if(!photos.length)list.textContent='Noch keine Fotos vorhanden.';
+    const toolbar=element('div');toolbar.className='actions photo-toolbar';list.before(toolbar);document.querySelectorAll('.photo-toolbar').forEach(el=>{if(el!==toolbar)el.remove();});
+    const selected=new Set();const counter=element('span','0 ausgew√§hlt');counter.setAttribute('role','status');
+    const all=button(toolbar,'Alle ausw√§hlen',()=>{const check=selected.size!==photos.length;list.querySelectorAll('input[type=checkbox]').forEach(box=>{box.checked=check;box.dispatchEvent(new Event('change'));});});
+    toolbar.append(counter);
+    const bulk=async(method,body)=>{if(!selected.size)return;if(method==='DELETE'&&!confirm(`${selected.size} ausgew√§hlte Fotos endg√ºltig l√∂schen?`))return;toolbar.querySelectorAll('button').forEach(b=>b.disabled=true);try{for(const id of selected)await api(`/api/event/${event.id}/photos/${id}`,method,body);await load();}catch(err){await load();throw err;}};
+    button(toolbar,'Auswahl freigeben',()=>bulk('PATCH',{approved:true}));button(toolbar,'Auswahl verbergen',()=>bulk('PATCH',{approved:false}));button(toolbar,'Auswahl l√∂schen',()=>bulk('DELETE')).className='danger';
+    for(const photo of photos) {
+      const card=element('article'),img=element('img');img.src=photo.url;img.alt='Veranstaltungsfoto';img.loading='lazy';const choice=element('label','Ausw√§hlen');choice.className='check-label';const box=element('input');box.type='checkbox';box.setAttribute('aria-label','Foto ausw√§hlen');box.onchange=()=>{box.checked?selected.add(photo.id):selected.delete(photo.id);counter.textContent=`${selected.size} ausgew√§hlt`;card.classList.toggle('selected',box.checked);};choice.prepend(box);card.append(choice,img,element('p',photo.approved?'Sichtbar f√ºr G√§ste':'Wartet auf Freigabe'));card.lastChild.className='photo-state';
+      button(card,photo.approved?'Freigabe zur√ºcknehmen':'Freigeben',async()=>{await api(`/api/event/${event.id}/photos/${photo.id}`,'PATCH',{approved:!photo.approved});await manage(event);});
+      button(card,'Foto l√∂schen',async()=>{if(confirm('Dieses Foto endg√ºltig l√∂schen?')){await api(`/api/event/${event.id}/photos/${photo.id}`,'DELETE');await load();}});
+      list.append(card);
+    }
+  }
+  async function load() {
+    const {events}=await api('/api/events');if(activeEvent&&!events.some(e=>e.id===activeEvent))activeEvent=null;document.querySelector('.create-panel').hidden=!!activeEvent;const section=document.getElementById('events');section.replaceChildren();
+    if(!events.length){section.append(element('p','Dein erstes Album wartet auf dich. Erstelle oben eine Veranstaltung.'));document.querySelector('.create-panel').open=true;}
+    for(const event of events) {
+      const card=element('article');card.className='event-card';const heading=element('div');heading.className='page-heading';const badge=element('span',event.paymentStatus==='disputed'?'Zahlungsstreitfall ¬∑ Zugang vorerst aktiv':event.status==='refunded'&&event.paymentStatus==='disputed_lost'?'Streitfall verloren ¬∑ Zugang beendet':event.status==='refunded'?'Erstattet ¬∑ Zugang beendet':event.readOnly?'Downloadphase':event.status==='trial'?'Kostenlos testen':event.status==='pilot'?'Geschlossener Praxistest':event.status==='paid'?(event.startsAt>Date.now()?'Start geplant':'Aktiv'):event.status==='pending'?'Zahlung offen':'Abgelaufen');badge.className='status-pill '+(event.status==='pending'||event.paymentStatus==='disputed'?'pending':'');heading.append(element('h2',event.title),badge);card.append(heading);if(activeEvent===event.id){const back=element('a','‚Üê Zur Veranstaltungs√ºbersicht');back.href='/dashboard';back.className='button secondary event-back';back.onclick=e=>{e.preventDefault();activeEvent=null;history.replaceState(null,'','/dashboard');document.getElementById('photo-manager').hidden=true;load();};card.append(back);}card.append(element('p',`${event.id}${event.event_date?` ¬∑ Start ${new Date(event.startsAt).toLocaleDateString('de-DE')}`:''}${event.expires_at?` ¬∑ Online bis ${new Date(event.expires_at).toLocaleDateString('de-DE')}${event.retentionUntil&&event.retentionUntil!==event.expires_at?` ¬∑ Downloads bis ${new Date(event.retentionUntil).toLocaleDateString('de-DE')}`:''}`:''}`));card.lastChild.className='event-meta';if(event.paymentStatus==='disputed')card.append(element('p','Der Zahlungsstreitfall wird gepr√ºft. Der Albumzugang bleibt bis zur Entscheidung bestehen.'));if(event.status==='refunded')card.append(element('p',event.paymentStatus==='disputed_lost'?`Die Bank hat den Streitfall zu Gunsten des Karteninhabers entschieden; der Albumzugang wurde beendet. Fotos werden sp√§testens am ${new Date(event.retentionUntil||event.expires_at).toLocaleDateString('de-DE')} gem√§√ü der Album-Aufbewahrungsfrist gel√∂scht.`:`Der Vollrefund ist best√§tigt; der G√§ste- und Veranstalterzugang wurde beendet. Die gespeicherten Fotos werden sp√§testens am ${new Date(event.retentionUntil||event.expires_at).toLocaleDateString('de-DE')} gem√§√ü der Album-Aufbewahrungsfrist gel√∂scht.`));if(event.hasInvoice){const invoiceLink=element('a','Rechnung / Zahlungsbeleg √∂ffnen');invoiceLink.href=`/api/event/${encodeURIComponent(event.id)}/invoice`;invoiceLink.target='_blank';invoiceLink.rel='noopener';invoiceLink.className='button secondary';card.append(invoiceLink);}
+      const stats=element('p',event.photoLimit===null?`${(event.storageBytes/1024**3).toFixed(2)} GB von ${(event.storageLimitBytes/1024**3).toFixed(1)} GB Fotospeicher belegt ¬∑ keine feste Fotoanzahl`:event.status==='pilot'?`${event.photoCount} von ${event.photoLimit} Fotos ¬∑ ${(event.storageBytes/1024**2).toFixed(1)} MB belegt`:`${event.photoCount} von 25 Testfotos ¬∑ ${(event.storageBytes/1024**2).toFixed(1)} MB belegt`);stats.id=`stats-${event.id}`;card.append(element('p',`Uploads: ${event.upload_successes} erfolgreich ¬∑ ${event.upload_failures} fehlgeschlagen`));if(event.readOnly)card.append(element('p',`Die Uploadzeit ist beendet. Deine Fotos bleiben bis ${new Date(event.retentionUntil).toLocaleDateString('de-DE')} zum Ansehen und Herunterladen verf√ºgbar; danach werden sie gel√∂scht.`));if(event.status==='pilot'&&!event.readOnly)card.append(element('p','Kostenloser Praxistest ohne Zahlung. Ma√ügeblich ist das angezeigte Ablaufdatum; bei Veranstaltungen mit Datum gibt es keine zus√§tzliche Downloadphase.'));if(event.status==='trial'&&!event.readOnly)card.append(element('p',`Bis zu 25 Fotos kostenlos testen ‚Äì daf√ºr ist keine Zahlung n√∂tig. Das vollst√§ndige Paket startet am ${new Date(event.startsAt).toLocaleDateString('de-DE')}; ohne Buchung bleibt es beim Testkontingent.`));if(event.status==='paid'&&event.startsAt>Date.now())card.append(element('p',`Testmodus bis ${new Date(event.startsAt).toLocaleDateString('de-DE')}: bis zu 25 Fotos. Ab dem Veranstaltungsdatum gilt das vollst√§ndige Speicherpaket.`));card.append(stats);const meter=element('progress');meter.max=event.storageLimitBytes;meter.value=event.storageBytes;meter.setAttribute('aria-label','Belegter Fotospeicher');card.append(meter);
+      const open=button(card,'Veranstaltung verwalten',()=>{activeEvent=event.id;history.replaceState(null,'',`/dashboard?event=${encodeURIComponent(event.id)}`);load();});open.className='primary event-open';
+      if(event.customerType==='consumer'&&event.paymentConcludedAt){
+        const withdrawal=element('section');withdrawal.className='event-section withdrawal-action';withdrawal.append(element('h3','Verbraucher-Widerruf'));
+        if(event.withdrawalSubmittedAt){withdrawal.append(element('p',`Dein Widerruf ist am ${new Date(event.withdrawalSubmittedAt).toLocaleString('de-DE',{dateStyle:'long',timeStyle:'short'})} eingegangen.`));withdrawal.append(element('p',event.withdrawalConfirmationStatus==='sent'?'Die Eingangsbest√§tigung wurde an deine Konto-E-Mail gesandt.':'Die Eingangsbest√§tigung ist gespeichert; der E-Mail-Versand wird erneut versucht.'));}
+        else {
+          const prepare=button(withdrawal,'Vertrag widerrufen',()=>{prepare.hidden=true;form.hidden=false;name.focus();});prepare.className='primary withdrawal-start';
+          const form=element('form');form.hidden=true;form.className='withdrawal-form';
+          form.append(element('p',`Vertrag: FinalSnap Fotoalbum ‚Äû${event.title}‚Äú (${event.id}). Die Eingangsbest√§tigung geht an ${event.email}.`));
+          const nameLabel=element('label','Vollst√§ndiger Name');const name=element('input');name.name='customerName';name.autocomplete='name';name.required=true;name.maxLength=160;nameLabel.append(name);form.append(nameLabel);
+          const emailLabel=element('label');emailLabel.className='check-label';const emailConfirmed=element('input');emailConfirmed.type='checkbox';emailConfirmed.required=true;emailLabel.append(emailConfirmed,element('span',` Ich best√§tige ${event.email} als E-Mail-Adresse f√ºr die Eingangsbest√§tigung.`));form.append(emailLabel);
+          const submit=element('button','Widerruf best√§tigen');submit.type='submit';submit.className='danger';form.append(submit);
+          form.onsubmit=async e=>{e.preventDefault();submit.disabled=true;try{const result=await api(`/api/events/${encodeURIComponent(event.id)}/withdrawal`,'POST',{customerName:name.value,emailConfirmed:emailConfirmed.checked});message.textContent=result.message;await load();}catch(error){report(error);submit.disabled=false;}};
+          withdrawal.append(form);
+        }
+        card.append(withdrawal);
+      }
+      const tabs=element('nav');tabs.className='actions event-tabs';tabs.setAttribute('aria-label','Veranstaltungsbereiche');card.append(tabs);
+      const panels=[];
+      const showPanel=index=>{panels.forEach((panel,i)=>panel.hidden=i!==index);tabs.querySelectorAll('button').forEach((b,i)=>b.setAttribute('aria-pressed',String(i===index)));document.getElementById('photo-manager').hidden=index!==0;if(index===0)return manage(event);};
+      if(['pending','trial'].includes(event.status)&&!event.readOnly){
+        const chooser=element('details');chooser.className='upgrade-panel';chooser.open=activeEvent===event.id;chooser.append(element('summary','Paket & Buchung'));
+        chooser.append(element('p','Kostenlos testen braucht keine Zahlung: Bis zu 25 Fotos kannst du direkt √ºber ‚ÄûFotos verwalten‚Äú hochladen. Der Endpreis betr√§gt 49,90 ‚Ç¨ inkl. 19 % USt. f√ºr Privat- und Gesch√§ftskunden. ‚ÄûTestzahlung starten‚Äú √∂ffnet den Stripe-Testcheckout; es wird kein echtes Geld eingezogen.'));
+        const buyerLabel=element('label','Kauf als');const buyerType=element('select');for(const [value,label] of [['consumer','Privatkunde'],['business','Gesch√§ftskunde']]){const option=element('option',label);option.value=value;buyerType.append(option);}buyerType.value=event.customerType||'consumer';buyerLabel.append(buyerType);chooser.append(buyerLabel);
+        const termsLabel=element('label');termsLabel.className='check-label';const termsAcceptance=element('input');termsAcceptance.type='checkbox';termsAcceptance.checked=event.termsAccepted&&event.termsVersion===TERMS_VERSION;const termsText=document.createTextNode(' Ich habe die ');const termsLink=element('a','Leistungsbedingungen');termsLink.href='/bedingungen';termsLink.target='_blank';termsLink.rel='noopener';termsLabel.append(termsAcceptance,termsText,termsLink,document.createTextNode(' gelesen und akzeptiere sie.'));
+        const earlyStartRequired=!!event.startsAt&&event.startsAt<Date.now()+14*86400000;
+        const earlyStartRequestLabel=element('label');earlyStartRequestLabel.className='check-label';const earlyStartRequest=element('input');earlyStartRequest.type='checkbox';earlyStartRequest.checked=event.earlyStartRequested;earlyStartRequestLabel.append(earlyStartRequest,document.createTextNode(' Ich verlange ausdr√ºcklich, dass FinalSnap mit dem entgeltlichen Albumdienst vor Ablauf der 14-t√§gigen Widerrufsfrist beginnt, wenn mein Veranstaltungsdatum innerhalb dieser Frist liegt.'));
+        const earlyStartAcknowledgementLabel=element('label');earlyStartAcknowledgementLabel.className='check-label';const earlyStartAcknowledgement=element('input');earlyStartAcknowledgement.type='checkbox';earlyStartAcknowledgement.checked=event.earlyStartAcknowledged;earlyStartAcknowledgementLabel.append(earlyStartAcknowledgement,document.createTextNode(' Ich best√§tige, dass ich bei einem Widerruf angemessenen Wertersatz f√ºr bereits erbrachte Leistungen schulden kann und mein Widerrufsrecht erst mit vollst√§ndiger Erbringung des Dienstes erlischt.'));
+        const withdrawalInfo=element('p');withdrawalInfo.className='small';withdrawalInfo.append(document.createTextNode('Widerrufsinformation: '));const withdrawalLink=element('a','Widerrufsrecht und Musterformular');withdrawalLink.href='/widerruf';withdrawalLink.target='_blank';withdrawalLink.rel='noopener';withdrawalInfo.append(withdrawalLink);
+        const consentMessage=element('p');consentMessage.setAttribute('role','status');consentMessage.setAttribute('aria-live','polite');
+        const updateEarlyStartVisibility=()=>{const visible=buyerType.value==='consumer'&&earlyStartRequired;earlyStartRequestLabel.hidden=!visible;earlyStartAcknowledgementLabel.hidden=!visible;withdrawalInfo.hidden=buyerType.value!=='consumer';};buyerType.addEventListener('change',updateEarlyStartVisibility);updateEarlyStartVisibility();
+        chooser.append(termsLabel,earlyStartRequestLabel,earlyStartAcknowledgementLabel,withdrawalInfo,consentMessage);
+        const grid=element('div');grid.className='plan-grid';chooser.append(grid);
+        for(const [key,plan] of Object.entries(availablePlans)){
+          if(plan.legacy&&event.plan!==key)continue;
+          const item=element('div');item.className='plan-card';const priceLabel=new Intl.NumberFormat('de-DE',{style:'currency',currency:'EUR'}).format(plan.priceCents/100);item.append(element('h3',plan.label),element('p',priceLabel),element('p','inkl. 19 % USt. ¬∑ Endpreis f√ºr Privat- und Gesch√§ftskunden'),element('p',`Keine feste Fotoanzahl ¬∑ bis zu ${plan.storageLimitGB.toLocaleString('de-DE',{maximumFractionDigits:1})} GB Fotospeicher. QR-Code, G√§stebuch, Fotoaufgaben, Diashow und Downloads enthalten.`));
+          const actionLabel=`${event.checkoutStarted&&event.plan===key?'Testzahlung fortsetzen':'Testzahlung starten'} ¬∑ ${priceLabel} inkl. USt.`;const choose=button(item,actionLabel,async()=>{if(!termsAcceptance.checked){consentMessage.textContent='Bitte lies und akzeptiere vor der Bestellung die Leistungsbedingungen.';termsAcceptance.focus();return;}const needsConsent=buyerType.value==='consumer'&&earlyStartRequired;if(needsConsent&&(!earlyStartRequest.checked||!earlyStartAcknowledgement.checked)){consentMessage.textContent='Bitte best√§tige beide Hinweise zum vorzeitigen Leistungsbeginn und Widerruf, bevor du fortf√§hrst.';return;}choose.disabled=true;try{const data=await api('/api/checkout','POST',{eventId:event.id,plan:key,customerType:buyerType.value,termsAccepted:termsAcceptance.checked,earlyStartRequest:needsConsent&&earlyStartRequest.checked,earlyStartAcknowledged:needsConsent&&earlyStartAcknowledgement.checked});if(!data.url)throw new Error('Der Test-Checkout hat keinen Link zur√ºckgegeben. Bitte sp√§ter erneut versuchen.');location.href=data.url;}finally{choose.disabled=false;}});choose.className='primary';choose.disabled=event.checkoutStarted&&event.plan!==key;grid.append(item);
+        }
+        if(event.checkoutStarted)chooser.append(element('p','Die begonnene Testzahlung ist an das einmalige FinalSnap-Fotoalbum gebunden.'));
+        card.append(chooser);
+      }
+      if(event.guestUrl) {
+        const photosSection=element('div');photosSection.className='event-section';photosSection.append(element('h3','Fotos & Live-Diashow'));card.append(photosSection);const photoActions=element('div');photoActions.className='actions';photosSection.append(photoActions);
+        const accessSection=element('div');accessSection.className='event-section';accessSection.append(element('h3','QR-Code & G√§stezugang'));card.append(accessSection);const accessActions=element('div');accessActions.className='actions';accessSection.append(accessActions);
+        const settings=element('details');settings.className='event-section event-settings';settings.open=true;settings.append(element('summary','Einstellungen & Freigabe'));card.append(settings);const settingsActions=element('div');settingsActions.className='actions';settings.append(element('p',event.readOnly?'Die Uploadzeit ist beendet. G√§ste k√∂nnen die vorhandenen Fotos noch bis zum Ende der Downloadphase ansehen.':event.moderation?'Neue Fotos warten auf deine Freigabe.':'G√§ste sehen auf ihrem Ger√§t nur ihre eigenen Uploads.'),settingsActions);if(event.event_date&&event.startsAt>Date.now()){const dateLabel=element('label','Veranstaltungsdatum √§ndern');const dateField=element('input');dateField.type='date';dateField.value=event.event_date;dateField.min=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Berlin'}).format(new Date());dateLabel.append(dateField);settingsActions.append(dateLabel);button(settingsActions,'Datum speichern',async()=>{await api(`/api/event/${event.id}`,'PATCH',{eventDate:dateField.value});message.textContent='Veranstaltungsdatum gespeichert. Der Albumzeitraum wurde angepasst.';await load();});}
+        panels.push(photosSection,accessSection,settings);
+        ['Fotos','G√§stezugang','Einstellungen'].forEach((label,i)=>button(tabs,label,()=>showPanel(i)));
+        button(accessActions,'G√§stelink kopieren',async()=>{try{await navigator.clipboard.writeText(event.guestUrl);message.textContent='G√§stelink kopiert.';}catch{const input=element('input');input.value=event.guestUrl;input.readOnly=true;accessSection.append(input);input.select();message.textContent='Bitte den markierten G√§stelink kopieren.';}});
+        link(accessActions,'G√§steansicht √∂ffnen',event.guestUrl);
+        link(photoActions,'Galerie √∂ffnen',event.guestUrl.replace('?','/gallery?'));
+        link(photoActions,'Live-Diashow',event.guestUrl.replace('?','/slideshow?'));
+        link(photoActions,'Fotoaufgaben',event.guestUrl.replace('?','/games?'));
+        link(photoActions,'G√§stebuch ansehen',event.guestUrl.replace('?','/guestbook?'));
+        link(accessActions,'G√§stebuch verwalten',`/event/${encodeURIComponent(event.id)}/guestbook`);
+        link(photoActions,'Design-Editor & QR-Druck',`/event/${encodeURIComponent(event.id)}/design`);
+        link(accessActions,'QR-Code herunterladen',`/api/event/${event.id}/qr`);
+        button(accessActions,'QR-Karte drucken',async()=>{
+          const blob=await (await fetch(`/api/event/${event.id}/qr`)).blob();
+          const url=URL.createObjectURL(blob),frame=document.createElement('iframe');frame.hidden=true;document.body.append(frame);
+          const doc=frame.contentDocument;doc.body.append(element('h1',event.title),element('p','Fotos teilen: QR-Code scannen.'));
+          const img=doc.createElement('img');img.width=350;img.onload=()=>{frame.contentWindow.focus();frame.contentWindow.print();setTimeout(()=>{frame.remove();URL.revokeObjectURL(url);},60000);};img.src=url;doc.body.append(img);
+        });
+        link(photoActions,'Alle Fotos herunterladen',`/api/event/${event.id}/download`);
+        button(photoActions,'Fotos verwalten',()=>manage(event)).className='primary';
+        button(settingsActions,event.moderation?'Automatische Freigabe aktivieren':'Manuelle Freigabe aktivieren',async()=>{await api(`/api/event/${event.id}`,'PATCH',{moderation:!event.moderation});await load();});
+        button(settingsActions,event.guestbook_moderation?'G√§stebuch: Freigabe ausschalten':'G√§stebuch: Freigabe einschalten',async()=>{await api(`/api/event/${event.id}`,'PATCH',{guestbookModeration:!event.guestbook_moderation});await load();});
+        button(settingsActions,'G√§stelink erneuern',async()=>{if(confirm('Alte Links und QR-Codes werden dadurch ung√ºltig. Fortfahren?')){await api(`/api/event/${event.id}/rotate-token`,'POST');await load();}});
+      }
+      const danger=element('details');danger.className='event-section event-settings';danger.append(element('summary','Veranstaltung l√∂schen'));card.append(danger);
+      button(danger,'Event und Fotos l√∂schen',async()=>{if(confirm('Event und alle Fotos endg√ºltig l√∂schen?')){await api(`/api/event/${event.id}`,'DELETE');document.getElementById('photo-manager').hidden=true;await load();}}).className='danger';
+      section.append(card);
+      if(activeEvent){card.hidden=event.id!==activeEvent;open.hidden=true;if(event.id===activeEvent){tabs.hidden=false;if(event.guestUrl)await showPanel(0);else document.getElementById('photo-manager').hidden=true;}}else{tabs.hidden=true;panels.forEach(panel=>panel.hidden=true);danger.hidden=true;}
 
-HOà¬à€€ú›TìT◊’ëTî“S”èIÃåçãLLKLLâŒ¬à]‹‹ôé¬à€€ú›Y\‹ÿYŸHHÿ›[Y[ùôŸ][[Y[ùûRY
-	€Y\‹ÿYŸI N¬à€€ú›ô\‹ùH\úõ‹àOà€Y\‹ÿYŸKù^€€ù[ùH\úõ‹ãõY\‹ÿYŸNﬂN¬à\ﬁ[ò»ù[ò›[€à\J\õY]ŸI——U	ÀõŸJH¬àYäY]ŸOOI——U	…âàX‹‹ôä^ÿ€€ú›YOX]ÿZ]ô]⁄
-	Àÿ\Kÿ]]€YI N⁄YäYKõ⁄ X‹‹ôèJ]ÿZ]YKöú€€ä
-JKò‹‹ôéﬂBà€€ú›ô\œX]ÿZ]ô]⁄
-\õ€Y]ŸXY\úŒû…–€€ù[ùU\IŒâÿ\Xÿ][€ã⁄ú€€âÀããä‹‹ôèﬁ…÷P‘‘ëãU⁄Ÿ[âŒò‹‹ôüNûﬂJ_KããäõŸOﬁÿõŸNíî””ãú›ö[ô⁄YûJõŸJ_NûﬂJ_JN¬à€€ú›]OX]ÿZ]ô\Àöú€€ä
-N¬àYä\ô\Àõ⁄ Hõ›»ô]»\úõ‹ä]Kô\úõ‹ü	–[ôúòYŸHôZŸ\ÿ⁄YŸ[ãâ N¬àYä]Kò‹‹ôäH‹‹ôèY]Kò‹‹ôé¬àô]\õà]N¬àBà€€ú›Ÿ⁄[èYÿ›[Y[ùôŸ][[Y[ùûRY
-	€Ÿ⁄[ãYõ‹õI N¬àYäŸ⁄[äH¬à€€ú›ôY⁄\›\ö[ôœ[ÿÿ][€ãú]ò[YOOOIÀ‹ôY⁄\›\âŒ¬àÿ›[Y[ùòõŸKò€\‹”\›ùŸŸ€J	€Ÿ⁄[ã\YŸIÀ\ôY⁄\›\ö[ô N¬à€€ú›Ÿ[X›Y[è[ô]»TìŸX\ò⁄\ò[\ ÿÿ][€ãúŸX\ò⁄
-KôŸ]
-	‹[â N¬àYäô]»TìŸX\ò⁄\ò[\ ÿÿ][€ãúŸX\ò⁄
-KôŸ]
-	Ÿ[]Y	 OOOIÃI [Y\‹ÿYŸKù^€€ù[ùI—Z[àö[ò[€ò\R€€ù»[ôZ[ôH[ô[à›\ô[àŸ[0Ìúÿ⁄àZ[ôH\õô]]H[õY[[ô»\›öX⁄YZàpÌô€X⁄âŒ¬àYäŸ[X›Y[èOOIŸ]ô[ù	 ^Ÿÿ›[Y[ùôŸ][[Y[ùûRY
-	ÿ]]Y\ÿ‹ö\[€â Kù^€€ù[ùI—Z[ôHZŸ]]\›ÿZ⁄\ô0Ôô\õõ€[Y[ãàôYHô]YHô\ò[ú›[[ô»ÿ[õú›HZ]ö\»ùHçHõ›‹»€‹›[õ‹»\›[ãâŒÿ€€ú››⁄]⁄[öœYÿ›[Y[ùú]Y\ûTŸ[X›‹ä	»ÿ]]\›⁄]⁄I N⁄Yä›⁄]⁄[ö \›⁄]⁄[öÀöôYèX…‹ôY⁄\›\ö[ôœ…€Ÿ⁄[âŒâ‹ôY⁄\›\âﬂO‹[èIŸ[ò€ŸUTíP€€\€ô[ù
-Ÿ[X›Y[ä_XﬂBà€€ú›\‹›€‹ôYÿ›[Y[ùôŸ][[Y[ùûRY
-	‹\‹›€‹ô	 N¬à€€ú›€€ôö\õX][€èYÿ›[Y[ùôŸ][[Y[ùûRY
-	‹\‹›€‹ôX€€ôö\õI N¬àYäôY⁄\›\ö[ô ^¬àÿ›[Y[ùôŸ][[Y[ùûRY
-	ÿ]]Y^YXúõ›… Kù^€€ù[ùI—RSàTî’T»—SQRSî–SQT»SïSIŒ¬àÿ›[Y[ùôŸ][[Y[ùûRY
-	ÿ]]]]I Kù^€€ù[ùI“€€ù»\ú›[[âŒ¬àÿ›[Y[ùôŸ][[Y[ùûRY
-	ÿ]]Y\ÿ‹ö\[€â Kù^€€ù[ùI”Z]Z[ô[H€€ù»Y‹›Hô\ò[ú›[[ôŸ[à[ã\ö0È›[àTãP€ŸH[ôô\ùÿ[\›[Hõ›‹ÀâŒ¬àÿ›[Y[ùôŸ][[Y[ùûRY
-	‹\‹›€‹ôZ[ù	 KöY[èYò[ŸN¬àÿ›[Y[ùôŸ][[Y[ùûRY
-	ÿ€€ôö\õK[Xô[	 KöY[èYò[ŸNÿ€€ôö\õX][€ãúô\]Z\ôY]ùYN¬à\‹›€‹ôò]]ÿ€€\]OI€ô]À\\‹›€‹ô	Œ¬àÿ›[Y[ùôŸ][[Y[ùûRY
-	ÿ]]\›XõZ]	 Kù^€€ù[ùI“€€ù»\ú›[[à	à]ô[ù[õYŸ[âŒ¬à€€ú››⁄]⁄\èYÿ›[Y[ùôŸ][[Y[ùûRY
-	ÿ]]\›⁄]⁄	 N‹›⁄]⁄\ãúô\XŸP⁄[ô[äÿ›[Y[ùò‹ôX]U^õŸJ	‘ÿ⁄€àZ[à€€ùœ»	 JNÿ€€ú›OYÿ›[Y[ùò‹ôX]Q[[Y[ù
-	ÿI NÿKöôYè\Ÿ[X›Y[èOOIŸ]ô[ù	œÿ€Ÿ⁄[è‹[èIŸ[ò€ŸUTíP€€\€ô[ù
-Ÿ[X›Y[ä_XâÀ€Ÿ⁄[âŒÿKù^€€ù[ùI–[õY[[âŒ‹›⁄]⁄\ãò\[ô
-JN¬àBàŸ⁄[ãõ€ú›XõZ]X\ﬁ[ò»OOû¬àKúô]ô[ùYò][
-
-N¬àYäôY⁄\›\ö[ô»	âà\‹›€‹ôùò[YHOOX€€ôö\õX][€ãùò[YJ^‹ô\‹ù
-ô]»\úõ‹ä	—YH\‹›Ìúù\à›[[Y[àöX⁄0Ôô\ôZ[ãâ JNÿ€€ôö\õX][€ãôõÿ›\ 
-N‹ô]\õéﬂBà€€ú›ù]€èYÿ›[Y[ùôŸ][[Y[ùûRY
-	ÿ]]\›XõZ]	 Nÿù]€ãô\ÿXõY]ùYN¬àû^ÿ]ÿZ]\Jÿ\Kÿ]]…‹ôY⁄\›\ö[ôœ…‹ôY⁄\›\âŒâ€Ÿ⁄[âﬂX	‘‘’	ÀŸ[XZ[ôÿ›[Y[ùôŸ][[Y[ùûRY
-	Ÿ[XZ[	 Kùò[YK\‹›€‹ôú\‹›€‹ôùò[Y_JNÿ€€ú›]ô[ù[ô]»TìŸX\ò⁄\ò[\ ÿÿ][€ãúŸX\ò⁄
-KôŸ]
-	Ÿ]ô[ù	 N€ÿÿ][€ãöôYèY]ô[ùÿŸ\⁄õÿ\ôŸ]ô[ùIŸ[ò€ŸUTíP€€\€ô[ù
-]ô[ù
-_XúŸ[X›Y[èOOIŸ]ô[ù	œÿŸ\⁄õÿ\ô‹[èIŸ[ò€ŸUTíP€€\€ô[ù
-Ÿ[X›Y[ä_XâÀŸ\⁄õÿ\ô	ŒﬂXÿ]⁄
-\úä^‹ô\‹ù
-\úäNÿù]€ãô\ÿXõYYò[ŸNﬂBàN‹ô]\õé¬àBÇà€€ú›[[Y[ùJYÀ^
-OOûÿ€€ú›[Yÿ›[Y[ùò‹ôX]Q[[Y[ù
-Y N⁄Yä^
-Y[ù^€€ù[ù]^‹ô]\õà[ﬂN¬à€€ú›ù]€èJ\ô[ùXô[X›[€äOOûÿ€€ú›[Y[[Y[ù
-	ÿù]€âÀXô[
-NŸ[ò€\‹”ò[YOI‹ŸX€€ô\ûIŒŸ[õ€ò€X⁄œJ
-OOîõ€Z\ŸKúô\€€ôJX›[€ä
-JKòÿ]⁄
-ô\‹ù
-N‹\ô[ùò\[ô
-[
-N‹ô]\õà[ﬂN¬à€€ú›[öœJ\ô[ùXô[\õ
-OOûÿ€€ú›[Y[[Y[ù
-	ÿIÀXô[
-NŸ[öôYè]\õŸ[ò€\‹”ò[YOIÿù]€àŸX€€ô\ûIŒ‹\ô[ùò\[ô
-[
-NﬂN¬à]]òZ[XõT[úœ^ﬂN¬à]X›]ôQ]ô[ù[ù[¬à\ﬁ[ò»ù[ò›[€àX[òYŸJ]ô[ù
-H¬à€€ú›ŸX›[€èYÿ›[Y[ùôŸ][[Y[ùûRY
-	‹›À[X[òYŸ\â N‹ŸX›[€ãöY[èYò[ŸN¬àÿ›[Y[ùôŸ][[Y[ùûRY
-	€X[òYŸ\ã]]I Kù^€€ù[ùXõ›‹Œà	Ÿ]ô[ùù]_X¬àYä\ŸX›[€ãô]\Ÿ]õ‹[ôY
-^‹ŸX›[€ãúÿ‹õ€[ù’öY] ÿôZ]ö[‹éâ‹€[€›	Àõÿ⁄Œâ‹›\ù	ﬂJN‹ŸX›[€ãô]\Ÿ]õ‹[ôYIÃIŒﬂBà€€ú›‹›‹ﬂOX]ÿZ]\Jÿ\KŸ]ô[ù…Ÿ]ô[ùöYK‹›‹œ€X[òYŸOLX
-N¬à€€ú›\›Yÿ›[Y[ùôŸ][[Y[ùûRY
-	€X[òYŸY\›‹… N€\›úô\XŸP⁄[ô[ä
-N¬àYä\›‹Àõ[ô›
-[\›ù^€€ù[ùI”õÿ⁄ŸZ[ôHõ›‹»õ‹ö[ô[ãâŒ¬à€€ú›€€ò\èY[[Y[ù
-	Ÿ]â N›€€ò\ãò€\‹”ò[YOIÿX›[€ú»›À]€€ò\âŒ€\›òôYõ‹ôJ€€ò\äNŸÿ›[Y[ùú]Y\ûTŸ[X›‹ê[
-	Àú›À]€€ò\â Kôõ‹ëXX⁄
-[Oû⁄Yä[OO]€€ò\äY[úô[[›ôJ
-NﬂJN¬à€€ú›Ÿ[X›Y[ô]»Ÿ]
-
-Nÿ€€ú›€›[ù\èY[[Y[ù
-	‹‹[âÀ	Ã]\ŸŸ]È	 Nÿ€›[ù\ãúŸ]]öXù]J	‹õ€IÀ	‹›]\… N¬à€€ú›[Xù]€ä€€ò\ã	–[H]\›È[âÀ
-
-OOûÿ€€ú›⁄X⁄œ\Ÿ[X›Yú⁄^ôHOO\›‹Àõ[ô›€\›ú]Y\ûTŸ[X›‹ê[
-	⁄[ú]›\OX⁄X⁄ÿõﬁI Kôõ‹ëXX⁄
-õﬁOûÿõﬁò⁄X⁄ŸYX⁄X⁄Œÿõﬁô\‹]⁄]ô[ù
-ô]»]ô[ù
-	ÿ⁄[ôŸI JNﬂJNﬂJN¬à€€ò\ãò\[ô
-€›[ù\äN¬à€€ú›ù[œX\ﬁ[ò Y]ŸõŸJOOû⁄Yä\Ÿ[X›Yú⁄^ôJ\ô]\õé⁄YäY]ŸOOI—SUI…âàX€€ôö\õJ	‹Ÿ[X›Yú⁄^ô_H]\ŸŸ]ÈHõ›‹»[ôÔY»0Ìúÿ⁄[èÿ
-J\ô]\õé›€€ò\ãú]Y\ûTŸ[X›‹ê[
-	ÿù]€â Kôõ‹ëXX⁄
-èOòãô\ÿXõY]ùYJN›û^Ÿõ‹ä€€ú›YŸàŸ[X›Y
-X]ÿZ]\Jÿ\KŸ]ô[ù…Ÿ]ô[ùöYK‹›‹À…⁄YXY]ŸõŸJNÿ]ÿZ]ÿY
-
-NﬂXÿ]⁄
-\úä^ÿ]ÿZ]ÿY
-
-N›õ›»\úéﬂ_N¬àù]€ä€€ò\ã	–]\›ÿZúôZYŸXô[âÀ
-
-OOòù[ 	‘U“	Àÿ\õ›ôYùùY_JJNÿù]€ä€€ò\ã	–]\›ÿZô\òô\ôŸ[âÀ
-
-OOòù[ 	‘U“	Àÿ\õ›ôYôò[Ÿ_JJNÿù]€ä€€ò\ã	–]\›ÿZ0Ìúÿ⁄[âÀ
-
-OOòù[ 	—SUI JKò€\‹”ò[YOIŸ[ôŸ\âŒ¬àõ‹ä€€ú››»Ÿà›‹ H¬à€€ú›ÿ\ôY[[Y[ù
-	ÿ\ùX€I K[YœY[[Y[ù
-	⁄[Y… N⁄[YÀú‹òœ\›Àù\õ⁄[YÀò[I’ô\ò[ú›[[ô‹Ÿõ›…Œ⁄[YÀõÿY[ôœI€^ûIŒÿ€€ú›⁄⁄XŸOY[[Y[ù
-	€Xô[	À	–]\›È[â Nÿ⁄⁄XŸKò€\‹”ò[YOIÿ⁄X⁄À[Xô[	Œÿ€€ú›õﬁY[[Y[ù
-	⁄[ú]	 Nÿõﬁù\OIÿ⁄X⁄ÿõﬁ	ŒÿõﬁúŸ]]öXù]J	ÿ\öXK[Xô[	À	—õ›»]\›È[â Nÿõﬁõ€ò⁄[ôŸOJ
-OOûÿõﬁò⁄X⁄ŸY‹Ÿ[X›YòY
-›ÀöY
-NúŸ[X›Yô[]J›ÀöY
-Nÿ€›[ù\ãù^€€ù[ùX	‹Ÿ[X›Yú⁄^ô_H]\ŸŸ]Èÿÿ\ôò€\‹”\›ùŸŸ€J	‹Ÿ[X›Y	Àõﬁò⁄X⁄ŸY
-NﬂNÿ⁄⁄XŸKúô\[ô
-õﬁ
-Nÿÿ\ôò\[ô
-⁄⁄XŸK[YÀ[[Y[ù
-	‹	À›Àò\õ›ôY…‘⁄X⁄ò\à∞ÔàÈ›IŒâ’ÿ\ù]]YàúôZYÿXôI JNÿÿ\ôõ\›⁄[ò€\‹”ò[YOI‹›À\›]IŒ¬àù]€äÿ\ô›Àò\õ›ôY…—úôZYÿXôHù\∞Ô⁄€ôZY[âŒâ—úôZYŸXô[âÀ\ﬁ[ò 
-OOûÿ]ÿZ]\Jÿ\KŸ]ô[ù…Ÿ]ô[ùöYK‹›‹À…‹›ÀöYX	‘U“	Àÿ\õ›ôYà\›Àò\õ›ôYJNÿ]ÿZ]X[òYŸJ]ô[ù
-NﬂJN¬àù]€äÿ\ô	—õ›»0Ìúÿ⁄[âÀ\ﬁ[ò 
-OOû⁄Yä€€ôö\õJ	—Y\Ÿ\»õ›»[ôÔY»0Ìúÿ⁄[è… J^ÿ]ÿZ]\Jÿ\KŸ]ô[ù…Ÿ]ô[ùöYK‹›‹À…‹›ÀöYX	—SUI Nÿ]ÿZ]ÿY
-
-Nﬂ_JN¬à\›ò\[ô
-ÿ\ô
-N¬àBàBà\ﬁ[ò»ù[ò›[€àÿY
-
-H¬à€€ú›Ÿ]ô[ùﬂOX]ÿZ]\J	Àÿ\KŸ]ô[ù… N⁄YäX›]ôQ]ô[ù	âàY]ô[ùÀú€€YJOOôKöYOOXX›]ôQ]ô[ù
-JXX›]ôQ]ô[ù[ù[Ÿÿ›[Y[ùú]Y\ûTŸ[X›‹ä	Àò‹ôX]K\[ô[	 KöY[èHHXX›]ôQ]ô[ùÿ€€ú›ŸX›[€èYÿ›[Y[ùôŸ][[Y[ùûRY
-	Ÿ]ô[ù… N‹ŸX›[€ãúô\XŸP⁄[ô[ä
-N¬àYäY]ô[ùÀõ[ô›
-^‹ŸX›[€ãò\[ô
-[[Y[ù
-	‹	À	—Z[à\ú›\»[ù[Hÿ\ù]]YàX⁄à\ú›[Hÿô[àZ[ôHô\ò[ú›[[ôÀâ JNŸÿ›[Y[ùú]Y\ûTŸ[X›‹ä	Àò‹ôX]K\[ô[	 Kõ‹[è]ùYNﬂBàõ‹ä€€ú›]ô[ùŸà]ô[ù H¬à€€ú›ÿ\ôY[[Y[ù
-	ÿ\ùX€I Nÿÿ\ôò€\‹”ò[YOIŸ]ô[ùXÿ\ô	Œÿ€€ú›XY[ôœY[[Y[ù
-	Ÿ]â N⁄XY[ôÀò€\‹”ò[YOI‹YŸKZXY[ô…Œÿ€€ú›òYŸOY[[Y[ù
-	‹‹[âÀ]ô[ùú^[Y[ù›]\œOOIŸ\‹]Y	œ…÷òZ[ô‹‹›ôZ]ò[0≠»ùYÿ[ô»õ‹ô\ú›Z›]âŒô]ô[ùú›]\œOOI‹ôYù[ôY	…âô]ô[ùú^[Y[ù›]\œOOIŸ\‹]Y€‹›	œ…‘›ôZ]ò[ô\õ‹ô[à0≠»ùYÿ[ô»ôY[ô]	Œô]ô[ùú›]\œOOI‹ôYù[ôY	œ…—\ú›]]0≠»ùYÿ[ô»ôY[ô]	Œô]ô[ùúôXY€õO…—›€õÿY\ŸIŒô]ô[ùú›]\œOOI›öX[	œ…“€‹›[õ‹»\›[âŒô]ô[ùú›]\œOOI‹[›	œ…—Ÿ\ÿ⁄‹‹Ÿ[ô\àò^\›\›	Œô]ô[ùú›]\œOOI‹ZY	œ ]ô[ùú›\ù–]ë]Kõõ› 
-O…‘›\ùŸ\[ù	Œâ–Z›]â Nô]ô[ùú›]\œOOI‹[ô[ô…œ…÷òZ[ô»Ÿôô[âŒâ–XôŸ[]Yô[â NÿòYŸKò€\‹”ò[YOI‹›]\À\[	  ]ô[ùú›]\œOOI‹[ô[ô…ﬂ]ô[ùú^[Y[ù›]\œOOIŸ\‹]Y	œ…‹[ô[ô…Œâ… N⁄XY[ôÀò\[ô
-[[Y[ù
-	⁄âÀ]ô[ùù]JKòYŸJNÿÿ\ôò\[ô
-XY[ô N⁄YäX›]ôQ]ô[ùOOY]ô[ùöY
-^ÿ€€ú›òX⁄œY[[Y[ù
-	ÿIÀ	¯°§ù\àô\ò[ú›[[ô‹Ôô\ú⁄X⁄	 NÿòX⁄ÀöôYèIÀŸ\⁄õÿ\ô	ŒÿòX⁄Àò€\‹”ò[YOIÿù]€àŸX€€ô\ûH]ô[ùXòX⁄…ŒÿòX⁄Àõ€ò€X⁄œYOOûŸKúô]ô[ùYò][
-
-NÿX›]ôQ]ô[ù[ù[⁄\›‹ûKúô\XŸT›]Jù[	…À	ÀŸ\⁄õÿ\ô	 NŸÿ›[Y[ùôŸ][[Y[ùûRY
-	‹›À[X[òYŸ\â KöY[è]ùYN€ÿY
-
-NﬂNÿÿ\ôò\[ô
-òX⁄ NﬂXÿ\ôò\[ô
-[[Y[ù
-	‹	À	Ÿ]ô[ùöYIŸ]ô[ùô]ô[ùŸ]Oÿ0≠»›\ù	€ô]»]J]ô[ùú›\ù–]
-Kù”ÿÿ[Q]T›ö[ô 	ŸKQI _Xâ…ﬂIŸ]ô[ùô^\ô\◊ÿ]ÿ0≠»€õ[ôHö\»	€ô]»]J]ô[ùô^\ô\◊ÿ]
-Kù”ÿÿ[Q]T›ö[ô 	ŸKQI _IŸ]ô[ùúô][ù[€ï[ù[	âô]ô[ùúô][ù[€ï[ù[OOY]ô[ùô^\ô\◊ÿ]ÿ0≠»›€õÿY»ö\»	€ô]»]J]ô[ùúô][ù[€ï[ù[
-Kù”ÿÿ[Q]T›ö[ô 	ŸKQI _Xâ…ﬂXâ…ﬂX
-JNÿÿ\ôõ\›⁄[ò€\‹”ò[YOIŸ]ô[ù[Y]IŒ⁄Yä]ô[ùú^[Y[ù›]\œOOIŸ\‹]Y	 Xÿ\ôò\[ô
-[[Y[ù
-	‹	À	—\àòZ[ô‹‹›ôZ]ò[⁄\ôŸ\∞Ôùà\à[ù[^ùYÿ[ô»õZXùö\»ù\à[ùÿ⁄ZY[ô»ô\›Z[ãâ JN⁄Yä]ô[ùú›]\œOOI‹ôYù[ôY	 Xÿ\ôò\[ô
-[[Y[ù
-	‹	À]ô[ùú^[Y[ù›]\œOOIŸ\‹]Y€‹›	œÿYHò[ö»][à›ôZ]ò[ùH›[ú›[à\»ÿ\ù[ö[öXô\ú»[ùÿ⁄YY[é»\à[ù[^ùYÿ[ô»›\ôHôY[ô]àõ›‹»Ÿ\ô[à‹0È\›[ú»[H	€ô]»]J]ô[ùúô][ù[€ï[ù[]ô[ùô^\ô\◊ÿ]
-Kù”ÿÿ[Q]T›ö[ô 	ŸKQI _HŸ[pÈ0Á»\à[ù[KP]Yòô]ÿZù[ô‹Ÿúö\›Ÿ[0Ìúÿ⁄òò\àõ€ôYù[ô\›ô\›0ÈY›»\àÈ›KH[ôô\ò[ú›[\ûùYÿ[ô»›\ôHôY[ô]àYHŸ\‹ZX⁄\ù[àõ›‹»Ÿ\ô[à‹0È\›[ú»[H	€ô]»]J]ô[ùúô][ù[€ï[ù[]ô[ùô^\ô\◊ÿ]
-Kù”ÿÿ[Q]T›ö[ô 	ŸKQI _HŸ[pÈ0Á»\à[ù[KP]Yòô]ÿZù[ô‹Ÿúö\›Ÿ[0Ìúÿ⁄ò
-JN⁄Yä]ô[ùö\“[ùõ⁄XŸJ^ÿ€€ú›[ùõ⁄XŸS[öœY[[Y[ù
-	ÿIÀ	‘ôX⁄ù[ô»»òZ[ô‹ÿô[Y»0Ìôôõô[â N⁄[ùõ⁄XŸS[öÀöôYèXÿ\KŸ]ô[ù…Ÿ[ò€ŸUTíP€€\€ô[ù
-]ô[ùöY
-_K⁄[ùõ⁄XŸX⁄[ùõ⁄XŸS[öÀù\ôŸ]I◊ÿõ[ö…Œ⁄[ùõ⁄XŸS[öÀúô[I€õ€‹[ô\âŒ⁄[ùõ⁄XŸS[öÀò€\‹”ò[YOIÿù]€àŸX€€ô\ûIŒÿÿ\ôò\[ô
-[ùõ⁄XŸS[ö NﬂBà€€ú››]œY[[Y[ù
-	‹	À]ô[ùú›”[Z]OO[ù[ÿ	 ]ô[ùú›‹òYŸPû]\ÀÃLç
-äå Kù—ö^Y
-ä_H–àõ€à	 ]ô[ùú›‹òYŸS[Z]û]\ÀÃLç
-äå Kù—ö^Y
-J_H–àõ›‹‹ZX⁄\àô[Y›0≠»ŸZ[ôHô\›Hõ›ÿ[ûòZô]ô[ùú›]\œOOI‹[›	œÿ	Ÿ]ô[ùú›–€›[ùHõ€à	Ÿ]ô[ùú›”[Z]Hõ›‹»0≠»	 ]ô[ùú›‹òYŸPû]\ÀÃLç
-äåäKù—ö^Y
-J_HPàô[Y›ò	Ÿ]ô[ùú›–€›[ùHõ€àçH\›õ›‹»0≠»	 ]ô[ùú›‹òYŸPû]\ÀÃLç
-äåäKù—ö^Y
-J_HPàô[Y›
-N‹›]ÀöYX›]ÀIŸ]ô[ùöYXÿÿ\ôò\[ô
-[[Y[ù
-	‹	À\ÿYŒà	Ÿ]ô[ùù\ÿY‹›XÿŸ\‹Ÿ\ﬂH\ôõ€‹ôZX⁄0≠»	Ÿ]ô[ùù\ÿYŸòZ[\ô\ﬂHôZŸ\ÿ⁄YŸ[ò
-JN⁄Yä]ô[ùúôXY€õJXÿ\ôò\[ô
-[[Y[ù
-	‹	ÀYH\ÿYôZ]\›ôY[ô]àZ[ôHõ›‹»õZXô[àö\»	€ô]»]J]ô[ùúô][ù[€ï[ù[
-Kù”ÿÿ[Q]T›ö[ô 	ŸKQI _Hù[H[úŸZ[à[ô\ù[ù\õY[àô\ô∞Ôÿò\é»[òX⁄Ÿ\ô[à⁄YHŸ[0Ìúÿ⁄ò
-JN⁄Yä]ô[ùú›]\œOOI‹[›	…âàY]ô[ùúôXY€õJXÿ\ôò\[ô
-[[Y[ù
-	‹	À	“€‹›[õ‹Ÿ\àò^\›\›⁄ôHòZ[ôÀàXpÁŸŸXõX⁄\›\»[ôŸ^ôZY›HXõ]Yô][N»ôZHô\ò[ú›[[ôŸ[àZ]][H⁄Xù\»ŸZ[ôHù\ÈõX⁄H›€õÿY\ŸKâ JN⁄Yä]ô[ùú›]\œOOI›öX[	…âàY]ô[ùúôXY€õJXÿ\ôò\[ô
-[[Y[ù
-	‹	Àö\»ùHçHõ›‹»€‹›[õ‹»\›[à8†$»Y∞Ôà\›ŸZ[ôHòZ[ô»∞ÌùYÀà\»õ€›0ÈôYŸHZŸ]›\ù][H	€ô]»]J]ô[ùú›\ù–]
-Kù”ÿÿ[Q]T›ö[ô 	ŸKQI _N»⁄ôHùX⁄[ô»õZXù\»ôZ[H\›€€ù[ôŸ[ùò
-JN⁄Yä]ô[ùú›]\œOOI‹ZY	…âô]ô[ùú›\ù–]ë]Kõõ› 
-JXÿ\ôò\[ô
-[[Y[ù
-	‹	À\›[Ÿ\»ö\»	€ô]»]J]ô[ùú›\ù–]
-Kù”ÿÿ[Q]T›ö[ô 	ŸKQI _Nàö\»ùHçHõ›‹ÀàXà[Hô\ò[ú›[[ô‹Ÿ][H⁄[\»õ€›0ÈôYŸH‹ZX⁄\úZŸ]ò
-JNÿÿ\ôò\[ô
-›] Nÿ€€ú›Y]\èY[[Y[ù
-	‹õŸ‹ô\‹… N€Y]\ãõX^Y]ô[ùú›‹òYŸS[Z]û]\Œ€Y]\ãùò[YOY]ô[ùú›‹òYŸPû]\Œ€Y]\ãúŸ]]öXù]J	ÿ\öXK[Xô[	À	–ô[Y›\àõ›‹‹ZX⁄\â Nÿÿ\ôò\[ô
-Y]\äN¬à€€ú›‹[èXù]€äÿ\ô	’ô\ò[ú›[[ô»ô\ùÿ[[âÀ
-
-OOûÿX›]ôQ]ô[ùY]ô[ùöY⁄\›‹ûKúô\XŸT›]Jù[	…ÀŸ\⁄õÿ\ôŸ]ô[ùIŸ[ò€ŸUTíP€€\€ô[ù
-]ô[ùöY
-_X
-N€ÿY
-
-NﬂJN€‹[ãò€\‹”ò[YOI‹ö[X\ûH]ô[ù[‹[âŒ¬àYä]ô[ùò›\›€Y\ï\OOOIÿ€€ú›[Y\â…âô]ô[ùú^[Y[ù€€ò€YY]
-^¬à€€ú›⁄]ò]ÿ[Y[[Y[ù
-	‹ŸX›[€â N›⁄]ò]ÿ[ò€\‹”ò[YOIŸ]ô[ù\ŸX›[€à⁄]ò]ÿ[XX›[€âŒ›⁄]ò]ÿ[ò\[ô
-[[Y[ù
-	⁄…À	’ô\òúò]X⁄\ãU⁄Y\úùYâ JN¬àYä]ô[ùù⁄]ò]ÿ[›XõZ]Y]
-^›⁄]ò]ÿ[ò\[ô
-[[Y[ù
-	‹	ÀZ[à⁄Y\úùYà\›[H	€ô]»]J]ô[ùù⁄]ò]ÿ[›XõZ]Y]
-Kù”ÿÿ[T›ö[ô 	ŸKQIÀŸ]T›[Nâ€€ô…À[YT›[Nâ‹⁄‹ù	ﬂJ_HZ[ôŸYÿ[ôŸ[ãò
-JN›⁄]ò]ÿ[ò\[ô
-[[Y[ù
-	‹	À]ô[ùù⁄]ò]ÿ[€€ôö\õX][€î›]\œOOI‹Ÿ[ù	œ…—YHZ[ôÿ[ô‹ÿô\›0ÈY›[ô»›\ôH[àZ[ôH€€ùÀQKSXZ[Ÿ\ÿ[ôâŒâ—YHZ[ôÿ[ô‹ÿô\›0ÈY›[ô»\›Ÿ\‹ZX⁄\ù»\àKSXZ[Uô\úÿ[ô⁄\ô\õô]]ô\ú›X⁄â JNﬂBà[ŸH¬à€€ú›ô\\ôOXù]€ä⁄]ò]ÿ[	’ô\ùòY»⁄Y\úùYô[âÀ
-
-OOû‹ô\\ôKöY[è]ùYNŸõ‹õKöY[èYò[ŸN€ò[YKôõÿ›\ 
-NﬂJN‹ô\\ôKò€\‹”ò[YOI‹ö[X\ûH⁄]ò]ÿ[\›\ù	Œ¬à€€ú›õ‹õOY[[Y[ù
-	Ÿõ‹õI NŸõ‹õKöY[è]ùYNŸõ‹õKò€\‹”ò[YOI›⁄]ò]ÿ[Yõ‹õIŒ¬àõ‹õKò\[ô
-[[Y[ù
-	‹	Àô\ùòYŒàö[ò[€ò\õ›ÿ[ù[H8†'âŸ]ô[ùù]_x†'
-	Ÿ]ô[ùöYJKàYHZ[ôÿ[ô‹ÿô\›0ÈY›[ô»ŸZ[à	Ÿ]ô[ùô[XZ[Kò
-JN¬à€€ú›ò[YSXô[Y[[Y[ù
-	€Xô[	À	’õ€›0ÈôYŸ\àò[YI Nÿ€€ú›ò[YOY[[Y[ù
-	⁄[ú]	 N€ò[YKõò[YOIÿ›\›€Y\ìò[YIŒ€ò[YKò]]ÿ€€\]OI€ò[YIŒ€ò[YKúô\]Z\ôY]ùYN€ò[YKõX^[ô›LMå€ò[YSXô[ò\[ô
-ò[YJNŸõ‹õKò\[ô
-ò[YSXô[
-N¬à€€ú›[XZ[Xô[Y[[Y[ù
-	€Xô[	 NŸ[XZ[Xô[ò€\‹”ò[YOIÿ⁄X⁄À[Xô[	Œÿ€€ú›[XZ[€€ôö\õYYY[[Y[ù
-	⁄[ú]	 NŸ[XZ[€€ôö\õYYù\OIÿ⁄X⁄ÿõﬁ	ŒŸ[XZ[€€ôö\õYYúô\]Z\ôY]ùYNŸ[XZ[Xô[ò\[ô
-[XZ[€€ôö\õYY[[Y[ù
-	‹‹[âÀX⁄ô\›0ÈYŸH	Ÿ]ô[ùô[XZ[H[»KSXZ[PYô\‹ŸH∞ÔàYHZ[ôÿ[ô‹ÿô\›0ÈY›[ôÀò
-JNŸõ‹õKò\[ô
-[XZ[Xô[
-N¬à€€ú››XõZ]Y[[Y[ù
-	ÿù]€âÀ	’⁄Y\úùYàô\›0ÈYŸ[â N‹›XõZ]ù\OI‹›XõZ]	Œ‹›XõZ]ò€\‹”ò[YOIŸ[ôŸ\âŒŸõ‹õKò\[ô
-›XõZ]
-N¬àõ‹õKõ€ú›XõZ]X\ﬁ[ò»OOûŸKúô]ô[ùYò][
-
-N‹›XõZ]ô\ÿXõY]ùYN›û^ÿ€€ú›ô\›[X]ÿZ]\Jÿ\KŸ]ô[ùÀ…Ÿ[ò€ŸUTíP€€\€ô[ù
-]ô[ùöY
-_K›⁄]ò]ÿ[	‘‘’	Àÿ›\›€Y\ìò[YNõò[YKùò[YK[XZ[€€ôö\õYYô[XZ[€€ôö\õYYò⁄X⁄ŸYJN€Y\‹ÿYŸKù^€€ù[ù\ô\›[õY\‹ÿYŸNÿ]ÿZ]ÿY
-
-NﬂXÿ]⁄
-\úõ‹ä^‹ô\‹ù
-\úõ‹äN‹›XõZ]ô\ÿXõYYò[ŸNﬂ_N¬à⁄]ò]ÿ[ò\[ô
-õ‹õJN¬àBàÿ\ôò\[ô
-⁄]ò]ÿ[
-N¬àBà€€ú›XúœY[[Y[ù
-	€ò]â N›XúÀò€\‹”ò[YOIÿX›[€ú»]ô[ù]Xú…Œ›XúÀúŸ]]öXù]J	ÿ\öXK[Xô[	À	’ô\ò[ú›[[ô‹ÿô\ôZX⁄I Nÿÿ\ôò\[ô
-Xú N¬à€€ú›[ô[œV◊N¬à€€ú›⁄›‘[ô[Z[ô^Oû‹[ô[Àôõ‹ëXX⁄
-
-[ô[JOOú[ô[öY[èZHOOZ[ô^
-N›XúÀú]Y\ûTŸ[X›‹ê[
-	ÿù]€â Kôõ‹ëXX⁄
-
-ãJOOòãúŸ]]öXù]J	ÿ\öXK\ô\‹ŸY	À›ö[ô OOOZ[ô^
-JJNŸÿ›[Y[ùôŸ][[Y[ùûRY
-	‹›À[X[òYŸ\â KöY[èZ[ô^OOL⁄Yä[ô^OOL
-\ô]\õàX[òYŸJ]ô[ù
-NﬂN¬àYä…‹[ô[ô…À	›öX[	◊Kö[ò€Y\ ]ô[ùú›]\ IâàY]ô[ùúôXY€õJ^¬à€€ú›⁄€‹Ÿ\èY[[Y[ù
-	Ÿ]Z[… Nÿ⁄€‹Ÿ\ãò€\‹”ò[YOI›\‹òYK\[ô[	Œÿ⁄€‹Ÿ\ãõ‹[èXX›]ôQ]ô[ùOOY]ô[ùöYÿ⁄€‹Ÿ\ãò\[ô
-[[Y[ù
-	‹›[[X\ûIÀ	‘ZŸ]	àùX⁄[ô… JN¬à⁄€‹Ÿ\ãò\[ô
-[[Y[ù
-	‹	À	“€‹›[õ‹»\›[àúò]X⁄ŸZ[ôHòZ[ôŒàö\»ùHçHõ›‹»ÿ[õú›H\ôZ›0Ôô\à8†'ëõ›‹»ô\ùÿ[[∏†'ÿ⁄Y[ãà\à[ôôZ\»ô]∞È›KL8†´[ö€àNH	HT›à∞Ôàö]ò]H[ôŸ\ÿ⁄0Èù⁄›[ô[ãà8†'ï\›òZ[ô»›\ù[∏†'0Ìôôõô][à›ö\KU\›⁄X⁄€›]»\»⁄\ôŸZ[àX⁄\»Ÿ[Z[ôŸ^õŸŸ[ãâ JN¬à€€ú›ù^Y\ìXô[Y[[Y[ù
-	€Xô[	À	“ÿ]Yà[… Nÿ€€ú›ù^Y\ï\OY[[Y[ù
-	‹Ÿ[X›	 NŸõ‹ä€€ú››ò[YKXô[HŸà÷…ÿ€€ú›[Y\âÀ	‘ö]ò]›[ôI◊K…ÿù\⁄[ô\‹…À	—Ÿ\ÿ⁄0Èù⁄›[ôI◊WJ^ÿ€€ú›‹[€èY[[Y[ù
-	€‹[€âÀXô[
-N€‹[€ãùò[YO]ò[YNÿù^Y\ï\Kò\[ô
-‹[€äNﬂXù^Y\ï\Kùò[YOY]ô[ùò›\›€Y\ï\_	ÿ€€ú›[Y\âŒÿù^Y\ìXô[ò\[ô
-ù^Y\ï\JNÿ⁄€‹Ÿ\ãò\[ô
-ù^Y\ìXô[
-N¬à€€ú›\õ\”Xô[Y[[Y[ù
-	€Xô[	 N›\õ\”Xô[ò€\‹”ò[YOIÿ⁄X⁄À[Xô[	Œÿ€€ú›\õ\–XÿŸ\[òŸOY[[Y[ù
-	⁄[ú]	 N›\õ\–XÿŸ\[òŸKù\OIÿ⁄X⁄ÿõﬁ	Œ›\õ\–XÿŸ\[òŸKò⁄X⁄ŸYY]ô[ùù\õ\–XÿŸ\Y	âô]ô[ùù\õ\’ô\ú⁄[€èOOUTìT◊’ëTî“S”éÿ€€ú›\õ\’^Yÿ›[Y[ùò‹ôX]U^õŸJ	»X⁄XôHYH	 Nÿ€€ú›\õ\”[öœY[[Y[ù
-	ÿIÀ	”Z\›[ô‹ÿôY[ô›[ôŸ[â N›\õ\”[öÀöôYèIÀÿôY[ô›[ôŸ[âŒ›\õ\”[öÀù\ôŸ]I◊ÿõ[ö…Œ›\õ\”[öÀúô[I€õ€‹[ô\âŒ›\õ\”Xô[ò\[ô
-\õ\–XÿŸ\[òŸK\õ\’^\õ\”[öÀÿ›[Y[ùò‹ôX]U^õŸJ	»Ÿ[\Ÿ[à[ôZﬁô\Y\ôH⁄YKâ JN¬à€€ú›X\õT›\ùô\]Z\ôYHHY]ô[ùú›\ù–]	âô]ô[ùú›\ù–]]Kõõ› 
-JÃM
-éç¬à€€ú›X\õT›\ùô\]Y\›Xô[Y[[Y[ù
-	€Xô[	 NŸX\õT›\ùô\]Y\›Xô[ò€\‹”ò[YOIÿ⁄X⁄À[Xô[	Œÿ€€ú›X\õT›\ùô\]Y\›Y[[Y[ù
-	⁄[ú]	 NŸX\õT›\ùô\]Y\›ù\OIÿ⁄X⁄ÿõﬁ	ŒŸX\õT›\ùô\]Y\›ò⁄X⁄ŸYY]ô[ùôX\õT›\ùô\]Y\›YŸX\õT›\ùô\]Y\›Xô[ò\[ô
-X\õT›\ùô\]Y\›ÿ›[Y[ùò‹ôX]U^õŸJ	»X⁄ô\õ[ôŸH]\Ÿ∞Ô⁄€X⁄\‹»ö[ò[€ò\Z][H[ùŸ[X⁄[à[ù[YY[ú›õ‹àXõ]Yà\àM]0È⁄YŸ[à⁄Y\úùYúŸúö\›ôY⁄[õùŸ[õàYZ[àô\ò[ú›[[ô‹Ÿ][H[õô\ö[àY\Ÿ\àúö\›YY›â JN¬à€€ú›X\õT›\ùX⁄€õ›€YŸ[Y[ùXô[Y[[Y[ù
-	€Xô[	 NŸX\õT›\ùX⁄€õ›€YŸ[Y[ùXô[ò€\‹”ò[YOIÿ⁄X⁄À[Xô[	Œÿ€€ú›X\õT›\ùX⁄€õ›€YŸ[Y[ùY[[Y[ù
-	⁄[ú]	 NŸX\õT›\ùX⁄€õ›€YŸ[Y[ùù\OIÿ⁄X⁄ÿõﬁ	ŒŸX\õT›\ùX⁄€õ›€YŸ[Y[ùò⁄X⁄ŸYY]ô[ùôX\õT›\ùX⁄€õ›€YŸYŸX\õT›\ùX⁄€õ›€YŸ[Y[ùXô[ò\[ô
-X\õT›\ùX⁄€õ›€YŸ[Y[ùÿ›[Y[ùò‹ôX]U^õŸJ	»X⁄ô\›0ÈYŸK\‹»X⁄ôZHZ[ô[H⁄Y\úùYà[ôŸ[Y\‹Ÿ[ô[àŸ\ù\úÿ]à∞Ôàô\ôZ]»\òúòX⁄HZ\›[ôŸ[àÿ⁄[[àÿ[õà[ôYZ[à⁄Y\úùYú‹ôX⁄\ú›Z]õ€›0ÈôYŸ\à\òúö[ô›[ô»\»Y[ú›\»\õ\ÿ⁄â JN¬à€€ú›⁄]ò]ÿ[[ôõœY[[Y[ù
-	‹	 N›⁄]ò]ÿ[[ôõÀò€\‹”ò[YOI‹€X[	Œ›⁄]ò]ÿ[[ôõÀò\[ô
-ÿ›[Y[ùò‹ôX]U^õŸJ	’⁄Y\úùYú⁄[ôõ‹õX][€éà	 JNÿ€€ú›⁄]ò]ÿ[[öœY[[Y[ù
-	ÿIÀ	’⁄Y\úùYú‹ôX⁄[ô]\›\ôõ‹õ][\â N›⁄]ò]ÿ[[öÀöôYèIÀ›⁄Y\úùYâŒ›⁄]ò]ÿ[[öÀù\ôŸ]I◊ÿõ[ö…Œ›⁄]ò]ÿ[[öÀúô[I€õ€‹[ô\âŒ›⁄]ò]ÿ[[ôõÀò\[ô
-⁄]ò]ÿ[[ö N¬à€€ú›€€úŸ[ùY\‹ÿYŸOY[[Y[ù
-	‹	 Nÿ€€úŸ[ùY\‹ÿYŸKúŸ]]öXù]J	‹õ€IÀ	‹›]\… Nÿ€€úŸ[ùY\‹ÿYŸKúŸ]]öXù]J	ÿ\öXK[]ôIÀ	‹€]I N¬à€€ú›\]QX\õT›\ùö\⁄Xö[]OJ
-OOûÿ€€ú›ö\⁄XõOXù^Y\ï\Kùò[YOOOIÿ€€ú›[Y\â…âôX\õT›\ùô\]Z\ôYŸX\õT›\ùô\]Y\›Xô[öY[èH]ö\⁄XõNŸX\õT›\ùX⁄€õ›€YŸ[Y[ùXô[öY[èH]ö\⁄XõN›⁄]ò]ÿ[[ôõÀöY[èXù^Y\ï\Kùò[YHOOIÿ€€ú›[Y\âŒﬂNÿù^Y\ï\KòY]ô[ù\›[ô\ä	ÿ⁄[ôŸIÀ\]QX\õT›\ùö\⁄Xö[]JN›\]QX\õT›\ùö\⁄Xö[]J
-N¬à⁄€‹Ÿ\ãò\[ô
-\õ\”Xô[X\õT›\ùô\]Y\›Xô[X\õT›\ùX⁄€õ›€YŸ[Y[ùXô[⁄]ò]ÿ[[ôõÀ€€úŸ[ùY\‹ÿYŸJN¬à€€ú›‹öYY[[Y[ù
-	Ÿ]â NŸ‹öYò€\‹”ò[YOI‹[ãY‹öY	Œÿ⁄€‹Ÿ\ãò\[ô
-‹öY
-N¬àõ‹ä€€ú›⁄Ÿ^K[óHŸàÿöôX›ô[ùöY\ ]òZ[XõT[ú J^¬àYä[ãõYÿXﬁIâô]ô[ùú[àOOZŸ^JX€€ù[ùYN¬à€€ú›][OY[[Y[ù
-	Ÿ]â N⁄][Kò€\‹”ò[YOI‹[ãXÿ\ô	Œÿ€€ú›öXŸSXô[[ô]»[ùìù[Xô\ëõ‹õX]
-	ŸKQIÀ‹›[Nâÿ›\úô[òﬁIÀ›\úô[òﬁNâ—UTâﬂJKôõ‹õX]
-[ãúöXŸPŸ[ùÀÃL
-N⁄][Kò\[ô
-[[Y[ù
-	⁄…À[ãõXô[
-K[[Y[ù
-	‹	ÀöXŸSXô[
-K[[Y[ù
-	‹	À	⁄[ö€àNH	HT›à0≠»[ôôZ\»∞Ôàö]ò]H[ôŸ\ÿ⁄0Èù⁄›[ô[â K[[Y[ù
-	‹	ÀŸZ[ôHô\›Hõ›ÿ[ûòZ0≠»ö\»ùH	‹[ãú›‹òYŸS[Z]–ãù”ÿÿ[T›ö[ô 	ŸKQIÀ€X^[][QúòX›[€ëY⁄]Œå_J_H–àõ›‹‹ZX⁄\ãàTãP€ŸKÈ›XùX⁄õ›ÿ]YôÿXô[ãX\⁄›»[ô›€õÿY»[ù[[ãò
-JN¬à€€ú›X›[€ìXô[X	Ÿ]ô[ùò⁄X⁄€›]›\ùY	âô]ô[ùú[èOOZŸ^O…’\›òZ[ô»õ‹ùŸ]ô[âŒâ’\›òZ[ô»›\ù[âﬂH0≠»	‹öXŸSXô[H[ö€àT›òÿ€€ú›⁄€‹ŸOXù]€ä][KX›[€ìXô[\ﬁ[ò 
-OOû⁄Yä]\õ\–XÿŸ\[òŸKò⁄X⁄ŸY
-^ÿ€€úŸ[ùY\‹ÿYŸKù^€€ù[ùI–ö]HY\»[ôZﬁô\Y\ôHõ‹à\àô\›[[ô»YHZ\›[ô‹ÿôY[ô›[ôŸ[ãâŒ›\õ\–XÿŸ\[òŸKôõÿ›\ 
-N‹ô]\õéﬂX€€ú›ôYY–€€úŸ[ùXù^Y\ï\Kùò[YOOOIÿ€€ú›[Y\â…âôX\õT›\ùô\]Z\ôY⁄YäôYY–€€úŸ[ù	âäYX\õT›\ùô\]Y\›ò⁄X⁄ŸYYX\õT›\ùX⁄€õ›€YŸ[Y[ùò⁄X⁄ŸY
-J^ÿ€€úŸ[ùY\‹ÿYŸKù^€€ù[ùI–ö]Hô\›0ÈYŸHôZYH[ùŸZ\ŸHù[Hõ‹ûôZ]YŸ[àZ\›[ô‹ÿôY⁄[õà[ô⁄Y\úùYãô]õ‹àHõ‹ù∞Èú›âŒ‹ô]\õéﬂX⁄€‹ŸKô\ÿXõY]ùYN›û^ÿ€€ú›]OX]ÿZ]\J	Àÿ\Kÿ⁄X⁄€›]	À	‘‘’	ÀŸ]ô[ùYô]ô[ùöY[éöŸ^K›\›€Y\ï\Nòù^Y\ï\Kùò[YK\õ\–XÿŸ\Yù\õ\–XÿŸ\[òŸKò⁄X⁄ŸYX\õT›\ùô\]Y\›õôYY–€€úŸ[ù	âôX\õT›\ùô\]Y\›ò⁄X⁄ŸYX\õT›\ùX⁄€õ›€YŸYõôYY–€€úŸ[ù	âôX\õT›\ùX⁄€õ›€YŸ[Y[ùò⁄X⁄ŸYJN⁄YäY]Kù\õ
-]õ›»ô]»\úõ‹ä	—\à\›P⁄X⁄€›]]ŸZ[ô[à[ö»ù\∞Ô⁄ŸŸYŸXô[ãàö]H‹0È\à\õô]]ô\ú›X⁄[ãâ N€ÿÿ][€ãöôYèY]Kù\õﬂYö[ò[^ÿ⁄€‹ŸKô\ÿXõYYò[ŸNﬂ_JNÿ⁄€‹ŸKò€\‹”ò[YOI‹ö[X\ûIŒÿ⁄€‹ŸKô\ÿXõYY]ô[ùò⁄X⁄€›]›\ùY	âô]ô[ùú[àOOZŸ^NŸ‹öYò\[ô
-][JN¬àBàYä]ô[ùò⁄X⁄€›]›\ùY
-X⁄€‹Ÿ\ãò\[ô
-[[Y[ù
-	‹	À	—YHôY€€õô[ôH\›òZ[ô»\›[à\»Z[õX[YŸHö[ò[€ò\Qõ›ÿ[ù[HŸXù[ô[ãâ JN¬àÿ\ôò\[ô
-⁄€‹Ÿ\äN¬àBàYä]ô[ùô›Y\›\õ
-H¬à€€ú››‹‘ŸX›[€èY[[Y[ù
-	Ÿ]â N‹›‹‘ŸX›[€ãò€\‹”ò[YOIŸ]ô[ù\ŸX›[€âŒ‹›‹‘ŸX›[€ãò\[ô
-[[Y[ù
-	⁄…À	—õ›‹»	à]ôKQX\⁄›… JNÿÿ\ôò\[ô
-›‹‘ŸX›[€äNÿ€€ú››–X›[€úœY[[Y[ù
-	Ÿ]â N‹›–X›[€úÀò€\‹”ò[YOIÿX›[€ú…Œ‹›‹‘ŸX›[€ãò\[ô
-›–X›[€ú N¬à€€ú›XÿŸ\‹‘ŸX›[€èY[[Y[ù
-	Ÿ]â NÿXÿŸ\‹‘ŸX›[€ãò€\‹”ò[YOIŸ]ô[ù\ŸX›[€âŒÿXÿŸ\‹‘ŸX›[€ãò\[ô
-[[Y[ù
-	⁄…À	‘TãP€ŸH	àÈ›^ùYÿ[ô… JNÿÿ\ôò\[ô
-XÿŸ\‹‘ŸX›[€äNÿ€€ú›XÿŸ\‹–X›[€úœY[[Y[ù
-	Ÿ]â NÿXÿŸ\‹–X›[€úÀò€\‹”ò[YOIÿX›[€ú…ŒÿXÿŸ\‹‘ŸX›[€ãò\[ô
-XÿŸ\‹–X›[€ú N¬à€€ú›Ÿ][ô‹œY[[Y[ù
-	Ÿ]Z[… N‹Ÿ][ô‹Àò€\‹”ò[YOIŸ]ô[ù\ŸX›[€à]ô[ù\Ÿ][ô‹…Œ‹Ÿ][ô‹Àõ‹[è]ùYN‹Ÿ][ô‹Àò\[ô
-[[Y[ù
-	‹›[[X\ûIÀ	—Z[ú›[[ôŸ[à	àúôZYÿXôI JNÿÿ\ôò\[ô
-Ÿ][ô‹ Nÿ€€ú›Ÿ][ô‹–X›[€úœY[[Y[ù
-	Ÿ]â N‹Ÿ][ô‹–X›[€úÀò€\‹”ò[YOIÿX›[€ú…Œ‹Ÿ][ô‹Àò\[ô
-[[Y[ù
-	‹	À]ô[ùúôXY€õO…—YH\ÿYôZ]\›ôY[ô]àÈ›HÌõõô[àYHõ‹ö[ô[ô[àõ›‹»õÿ⁄ö\»ù[H[ôH\à›€õÿY\ŸH[úŸZ[ãâŒô]ô[ùõ[Ÿ\ò][€è…”ô]YHõ›‹»ÿ\ù[à]YàZ[ôHúôZYÿXôKâŒâ—È›HŸZ[à]YàZô[HŸ\∞Èù\àZôHZYŸ[ô[à\ÿYÀâ KŸ][ô‹–X›[€ú N⁄Yä]ô[ùô]ô[ùŸ]Iâô]ô[ùú›\ù–]ë]Kõõ› 
-J^ÿ€€ú›]SXô[Y[[Y[ù
-	€Xô[	À	’ô\ò[ú›[[ô‹Ÿ][H0Èô\õâ Nÿ€€ú›]QöY[Y[[Y[ù
-	⁄[ú]	 NŸ]QöY[ù\OIŸ]IŒŸ]QöY[ùò[YOY]ô[ùô]ô[ùŸ]NŸ]QöY[õZ[è[ô]»[ùë]U[YQõ‹õX]
-	Ÿ[ãP–IÀ›[YVõ€ôNâ—]\õ‹K–ô\õ[âﬂJKôõ‹õX]
-ô]»]J
-JNŸ]SXô[ò\[ô
-]QöY[
-N‹Ÿ][ô‹–X›[€úÀò\[ô
-]SXô[
-Nÿù]€äŸ][ô‹–X›[€úÀ	—][H‹ZX⁄\õâÀ\ﬁ[ò 
-OOûÿ]ÿZ]\Jÿ\KŸ]ô[ù…Ÿ]ô[ùöYX	‘U“	ÀŸ]ô[ù]Nô]QöY[ùò[Y_JN€Y\‹ÿYŸKù^€€ù[ùI’ô\ò[ú›[[ô‹Ÿ][HŸ\‹ZX⁄\ùà\à[ù[^ôZ]ò][H›\ôH[ôŸ\\‹›âŒÿ]ÿZ]ÿY
-
-NﬂJNﬂBà[ô[Àú\⁄
-›‹‘ŸX›[€ãXÿŸ\‹‘ŸX›[€ãŸ][ô‹ N¬à…—õ›‹…À	—È›^ùYÿ[ô…À	—Z[ú›[[ôŸ[â◊Kôõ‹ëXX⁄
-
-Xô[JOOòù]€äXúÀXô[
-
-OOú⁄›‘[ô[
-JJJN¬àù]€äXÿŸ\‹–X›[€úÀ	—È›[[ö»€‹Y\ô[âÀ\ﬁ[ò 
-OOû›û^ÿ]ÿZ]ò]öYÿ]‹ãò€\õÿ\ôù‹ö]U^
-]ô[ùô›Y\›\õ
-N€Y\‹ÿYŸKù^€€ù[ùI—È›[[ö»€‹Y\ùâŒﬂXÿ]⁄ÿ€€ú›[ú]Y[[Y[ù
-	⁄[ú]	 N⁄[ú]ùò[YOY]ô[ùô›Y\›\õ⁄[ú]úôXY€õO]ùYNÿXÿŸ\‹‘ŸX›[€ãò\[ô
-[ú]
-N⁄[ú]úŸ[X›
-
-N€Y\‹ÿYŸKù^€€ù[ùI–ö]H[àX\ö⁄Y\ù[àÈ›[[ö»€‹Y\ô[ãâŒﬂ_JN¬à[ö XÿŸ\‹–X›[€úÀ	—È›X[ú⁄X⁄0Ìôôõô[âÀ]ô[ùô›Y\›\õ
-N¬à[ö ›–X›[€úÀ	—ÿ[\öYH0Ìôôõô[âÀ]ô[ùô›Y\›\õúô\XŸJ	œ…À	ÀŸÿ[\ûO… JN¬à[ö ›–X›[€úÀ	”]ôKQX\⁄›…À]ô[ùô›Y\›\õúô\XŸJ	œ…À	À‹€Y\⁄›œ… JN¬à[ö ›–X›[€úÀ	—õ›ÿ]YôÿXô[âÀ]ô[ùô›Y\›\õúô\XŸJ	œ…À	ÀŸÿ[Y\œ… JN¬à[ö ›–X›[€úÀ	—È›XùX⁄[úŸZ[âÀ]ô[ùô›Y\›\õúô\XŸJ	œ…À	ÀŸ›Y\›õ€⁄œ… JN¬à[ö XÿŸ\‹–X›[€úÀ	—È›XùX⁄ô\ùÿ[[âÀŸ]ô[ù…Ÿ[ò€ŸUTíP€€\€ô[ù
-]ô[ùöY
-_KŸ›Y\›õ€⁄ÿ
-N¬à[ö ›–X›[€úÀ	—\⁄Y€ãQY]‹à	àTãQùX⁄…ÀŸ]ô[ù…Ÿ[ò€ŸUTíP€€\€ô[ù
-]ô[ùöY
-_KŸ\⁄Y€ò
-N¬à[ö XÿŸ\‹–X›[€úÀ	‘TãP€ŸH\ù[ù\õY[âÀÿ\KŸ]ô[ù…Ÿ]ô[ùöYK‹\ò
-N¬àù]€äXÿŸ\‹–X›[€úÀ	‘TãRÿ\ùHùX⁄Ÿ[âÀ\ﬁ[ò 
-OOû¬à€€ú›õÿèX]ÿZ]
-]ÿZ]ô]⁄
-ÿ\KŸ]ô[ù…Ÿ]ô[ùöYK‹\ò
-JKòõÿä
-N¬à€€ú›\õUTìò‹ôX]SÿöôX›Tì
-õÿäKúò[YOYÿ›[Y[ùò‹ôX]Q[[Y[ù
-	⁄Yúò[YI NŸúò[YKöY[è]ùYNŸÿ›[Y[ùòõŸKò\[ô
-úò[YJN¬à€€ú›ÿœYúò[YKò€€ù[ùÿ›[Y[ùŸÿÀòõŸKò\[ô
-[[Y[ù
-	⁄IÀ]ô[ùù]JK[[Y[ù
-	‹	À	—õ›‹»Z[[éàTãP€ŸHÿÿ[õô[ãâ JN¬à€€ú›[YœYÿÀò‹ôX]Q[[Y[ù
-	⁄[Y… N⁄[YÀù⁄YLÕL⁄[YÀõ€õÿYJ
-OOûŸúò[YKò€€ù[ù⁄[ô›Àôõÿ›\ 
-NŸúò[YKò€€ù[ù⁄[ô›Àúö[ù
-
-N‹Ÿ][Y[›]
-
-
-OOûŸúò[YKúô[[›ôJ
-N’Tìúô]õ⁄ŸSÿöôX›Tì
-\õ
-NﬂKå
-NﬂN⁄[YÀú‹òœ]\õŸÿÀòõŸKò\[ô
-[Y N¬àJN¬à[ö ›–X›[€úÀ	–[Hõ›‹»\ù[ù\õY[âÀÿ\KŸ]ô[ù…Ÿ]ô[ùöYKŸ›€õÿY
-N¬àù]€ä›–X›[€úÀ	—õ›‹»ô\ùÿ[[âÀ
-
-OOõX[òYŸJ]ô[ù
-JKò€\‹”ò[YOI‹ö[X\ûIŒ¬àù]€äŸ][ô‹–X›[€úÀ]ô[ùõ[Ÿ\ò][€è…–]]€X]\ÿ⁄HúôZYÿXôHZ›]öY\ô[âŒâ”X[ùY[HúôZYÿXôHZ›]öY\ô[âÀ\ﬁ[ò 
-OOûÿ]ÿZ]\Jÿ\KŸ]ô[ù…Ÿ]ô[ùöYX	‘U“	À€[Ÿ\ò][€éàY]ô[ùõ[Ÿ\ò][€üJNÿ]ÿZ]ÿY
-
-NﬂJN¬àù]€äŸ][ô‹–X›[€úÀ]ô[ùô›Y\›õ€⁄◊€[Ÿ\ò][€è…—È›XùX⁄àúôZYÿXôH]\‹ÿ⁄[[âŒâ—È›XùX⁄àúôZYÿXôHZ[úÿ⁄[[âÀ\ﬁ[ò 
-OOûÿ]ÿZ]\Jÿ\KŸ]ô[ù…Ÿ]ô[ùöYX	‘U“	ÀŸ›Y\›õ€⁄”[Ÿ\ò][€éàY]ô[ùô›Y\›õ€⁄◊€[Ÿ\ò][€üJNÿ]ÿZ]ÿY
-
-NﬂJN¬àù]€äŸ][ô‹–X›[€úÀ	—È›[[ö»\õô]Y\õâÀ\ﬁ[ò 
-OOû⁄Yä€€ôö\õJ	–[H[ö‹»[ôTãP€Ÿ\»Ÿ\ô[àY\ò⁄[ôÔYÀàõ‹ùòZô[è… J^ÿ]ÿZ]\Jÿ\KŸ]ô[ù…Ÿ]ô[ùöYK‹õ›]K]⁄Ÿ[ò	‘‘’	 Nÿ]ÿZ]ÿY
-
-Nﬂ_JN¬àBà€€ú›[ôŸ\èY[[Y[ù
-	Ÿ]Z[… NŸ[ôŸ\ãò€\‹”ò[YOIŸ]ô[ù\ŸX›[€à]ô[ù\Ÿ][ô‹…ŒŸ[ôŸ\ãò\[ô
-[[Y[ù
-	‹›[[X\ûIÀ	’ô\ò[ú›[[ô»0Ìúÿ⁄[â JNÿÿ\ôò\[ô
-[ôŸ\äN¬àù]€ä[ôŸ\ã	—]ô[ù[ôõ›‹»0Ìúÿ⁄[âÀ\ﬁ[ò 
-OOû⁄Yä€€ôö\õJ	—]ô[ù[ô[Hõ›‹»[ôÔY»0Ìúÿ⁄[è… J^ÿ]ÿZ]\Jÿ\KŸ]ô[ù…Ÿ]ô[ùöYX	—SUI NŸÿ›[Y[ùôŸ][[Y[ùûRY
-	‹›À[X[òYŸ\â KöY[è]ùYNÿ]ÿZ]ÿY
-
-Nﬂ_JKò€\‹”ò[YOIŸ[ôŸ\âŒ¬àŸX›[€ãò\[ô
-ÿ\ô
-N¬àYäX›]ôQ]ô[ù
-^ÿÿ\ôöY[èY]ô[ùöYOOXX›]ôQ]ô[ù€‹[ãöY[è]ùYN⁄Yä]ô[ùöYOOXX›]ôQ]ô[ù
-^›XúÀöY[èYò[ŸN⁄Yä]ô[ùô›Y\›\õ
-X]ÿZ]⁄›‘[ô[
-
-NŸ[ŸHÿ›[Y[ùôŸ][[Y[ùûRY
-	‹›À[X[òYŸ\â KöY[è]ùYNﬂ_Y[Ÿ^›XúÀöY[è]ùYN‹[ô[Àôõ‹ëXX⁄
-[ô[Oú[ô[öY[è]ùYJNŸ[ôŸ\ãöY[è]ùYNﬂBÇàBàBàÿ›[Y[ùôŸ][[Y[ùûRY
-	ÿ€‹ŸK[X[òYŸ\â Kõ€ò€X⁄œJ
-OOûÿX›]ôQ]ô[ù[ù[⁄\›‹ûKúô\XŸT›]Jù[	…À	ÀŸ\⁄õÿ\ô	 NŸÿ›[Y[ùôŸ][[Y[ùûRY
-	‹›À[X[òYŸ\â KöY[è]ùYN€ÿY
-
-Kòÿ]⁄
-ô\‹ù
-NﬂN¬àX›]ôQ]ô[ù[ô]»TìŸX\ò⁄\ò[\ ÿÿ][€ãúŸX\ò⁄
-KôŸ]
-	Ÿ]ô[ù	 N¬àÿ›[Y[ùôŸ][[Y[ùûRY
-	€Ÿ€›]	 Kõ€ò€X⁄œJ
-OOò\J	Àÿ\Kÿ]]€Ÿ€›]	À	‘‘’	 Kù[ä
-
-OOõÿÿ][€ãöôYèIÀ€Ÿ⁄[â Kòÿ]⁄
-ô\‹ù
-N¬à€€ú›[]PXÿ€›[ùõ‹õOYÿ›[Y[ùôŸ][[Y[ùûRY
-	Ÿ[]KXXÿ€›[ùYõ‹õI N¬à[]PXÿ€›[ùõ‹õKõ€ú›XõZ]X\ﬁ[ò»OOû¬àKúô]ô[ùYò][
-
-N¬àYäÿ›[Y[ùôŸ][[Y[ùûRY
-	Ÿ[]KXXÿ€›[ùX€€ôö\õI Kùò[YHOOI“””ï»0Âî–“Sâ ^‹ô\‹ù
-ô]»\úõ‹ä	–ö]H8†'í””ï»0Âî–“S∏†'Ÿ[ò]H€»Z[ôŸXô[ãâ JN‹ô]\õéﬂBà€€ú››XõZ]Y[]PXÿ€›[ùõ‹õKú]Y\ûTŸ[X›‹ä	ÿù]€â N‹›XõZ]ô\ÿXõY]ùYN¬àû^ÿ]ÿZ]\J	Àÿ\Kÿ]]ÿXÿ€›[ù	À	—SUIÀ‹\‹›€‹ôôÿ›[Y[ùôŸ][[Y[ùûRY
-	Ÿ[]KXXÿ€›[ù\\‹›€‹ô	 Kùò[YK€€ôö\õNâ“””ï»0Âî–“SâﬂJN€ÿÿ][€ãöôYèIÀ€Ÿ⁄[èŸ[]YLIŒﬂBàÿ]⁄
-\úä^‹ô\‹ù
-\úäN‹›XõZ]ô\ÿXõYYò[ŸNﬂBàN¬à€€ú›]ô[ùY[ú]Yÿ›[Y[ùôŸ][[Y[ùûRY
-	Ÿ]ô[ùZY	 N¬à€€ú›õ‹õX[^ôQ]ô[ùY]ò[YOOùò[YKùö[J
-Kù”›Ÿ\êÿ\ŸJ
-Kúô\XŸJÈŸÀ	ÿYI Kúô\XŸJÌãŸÀ	€ŸI Kúô\XŸJÔŸÀ	›YI Kúô\XŸJÁÀŸÀ	‹‹… Kõõ‹õX[^ôJ	”ëí—	 Kúô\XŸJ÷◊LÃWLÕôóKŸÀ	… Kúô\XŸJ÷◊òK^åNWÀWJÀŸÀ	ÀI Kúô\XŸJ◊ñÀW◊JﬂÀW◊J…ŸÀ	… N¬à]ô[ùY[ú]òY]ô[ù\›[ô\ä	ÿõ\âÀ
-
-OOûŸ]ô[ùY[ú]ùò[YO[õ‹õX[^ôQ]ô[ùY
-]ô[ùY[ú]ùò[YJNﬂJN¬à€€ú›]ô[ù]R[ú]Yÿ›[Y[ùôŸ][[Y[ùûRY
-	Ÿ]ô[ùY]I N¬à€€ú›[Y[[ôTô]öY]œYÿ›[Y[ùôŸ][[Y[ùûRY
-	Ÿ]ô[ù][Y[[ôK\ô]öY]… N¬à€€ú›⁄Yù]OJò[YK[€ùœL^\œL
-OOû¬à€€ú›ﬁYX\ã[€ù^WO]ò[YKú‹]
-	ÀI KõX\
-ù[Xô\äN¬à€€ú›[€ù›\ù[ô]»]J]KïU YX\ã[€ùLJ€[€ùÀJJN¬à€€ú›\›^O[ô]»]J]KïU [€ù›\ùôŸ]U—ù[YX\ä
-K[€ù›\ùôŸ]U”[€ù
-
-JÃK
-JKôŸ]U—]J
-N¬à€€ú›⁄YùY[ô]»]J]KïU [€ù›\ùôŸ]U—ù[YX\ä
-K[€ù›\ùôŸ]U”[€ù
-
-KX]õZ[ä^K\›^JJŸ^\ JN¬àô]\õà⁄YùYù“T”‘›ö[ô 
-Kú€XŸJL
-N¬àN¬à€€ú›\‹^Q]O]ò[YOOõô]»[ùë]U[YQõ‹õX]
-	ŸKQIÀŸ]T›[Nâ€€ô…À[YVõ€ôNâ’U…ﬂJKôõ‹õX]
-ô]»]J	›ò[Y_ULéååò
-JN¬à€€ú›\]U[Y[[ôTô]öY]œJ
-OOû¬àYä][Y[[ôTô]öY] \ô]\õé¬à[Y[[ôTô]öY]Àúô\XŸP⁄[ô[ä[[Y[ù
-	‹›õ€ô…À	‘€»0ÈYùZ[à[ù[I JN¬àYäY]ô[ù]R[ú]ùò[YJ^›[Y[[ôTô]öY]Àò\[ô
-[[Y[ù
-	‹	À	’ÈHZ[àô\ò[ú›[[ô‹Ÿ][K[H[àôZ][àùHŸZ[ãâ JN‹ô]\õéﬂBà€€ú››\ùY]ô[ù]R[ú]ùò[YK[ô\⁄Yù]J›\ùL
-K\›Y[[Y[ù
-	›[	 N¬à\›ò\[ô
-[[Y[ù
-	€IÀõ‹à\àôZY\éàö\»ùHçH€‹›[õ‹ŸH\›õ›‹Àò
-JN¬à\›ò\[ô
-[[Y[ù
-	€IÀXà	Ÿ\‹^Q]J›\ù
-_Nà\àô\ò[ú›[[ô‹ﬁôZ]ò][HôY⁄[õù»ôZHùX⁄[ô»⁄[\»õ€›0ÈôYŸH‹ZX⁄\úZŸ]ò
-JN¬à\›ò\[ô
-[[Y[ù
-	€IÀö\»	Ÿ\‹^Q]J[ô
-_Nàõ›‹»ÿ⁄Y[ã[úŸZ[à[ô\ù[ù\õY[à8†$»LYŸHXàô\ò[ú›[[ô‹Ÿ][Kò
-JN¬à\›ò\[ô
-[[Y[ù
-	€IÀ[H	Ÿ\‹^Q]J[ô
-_HŸ\ô[àYHõ›‹»]]€X]\ÿ⁄Ÿ[0Ìúÿ⁄àö]Hõ‹ö\à\ù[ù\õY[ãò
-JN¬à[Y[[ôTô]öY]Àò\[ô
-\›
-N¬àN¬à]ô[ù]R[ú]òY]ô[ù\›[ô\ä	⁄[ú]	À\]U[Y[[ôTô]öY] N¬à]ô[ù]R[ú]òY]ô[ù\›[ô\ä	ÿ⁄[ôŸIÀ\]U[Y[[ôTô]öY] N¬à\]U[Y[[ôTô]öY] 
-N¬àÿ›[Y[ùôŸ][[Y[ùûRY
-	Ÿ]ô[ùYõ‹õI Kõ€ú›XõZ]X\ﬁ[ò»OOû¬àKúô]ô[ùYò][
-
-NŸ]ô[ùY[ú]ùò[YO[õ‹õX[^ôQ]ô[ùY
-]ô[ùY[ú]ùò[YJN⁄YäK◊ñÿK^åNWVÿK^åNWÀW^ÃãåﬂIÀù\›
-]ô[ùY[ú]ùò[YJJ^€Y\‹ÿYŸKù^€€ù[ùI–ö]HZ[ô[à›\ûõò[Y[àZ]Z[ô\›[ú»»ùX⁄›Xô[àŸ\àòZ[àZ[ôŸXô[ãâŒ€Y\‹ÿYŸKúÿ‹õ€[ù’öY] ÿõÿ⁄ŒâÿŸ[ù\âﬂJNŸ]ô[ùY[ú]ôõÿ›\ 
-N‹ô]\õéﬂ]û^ÿ€€ú›‹ôX]YX]ÿZ]\J	Àÿ\KŸ]ô[ù…À	‘‘’	À›]Nôÿ›[Y[ùôŸ][[Y[ùûRY
-	›]I Kùò[YK]ô[ùYôÿ›[Y[ùôŸ][[Y[ùûRY
-	Ÿ]ô[ùZY	 Kùò[YK[éâŸ]ô[ù	À]ô[ù]Nôÿ›[Y[ùôŸ][[Y[ùûRY
-	Ÿ]ô[ùY]I Kùò[YK[Ÿ\ò][€éôÿ›[Y[ùôŸ][[Y[ùûRY
-	€[Ÿ\ò][€â Kò⁄X⁄ŸY›Y\›õ€⁄”[Ÿ\ò][€éôÿ›[Y[ùôŸ][[Y[ùûRY
-	Ÿ›Y\›õ€⁄À[[Ÿ\ò][€â Kò⁄X⁄ŸYJNÿX›]ôQ]ô[ùX‹ôX]Yô]ô[ùY⁄\›‹ûKúô\XŸT›]Jù[	…ÀŸ\⁄õÿ\ôŸ]ô[ùIŸ[ò€ŸUTíP€€\€ô[ù
-X›]ôQ]ô[ù
-_X
-N€Y\‹ÿYŸKù^€€ù[ùI’ô\ò[ú›[[ô»\ú›[àHÿ[õú›ô]ù€‹›[õ‹»Z]ö\»ùHçHõ›‹»\›[ãâŒŸKù\ôŸ]úô\Ÿ]
-
-NŸÿ›[Y[ùôŸ][[Y[ùûRY
-	Ÿ›Y\›õ€⁄À[[Ÿ\ò][€â Kò⁄X⁄ŸY]ùYNÿ]ÿZ]ÿY
-
-N€Y\‹ÿYŸKúÿ‹õ€[ù’öY] ÿõÿ⁄ŒâÿŸ[ù\âÀôZ]ö[‹éâ‹€[€›	ﬂJNﬂXÿ]⁄
-\úä^‹ô\‹ù
-\úäN€Y\‹ÿYŸKúÿ‹õ€[ù’öY] ÿõÿ⁄ŒâÿŸ[ù\âÀôZ]ö[‹éâ‹€[€›	ﬂJNﬂBàN¬à
-\ﬁ[ò 
-OOû¬àû^ÿ€€ú›Xÿ€›[ùX]ÿZ]\J	Àÿ\Kÿ]]€YI N⁄YäXÿ€›[ùô[XZ[[]ô\ûP]òZ[XõIâàXXÿ€›[ùô[XZ[ô\öYöYY
-^ÿ€€ú›õ›XŸOY[[Y[ù
-	Ÿ]â N€õ›XŸKò€\‹”ò[YOI›\›[õ›XŸIŒ€õ›XŸKò\[ô
-[[Y[ù
-	‹	À	–ö]Hô\›0ÈYŸHZ[ôHKSXZ[PYô\‹ŸH0Ôô\à[à[ö»[àZ[ô\àXZ[â JNÿù]€äõ›XŸK	–ô\›0ÈY›[ô‹€XZ[\õô]]Ÿ[ô[âÀ\ﬁ[ò 
-OOûÿ]ÿZ]\J	Àÿ\Kÿ]]‹ô\]Y\›]ô\öYöXÿ][€âÀ	‘‘’	 N€Y\‹ÿYŸKù^€€ù[ùI–ô\›0ÈY›[ô‹€XZ[[ôŸYõ‹ô\ùàö]H]X⁄[H‹[[‹ôô\àòX⁄ŸZ[ãâŒﬂJNŸÿ›[Y[ùôŸ][[Y[ùûRY
-	Ÿ]ô[ù… KòôYõ‹ôJõ›XŸJNﬂX€€ú››‹òYŸOX]ÿZ]\J	Àÿ\K‹›‹òYŸI N⁄Yä›‹òYŸKùÿ\õö[ô [Y\‹ÿYŸKù^€€ù[ù\›‹òYŸKù\ÿY‘]\ŸY…’\ÿY»⁄[ôŸYŸ[à\»€ò\[à[\‹∞Èô[à‹ZX⁄\ú»õ‹∞Ôô\ôŸZ[ô]\⁄Y\ùàö]H[àZ[öYŸ[àZ[ù][à\õô]]ô\ú›X⁄[ãâŒâ—\à‹ZX⁄\à⁄\ô€ò\àö]Hõ‹àŸZ]\ô[à\ÿY»‹ZX⁄\òô[Y›[ô»∞Ôô[ãâŒÿ€€ú››’\ŸY\›‹òYŸKù\ŸYû]\œœ‹›‹òYŸKù›[û]\À\›‹òYŸKôúôYPû]\Œÿ€€ú››”Xô[\›‹òYŸKõÿÿ][€èOOI€ÿöôX›\›‹òYŸIœ…“]õô\ãQõ›‹‹ZX⁄\âŒâ—õ›‹‹ZX⁄\à]Yà\à\Q\⁄…Œÿ€€ú›\⁄”õ›OY[[Y[ù
-	‹	À	‹›”Xô[Nà	 ›’\ŸYÃLç
-äå Kù—ö^Y
-ä_H–àõ€à	 ›‹òYŸKù›[û]\ÀÃLç
-äå Kù—ö^Y
-J_H–àô[Y›à[\‹∞Èô\àô[ô\ãU\ÿYYôô\éà	 ›‹òYŸKù\ÿY\⁄ÀôúôYPû]\ÀÃLç
-äå Kù—ö^Y
-ä_H–àúôZN»ôZHŸ[öYŸ\à[»	 ›‹òYŸKù\ÿY\⁄ÀõZ[ö[][QúôYPû]\ÀÃLç
-äå Kù—ö^Y
-
-_H–à]\⁄Y\ùö[ò[€ò\ô]YH\ÿYÀò
-NŸ\⁄”õ›Kò€\‹”ò[YOI‹€X[	ŒŸÿ›[Y[ùôŸ][[Y[ùûRY
-	Ÿ]ô[ù… KòôYõ‹ôJ\⁄”õ›JNÿ€€ú›[úœX]ÿZ]\J	Àÿ\K‹[ú… Nÿ]òZ[XõT[úœ\[úŒÿ€€ú›]R[ú]Yÿ›[Y[ùôŸ][[Y[ùûRY
-	Ÿ]ô[ùY]I Nÿ€€ú›Ÿ^O[ô]»[ùë]U[YQõ‹õX]
-	Ÿ[ãP–IÀ›[YVõ€ôNâ—]\õ‹K–ô\õ[âﬂJKôõ‹õX]
-ô]»]J
-JNŸ]R[ú]õZ[è]Ÿ^Nÿ€€ú›X^]O[ô]»]J	›Ÿ^_ULéååò
-N€X^]KúŸ]U”[€ù
-X^]KôŸ]U”[€ù
-
-JÃç
-NŸ]R[ú]õX^[X^]Kù“T”‘›ö[ô 
-Kú€XŸJL
-N⁄Yäô]»TìŸX\ò⁄\ò[\ ÿÿ][€ãúŸX\ò⁄
-KôŸ]
-	‹[â OOOIŸ]ô[ù	 Yÿ›[Y[ùú]Y\ûTŸ[X›‹ä	Àò‹ôX]K\[ô[	 Kõ‹[è]ùYNÿ]ÿZ]ÿY
-
-NﬂXÿ]⁄
-\úä^‹ô\‹ù
-\úäNﬂBàJJ
-N¬üJJ
-N¬
+    }
+  }
+  document.getElementById('close-manager').onclick=()=>{activeEvent=null;history.replaceState(null,'','/dashboard');document.getElementById('photo-manager').hidden=true;load().catch(report);};
+  activeEvent=new URLSearchParams(location.search).get('event');
+  document.getElementById('logout').onclick=()=>api('/api/auth/logout','POST').then(()=>location.href='/login').catch(report);
+  const deleteAccountForm=document.getElementById('delete-account-form');
+  deleteAccountForm.onsubmit=async e=>{
+    e.preventDefault();
+    if(document.getElementById('delete-account-confirm').value!=='KONTO L√ñSCHEN'){report(new Error('Bitte ‚ÄûKONTO L√ñSCHEN‚Äú genau so eingeben.'));return;}
+    const submit=deleteAccountForm.querySelector('button');submit.disabled=true;
+    try{await api('/api/auth/account','DELETE',{password:document.getElementById('delete-account-password').value,confirm:'KONTO L√ñSCHEN'});location.href='/login?deleted=1';}
+    catch(err){report(err);submit.disabled=false;}
+  };
+  const eventIdInput=document.getElementById('event-id');
+  const normalizeEventId=value=>value.trim().toLowerCase().replace(/√§/g,'ae').replace(/√∂/g,'oe').replace(/√º/g,'ue').replace(/√ü/g,'ss').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9_-]+/g,'-').replace(/^[-_]+|[-_]+$/g,'');
+  eventIdInput.addEventListener('blur',()=>{eventIdInput.value=normalizeEventId(eventIdInput.value);});
+  const eventDateInput=document.getElementById('event-date');
+  const timelinePreview=document.getElementById('event-timeline-preview');
+  const shiftDate=(value,months=0,days=0)=>{
+    const [year,month,day]=value.split('-').map(Number);
+    const monthStart=new Date(Date.UTC(year,month-1+months,1));
+    const lastDay=new Date(Date.UTC(monthStart.getUTCFullYear(),monthStart.getUTCMonth()+1,0)).getUTCDate();
+    const shifted=new Date(Date.UTC(monthStart.getUTCFullYear(),monthStart.getUTCMonth(),Math.min(day,lastDay)+days));
+    return shifted.toISOString().slice(0,10);
+  };
+  const displayDate=value=>new Intl.DateTimeFormat('de-DE',{dateStyle:'long',timeZone:'UTC'}).format(new Date(`${value}T12:00:00Z`));
+  const updateTimelinePreview=()=>{
+    if(!timelinePreview)return;
+    timelinePreview.replaceChildren(element('strong','So l√§uft dein Album'));
+    if(!eventDateInput.value){timelinePreview.append(element('p','W√§hle ein Veranstaltungsdatum, um den Zeitplan zu sehen.'));return;}
+    const start=eventDateInput.value,end=shiftDate(start,0,90),list=element('ul');
+    list.append(element('li',`Vor der Feier: bis zu 25 kostenlose Testfotos.`));
+    list.append(element('li',`Ab ${displayDate(start)}: Der Veranstaltungszeitraum beginnt; bei Buchung gilt das vollst√§ndige Speicherpaket.`));
+    list.append(element('li',`Bis ${displayDate(end)}: Fotos hochladen, ansehen und herunterladen ‚Äì 90 Tage ab Veranstaltungsdatum.`));
+    list.append(element('li',`Am ${displayDate(end)} werden die Fotos automatisch gel√∂scht. Bitte vorher herunterladen.`));
+    timelinePreview.append(list);
+  };
+  eventDateInput.addEventListener('input',updateTimelinePreview);
+  eventDateInput.addEventListener('change',updateTimelinePreview);
+  updateTimelinePreview();
+  document.getElementById('event-form').onsubmit=async e=>{
+    e.preventDefault();eventIdInput.value=normalizeEventId(eventIdInput.value);if(!/^[a-z0-9][a-z0-9_-]{2,63}$/.test(eventIdInput.value)){message.textContent='Bitte einen Kurznamen mit mindestens 3 Buchstaben oder Zahlen eingeben.';message.scrollIntoView({block:'center'});eventIdInput.focus();return;}try{const created=await api('/api/events','POST',{title:document.getElementById('title').value,eventId:document.getElementById('event-id').value,plan:'event',eventDate:document.getElementById('event-date').value,moderation:document.getElementById('moderation').checked,guestbookModeration:document.getElementById('guestbook-moderation').checked});activeEvent=created.eventId;history.replaceState(null,'',`/dashboard?event=${encodeURIComponent(activeEvent)}`);message.textContent='Veranstaltung erstellt. Du kannst jetzt kostenlos mit bis zu 25 Fotos testen.';e.target.reset();document.getElementById('guestbook-moderation').checked=true;await load();message.scrollIntoView({block:'center',behavior:'smooth'});}catch(err){report(err);message.scrollIntoView({block:'center',behavior:'smooth'});}
+  };
+  (async()=>{
+    try{const account=await api('/api/auth/me');if(account.emailDeliveryAvailable&&!account.emailVerified){const notice=element('div');notice.className='test-notice';notice.append(element('p','Bitte best√§tige deine E-Mail-Adresse √ºber den Link in deiner Mail.'));button(notice,'Best√§tigungsmail erneut senden',async()=>{await api('/api/auth/request-verification','POST');message.textContent='Best√§tigungsmail angefordert. Bitte auch im Spamordner nachsehen.';});document.getElementById('events').before(notice);}const storage=await api('/api/storage');if(storage.warning)message.textContent=storage.uploadsPaused?'Uploads sind wegen des knappen tempor√§ren Speichers vor√ºbergehend pausiert. Bitte in einigen Minuten erneut versuchen.':'Der Speicher wird knapp. Bitte vor weiteren Uploads Speicherbelegung pr√ºfen.';const photoUsed=storage.usedBytes??storage.totalBytes-storage.freeBytes;const photoLabel=storage.location==='object-storage'?'Hetzner-Fotospeicher':'Fotospeicher auf der App-Disk';const diskNote=element('p',`${photoLabel}: ${(photoUsed/1024**3).toFixed(2)} GB von ${(storage.totalBytes/1024**3).toFixed(1)} GB belegt. Tempor√§rer Render-Uploadpuffer: ${(storage.uploadDisk.freeBytes/1024**3).toFixed(2)} GB frei; bei weniger als ${(storage.uploadDisk.minimumFreeBytes/1024**3).toFixed(0)} GB pausiert FinalSnap neue Uploads.`);diskNote.className='small';document.getElementById('events').before(diskNote);const plans=await api('/api/plans');availablePlans=plans;const dateInput=document.getElementById('event-date');const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Berlin'}).format(new Date());dateInput.min=today;const maxDate=new Date(`${today}T12:00:00Z`);maxDate.setUTCMonth(maxDate.getUTCMonth()+24);dateInput.max=maxDate.toISOString().slice(0,10);if(new URLSearchParams(location.search).get('plan')==='event')document.querySelector('.create-panel').open=true;await load();}catch(err){report(err);}
+  })();
+})();

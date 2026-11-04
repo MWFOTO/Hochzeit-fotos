@@ -1,294 +1,168 @@
-Y™Áäx≥¨uÁ%j∑ù¬+arâÏ∂ÎïÎ_¢∫ﬁjÀ"ÇvõïÎ⁄Æ&õïÎ€€ú››\›Yù\üO\ô\]Z\ôJ	€õŸNù\›	 N¬ò€€ú›\‹Ÿ\ù\ô\]Z\ôJ	€õŸNò\‹Ÿ\ù‹›öX›	 N¬ò€€ú›úœ\ô\]Z\ôJ	€õŸNôú… N¬ò€€ú›‹œ\ô\]Z\ôJ	€õŸNõ‹… N¬ò€€ú›]\ô\]Z\ôJ	€õŸNú]	 N¬ò€€ú››ö\O\ô\]Z\ôJ	‹›ö\I N¬ò€€ú›ÿ‹ôX]P\O\ô\]Z\ôJ	Àãã‹Ÿ\ùô\â N¬Çò€€ú›\YúÀõZŸ[\ﬁ[ò ]öõ⁄[ä‹Àù\\ä
-K	Ÿö[ò[€ò\\^[Y[ù[YôXﬁX€KI JN¬ò€€ú›⁄Y€ö[ôœI›⁄ŸX◊‹^[Y[ù€YôXﬁX€W›\›	Œ¬ò€€ú›⁄Y€ô\è[ô]»›ö\J	‹⁄◊›\›‹^[Y[ù€YôXﬁX€I N¬ò€€ú›Ÿ\‹⁄[€úœ[ô]»X\
+const {test,after}=require('node:test');
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const os=require('node:os');
+const path=require('node:path');
+const Stripe=require('stripe');
+const {createApp}=require('../server');
 
-N¬õ]‹ôX]YL¬ò€€ú›⁄X⁄€›]ô\]Y\›œV◊N¬ò€€ú›õ›YöXÿ][€úœV◊N¬õ]òZ[⁄]ò]ÿ[XZ[Yò[ŸN¬ò€€ú›òZŸO^¬àŸXö€⁄‹Œú⁄Y€ô\ãùŸXö€⁄‹Àà[ùõ⁄XŸ\Œû‹ô]öY]ôNò\ﬁ[ò»YOä⁄Y[ùõ⁄XŸW‹éâ⁄ŒãÀ⁄[ùõ⁄XŸKú›ö\Kò€€K⁄K›\›\âﬂJ_Kà⁄X⁄€›]û‹Ÿ\‹⁄[€úŒû¬à‹ôX]Nò\ﬁ[ò ]K‹[€ú OOû¬à‹ôX]Y
- Œ¬à⁄X⁄€›]ô\]Y\›Àú\⁄
-]JN¬à€€ú›Ÿ\‹⁄[€è^⁄Yò‹◊›\›…ÿ‹ôX]YX]ô[[ŸNôò[ŸK›]\Œâ€‹[âÀ^[Y[ù‹›]\Œâ›[úZY	À[ŸNô]Kõ[ŸKY]Y]Nô]KõY]Y]K›\úô[òﬁNâŸ]\âÀ[[›[ù››[ô]Kõ[ôW⁄][\÷ÃKúöXŸWŸ]Kù[ö]ÿ[[›[ù^[Y[ù⁄[ù[ùòW›\›…ÿ‹ôX]YX[ùõ⁄XŸNò[ó›\›…ÿ‹ôX]YX›\›€Y\éò›\◊›\›…ÿ‹ôX]YX\õâ⁄ŒãÀÿ⁄X⁄€›]ú›ö\Kò€€K›\›	ﬂN¬àŸ\‹⁄[€úÀúŸ]
-Ÿ\‹⁄[€ãöYŸ\‹⁄[€äN‹ô]\õàŸ\‹⁄[€é¬àKàô]öY]ôNò\ﬁ[ò»YOûÿ€€ú›Ÿ\‹⁄[€è\Ÿ\‹⁄[€úÀôŸ]
-Y
-N⁄Yä\Ÿ\‹⁄[€ä^ÿ€€ú›\úõ‹è[ô]»\úõ‹ä	”õ»›X⁄⁄X⁄€›]Ÿ\‹⁄[€â NŸ\úõ‹ãò€ŸOI‹ô\€›\òŸW€Z\‹⁄[ô…Œ›õ›»\úõ‹éﬂ\ô]\õàŸ\‹⁄[€éﬂKà^\ôNò\ﬁ[ò»YOûÿ€€ú›Ÿ\‹⁄[€è\Ÿ\‹⁄[€úÀôŸ]
-Y
-N‹Ÿ\‹⁄[€ãú›]\œIŸ^\ôY	Œ‹ô]\õàŸ\‹⁄[€éﬂBà_KàôYù[ôŒûÿ‹ôX]Nò\ﬁ[ò ]K‹[€ú OOûÿ€€ú›ôYù[ô^⁄YòôW›\›…€‹[€úÀöY[\›[òﬁRŸ^_X]ô[[ŸNôò[ŸK›]\Œâ‹[ô[ô…À[[›[ùô]Kò[[›[ùôX\€€éô]KúôX\€€ã^[Y[ù⁄[ù[ùô]Kú^[Y[ù⁄[ù[ùY]Y]Nô]KõY]Y]_Nÿ]ÿZ]ŸXö€⁄ 	‹ôYù[ôò‹ôX]Y	ÀôYù[ô]ù…‹ôYù[ôöYWÿ‹ôX]Y
-N‹ô]\õàÀããúôYù[ô›]\Œâ‹›XÿŸYYY	ﬂNﬂ_BüN¬ò€€ú›\X‹ôX]P\
-¬àó‘Uú]öõ⁄[ä\	Ÿ]ô[ùÀôâ KT–Q—Téú]öõ⁄[ä\	›\ÿY… KêT—W’Tìâ⁄ãÀ€ÿÿ[‹›åÃ	Àà’íTW’—Pí”“◊‘—P‘ëUú⁄Y€ö[ôÀ’íTW’V—SêPìQâÃIÀVSQSï–QRSó—SPRSŒâÿYZ[êö[ò[€ò\ôIÀVSQSï–STï—SPRSâÿYZ[êö[ò[€ò\ôIÀà›ö\NôòZŸKXZ[\éò\ﬁ[ò»Y\‹ÿYŸOOû⁄YäòZ[⁄]ò]ÿ[XZ[	âõY\‹ÿYŸKú›XöôX›ö[ò€Y\ 	—Z[ôÿ[ô‹ÿô\›0ÈY›[ô»Z[ô\»⁄Y\úùYú… J]õ›»ô]»\úõ‹ä	’\›ôZ\éàXZ[Y[ú›õ‹∞Ôô\ôŸZ[ôöX⁄\úôZX⁄ò\â N€õ›YöXÿ][€úÀú\⁄
-Y\‹ÿYŸJNﬂBüJN¬ò€€ú›Ÿ\ùô\èX\õ\›[ä
-K‹öY⁄[èXãÀÃLçÀåååNâ‹Ÿ\ùô\ãòYô\‹ 
-Kú‹ùX¬òYù\ä
+const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'finalsnap-payment-lifecycle-'));
+const signing='whsec_payment_lifecycle_test';
+const signer=new Stripe('sk_test_payment_lifecycle');
+const sessions=new Map();
+let created=0;
+const checkoutRequests=[];
+const notifications=[];
+let failWithdrawalMail=false;
+const fake={
+  webhooks:signer.webhooks,
+  invoices:{retrieve:async id=>({id,invoice_pdf:'https://invoice.stripe.com/i/test-pdf'})},
+  checkout:{sessions:{
+    create:async(data,options)=>{
+      created++;
+      checkoutRequests.push(data);
+      const session={id:`cs_test_${created}`,livemode:false,status:'open',payment_status:'unpaid',mode:data.mode,metadata:data.metadata,currency:'eur',amount_total:data.line_items[0].price_data.unit_amount,payment_intent:`pi_test_${created}`,invoice:`in_test_${created}`,customer:`cus_test_${created}`,url:'https://checkout.stripe.com/test'};
+      sessions.set(session.id,session);return session;
+    },
+    retrieve:async id=>{const session=sessions.get(id);if(!session){const error=new Error('No such checkout session');error.code='resource_missing';throw error;}return session;},
+    expire:async id=>{const session=sessions.get(id);session.status='expired';return session;}
+  }},
+  refunds:{create:async(data,options)=>{const refund={id:`re_test_${options.idempotencyKey}`,livemode:false,status:'pending',amount:data.amount,reason:data.reason,payment_intent:data.payment_intent,metadata:data.metadata};await webhook('refund.created',refund,`evt_${refund.id}_created`);return {...refund,status:'succeeded'};}}
+};
+const app=createApp({
+  DB_PATH:path.join(tmp,'events.db'),UPLOAD_DIR:path.join(tmp,'uploads'),BASE_URL:'http://localhost:3000',
+  STRIPE_WEBHOOK_SECRET:signing,STRIPE_TAX_ENABLED:'1',PAYMENT_ADMIN_EMAILS:'admin@finalsnap.de',PAYMENT_ALERT_EMAIL:'admin@finalsnap.de',
+  stripe:fake,mailer:async message=>{if(failWithdrawalMail&&message.subject.includes('Eingangsbest√§tigung deines Widerrufs'))throw new Error('Testfehler: Maildienst vor√ºbergehend nicht erreichbar');notifications.push(message);}
+});
+const server=app.listen(0),origin=`http://127.0.0.1:${server.address().port}`;
+after(()=>{server.close();app.locals.db.close();fs.rmSync(tmp,{recursive:true,force:true});});
+async function request(url,{user,method='GET',body,headers={}}={}){
+  const response=await fetch(origin+url,{method,headers:{...(user?{Cookie:user.cookie,'X-CSRF-Token':user.csrf}:{}),...(method!=='GET'?{Origin:'http://localhost:3000'}:{}),...(body?{'Content-Type':'application/json'}:{}),...headers},body:body?JSON.stringify(body):undefined,redirect:'manual'});
+  return {response,data:response.headers.get('content-type')?.includes('application/json')?await response.json():await response.text()};
+}
+async function register(email){
+  const result=await request('/api/auth/register',{method:'POST',body:{email,password:'a-long-test-password'}});
+  assert.equal(result.response.status,200);
+  return {id:result.data.user.id,cookie:result.response.headers.get('set-cookie').split(';')[0],csrf:result.data.csrf};
+}
+async function webhook(type,object,id){
+  const payload=JSON.stringify({id,type,livemode:false,data:{object}});
+  const signature=signer.webhooks.generateTestHeaderString({payload,secret:signing});
+  const response=await fetch(origin+'/api/stripe/webhook',{method:'POST',headers:{'stripe-signature':signature,'Content-Type':'application/json'},body:payload});
+  return response.status;
+}
+test('Checkout retries the same album; refund decisions and dispute events are audited and control access',async()=>{
+  const admin=await register('admin@finalsnap.de');
+  assert.equal((await request('/ops/payments',{user:admin})).response.status,403);
+  app.locals.db.prepare('UPDATE users SET email_verified_at=? WHERE id=?').run(Date.now(),admin.id);
+  assert.equal((await request('/ops/payments',{user:admin})).response.status,200);
+  const eventDate=new Date(Date.now()+30*86400000).toISOString().slice(0,10);
+  assert.equal((await request('/api/events',{user:admin,method:'POST',body:{eventId:'refund-event',title:'Refund test album',eventDate,trial:false}})).response.status,201);
+  const first=await request('/api/checkout',{user:admin,method:'POST',body:{termsAccepted:true,eventId:'refund-event'}});
+  assert.equal(first.response.status,200);assert.equal(created,1);
+  assert.equal(checkoutRequests[0].locale,'de');assert.equal(checkoutRequests[0].submit_type,'pay');
+  assert.match(checkoutRequests[0].custom_text.submit.message,/49,90 ‚Ç¨ inkl\. 19 % USt\./);
+  assert.match(checkoutRequests[0].custom_text.submit.message,/25 GB/);
+  assert.equal(checkoutRequests[0].automatic_tax.enabled,true);assert.equal(checkoutRequests[0].billing_address_collection,'required');assert.equal(checkoutRequests[0].tax_id_collection.enabled,true);assert.equal(checkoutRequests[0].invoice_creation.enabled,true);assert.equal(checkoutRequests[0].line_items[0].price_data.tax_behavior,'inclusive');
+  assert.deepEqual(checkoutRequests[0].name_collection,{individual:{enabled:true},business:{enabled:true,optional:true}});
+  const payment=app.locals.db.prepare('SELECT * FROM payments WHERE event_id=?').get('refund-event');
+  const session1=sessions.get(payment.stripe_session_id);
+  const repeated=await request('/api/checkout',{user:admin,method:'POST',body:{termsAccepted:true,eventId:'refund-event'}});
+  assert.equal(repeated.response.status,200);assert.equal(created,1);assert.equal(repeated.data.url,first.data.url);
+  session1.status='expired';
+  assert.equal(await webhook('checkout.session.expired',session1,'evt_expired'),200);
+  const retryState=await request(`/api/checkout/${session1.id}`,{user:admin});
+  assert.equal(retryState.data.status,'retry_available');assert.equal(retryState.data.retryAvailable,true);
+  const second=await request('/api/checkout',{user:admin,method:'POST',body:{termsAccepted:true,eventId:'refund-event'}});
+  assert.equal(second.response.status,200);assert.equal(second.data.attempt,2);assert.equal(created,2);
+  const session2=sessions.get(app.locals.db.prepare('SELECT stripe_session_id FROM payments WHERE id=?').get(payment.id).stripe_session_id);
+  assert.notEqual(session1.id,session2.id);
+  session2.status='complete';session2.payment_status='paid';
+  assert.equal(await webhook('checkout.session.completed',session2,'evt_paid'),200);
+  assert.ok(app.locals.db.prepare('SELECT paid_at FROM payments WHERE id=?').get(payment.id).paid_at);
+  assert.equal(app.locals.db.prepare('SELECT stripe_invoice_id,stripe_customer_id FROM payments WHERE id=?').get(payment.id).stripe_invoice_id,'in_test_2');
+  const intruder=await register('withdrawal-intruder@finalsnap.de');
+  assert.equal((await request('/api/events/refund-event/withdrawal',{user:intruder,method:'POST',body:{customerName:'Fremde Person',emailConfirmed:true}})).response.status,404);
+  assert.equal((await request('/api/events/refund-event/withdrawal',{user:admin,method:'POST',body:{customerName:'Kunde',emailConfirmed:false}})).response.status,400);
+  failWithdrawalMail=true;
+  const withdrawal=await request('/api/events/refund-event/withdrawal',{user:admin,method:'POST',body:{customerName:'Musterkunde',emailConfirmed:true}});
+  assert.equal(withdrawal.response.status,202);assert.equal(withdrawal.data.confirmationStatus,'pending');
+  assert.equal(app.locals.db.prepare('SELECT attempts FROM withdrawal_confirmations WHERE payment_id=?').get(payment.id).attempts,1);
+  failWithdrawalMail=false;await app.locals.flushWithdrawalConfirmations();
+  const withdrawalEmail=notifications.findLast(message=>message.subject.includes('Eingangsbest√§tigung deines Widerrufs'));
+  assert.match(withdrawalEmail.text,/Hiermit widerrufe ich, Musterkunde/);
+  assert.match(withdrawalEmail.text,/Eingang:/);assert.equal(withdrawalEmail.to,'admin@finalsnap.de');
+  const withdrawalReceiptCount=()=>notifications.filter(message=>message.subject.includes('Eingangsbest√§tigung deines Widerrufs')).length;
+  const emailCountAfterWithdrawal=withdrawalReceiptCount();
+  const withdrawalAgain=await request('/api/events/refund-event/withdrawal',{user:admin,method:'POST',body:{customerName:'Andere Angabe',emailConfirmed:true}});
+  assert.equal(withdrawalAgain.data.submittedAt,withdrawal.data.submittedAt);assert.equal(withdrawalReceiptCount(),emailCountAfterWithdrawal);
+  assert.equal(app.locals.db.prepare("SELECT COUNT(*) n FROM payment_events WHERE payment_id=? AND event_type='customer.withdrawal.submitted'").get(payment.id).n,1);
+  const albumInvoices=await request('/api/events',{user:admin});assert.equal(albumInvoices.data.events[0].hasInvoice,true);
+  assert.equal(albumInvoices.data.events[0].withdrawalConfirmationStatus,'sent');
+  const invoiceLink=await request('/api/event/refund-event/invoice',{user:admin});assert.equal(invoiceLink.response.status,302);assert.equal(invoiceLink.response.headers.get('location'),'https://invoice.stripe.com/i/test-pdf');
+  const token=app.locals.db.prepare('SELECT guest_token FROM events WHERE id=?').get('refund-event').guest_token;
+  assert.equal((await request(`/event/refund-event?token=${token}`)).response.status,200);
 
-OOû‹Ÿ\ùô\ãò€‹ŸJ
-Nÿ\õÿÿ[Àôãò€‹ŸJ
-NŸúÀúõTﬁ[ò \‹ôX›\ú⁄]ôNùùYKõ‹òŸNùùY_JNﬂJN¬ò\ﬁ[ò»ù[ò›[€àô\]Y\›
-\õ›\Ÿ\ãY]ŸI——U	ÀõŸKXY\úœ^ﬂ_O^ﬂJ^¬à€€ú›ô\‹€úŸOX]ÿZ]ô]⁄
-‹öY⁄[ä›\õ€Y]ŸXY\úŒûÀããä\Ÿ\èﬁ–€€⁄⁄YNù\Ÿ\ãò€€⁄⁄YK	÷P‘‘ëãU⁄Ÿ[âŒù\Ÿ\ãò‹‹ôüNûﬂJKããäY]ŸOOI——U	œﬁ”‹öY⁄[éâ⁄ãÀ€ÿÿ[‹›åÃ	ﬂNûﬂJKããäõŸOﬁ…–€€ù[ùU\IŒâÿ\Xÿ][€ã⁄ú€€âﬂNûﬂJKããöXY\úﬂKõŸNòõŸO“î””ãú›ö[ô⁄YûJõŸJNù[ôYö[ôYôY\ôX›â€X[ùX[	ﬂJN¬àô]\õà‹ô\‹€úŸK]Núô\‹€úŸKöXY\úÀôŸ]
-	ÿ€€ù[ù]\I OÀö[ò€Y\ 	ÿ\Xÿ][€ã⁄ú€€â Oÿ]ÿZ]ô\‹€úŸKöú€€ä
-Nò]ÿZ]ô\‹€úŸKù^
+  const dispute={id:'dp_test_1',livemode:false,status:'needs_response',reason:'product_not_received',amount:4990,currency:'eur',charge:'ch_test_1',payment_intent:session2.payment_intent};
+  assert.equal(await webhook('charge.dispute.created',dispute,'evt_dispute_open'),200);
+  assert.equal(app.locals.db.prepare('SELECT status FROM payments WHERE id=?').get(payment.id).status,'disputed');
+  assert.equal(app.locals.db.prepare('SELECT status FROM events WHERE id=?').get('refund-event').status,'paid');
+  assert.equal((await request(`/event/refund-event?token=${token}`)).response.status,200);
+  assert.equal(await webhook('charge.dispute.updated',{...dispute,status:'needs_response'},'evt_dispute_updated'),200);
+  assert.equal(app.locals.db.prepare("SELECT a.status FROM payment_alerts a JOIN payment_events e ON e.id=a.event_id WHERE e.stripe_event_id='evt_dispute_updated'").get().status,'sent');
+  await app.locals.flushPaymentAlerts();
+  assert.equal(app.locals.db.prepare("SELECT COUNT(*) n FROM payment_alerts WHERE status='pending'").get().n,0);
+  assert.equal(await webhook('charge.dispute.closed',{...dispute,status:'won'},'evt_dispute_won'),200);
+  assert.equal(app.locals.db.prepare('SELECT status FROM payments WHERE id=?').get(payment.id).status,'paid');
+  const disputedAgain={...dispute,id:'dp_test_2'};
+  assert.equal(await webhook('charge.dispute.created',disputedAgain,'evt_dispute_reopened'),200);
+  assert.equal(await webhook('charge.dispute.closed',{...disputedAgain,status:'lost'},'evt_dispute_lost'),200);
+  assert.equal(app.locals.db.prepare('SELECT status FROM payments WHERE id=?').get(payment.id).status,'disputed_lost');
+  assert.equal((await request(`/event/refund-event?token=${token}`)).response.status,402);
+  assert.equal(await webhook('charge.dispute.funds_reinstated',disputedAgain,'evt_funds_reinstated'),200);
+  assert.equal(app.locals.db.prepare('SELECT status FROM payments WHERE id=?').get(payment.id).status,'paid');
+  assert.equal((await request(`/event/refund-event?token=${token}`)).response.status,200);
 
-_N¬üBò\ﬁ[ò»ù[ò›[€àôY⁄\›\ä[XZ[
-^¬à€€ú›ô\›[X]ÿZ]ô\]Y\›
-	Àÿ\Kÿ]]‹ôY⁄\›\âÀ€Y]Ÿâ‘‘’	ÀõŸNûŸ[XZ[\‹›€‹ôâÿK[€ôÀ]\›\\‹›€‹ô	ﬂ_JN¬à\‹Ÿ\ùô\]X[
-ô\›[úô\‹€úŸKú›]\Àå
-N¬àô]\õà⁄Yúô\›[ô]Kù\Ÿ\ãöY€€⁄⁄YNúô\›[úô\‹€úŸKöXY\úÀôŸ]
-	‹Ÿ]X€€⁄⁄YI Kú‹]
-	Œ… VÃK‹‹ôéúô\›[ô]Kò‹‹ôüN¬üBò\ﬁ[ò»ù[ò›[€àŸXö€⁄ \KÿöôX›Y
-^¬à€€ú›^[ÿYRî””ãú›ö[ô⁄YûJ⁄Y\K]ô[[ŸNôò[ŸK]Nû€ÿöôX›_JN¬à€€ú›⁄Y€ò]\ôO\⁄Y€ô\ãùŸXö€⁄‹ÀôŸ[ô\ò]U\›XY\î›ö[ô ‹^[ÿYŸX‹ô]ú⁄Y€ö[ôﬂJN¬à€€ú›ô\‹€úŸOX]ÿZ]ô]⁄
-‹öY⁄[ä…Àÿ\K‹›ö\K›ŸXö€⁄…À€Y]Ÿâ‘‘’	ÀXY\úŒû…‹›ö\K\⁄Y€ò]\ôIŒú⁄Y€ò]\ôK	–€€ù[ùU\IŒâÿ\Xÿ][€ã⁄ú€€âﬂKõŸNú^[ÿYJN¬àô]\õàô\‹€úŸKú›]\Œ¬üBù\›
-	–⁄X⁄€›]ô]öY\»Hÿ[YH[ù[N»ôYù[ôX⁄\⁄[€ú»[ô\‹]H]ô[ù»\ôH]Y]Y[ô€€ùõ€XÿŸ\‹…À\ﬁ[ò 
-OOû¬à€€ú›YZ[èX]ÿZ]ôY⁄\›\ä	ÿYZ[êö[ò[€ò\ôI N¬à\‹Ÿ\ùô\]X[
+  const noReason=await request(`/api/admin/payments/${payment.id}/refunds`,{user:admin,method:'POST',body:{amountCents:1000,reason:'requested_by_customer',note:'zu kurz'}});
+  assert.equal(noReason.response.status,400);
+  const partial=await request(`/api/admin/payments/${payment.id}/refunds`,{user:admin,method:'POST',body:{amountCents:1000,reason:'requested_by_customer',note:'Kunde hat eine Teilerstattung angefragt.'}});
+  assert.equal(partial.response.status,202);assert.equal(partial.data.status,'succeeded');
+  assert.equal(app.locals.db.prepare('SELECT status FROM payments WHERE id=?').get(payment.id).status,'partially_refunded');
+  assert.equal((await request(`/event/refund-event?token=${token}`)).response.status,200);
+  const externalRefund={id:'re_test_external',livemode:false,status:'pending',amount:500,currency:'eur',reason:'requested_by_customer',payment_intent:session2.payment_intent};
+  assert.equal(await webhook('refund.created',externalRefund,'evt_refund_created'),200);
+  assert.equal(await webhook('refund.updated',{...externalRefund,status:'succeeded'},'evt_refund_updated'),200);
+  assert.equal(app.locals.db.prepare("SELECT status FROM refunds WHERE stripe_refund_id='re_test_external'").get().status,'succeeded');
+  assert.equal(app.locals.db.prepare('SELECT status FROM payments WHERE id=?').get(payment.id).status,'partially_refunded');
+  assert.equal(await webhook('charge.refunded',{id:'ch_test_1',livemode:false,payment_intent:session2.payment_intent,amount:4990,amount_refunded:1500,currency:'eur',refunded:false},'evt_charge_refunded'),200);
+  const full=await request(`/api/admin/payments/${payment.id}/refunds`,{user:admin,method:'POST',body:{reason:'requested_by_customer',note:'Vertrag widerrufen; vollst√§ndiger Betrag wird erstattet.'}});
+  assert.equal(full.response.status,202);assert.equal(full.data.status,'succeeded');
+  assert.equal(app.locals.db.prepare('SELECT status FROM payments WHERE id=?').get(payment.id).status,'refunded');
+  assert.equal(app.locals.db.prepare('SELECT status FROM events WHERE id=?').get('refund-event').status,'refunded');
+  assert.equal((await request(`/event/refund-event?token=${token}`)).response.status,402);
+  assert.equal(app.locals.db.prepare('SELECT COUNT(*) n FROM payment_attempts WHERE payment_id=?').get(payment.id).n,2);
+  assert.ok(app.locals.db.prepare('SELECT COUNT(*) n FROM payment_events WHERE payment_id=?').get(payment.id).n>=11);
+  assert.ok(notifications.length>=5);
+  assert.ok(notifications.filter(message=>!message.subject.includes('Willkommen')).every(message=>message.to==='admin@finalsnap.de'));
+  assert.equal(app.locals.db.prepare("SELECT COUNT(*) n FROM payment_alerts WHERE status='pending'").get().n,0);
+  const other=await register('other@finalsnap.de');assert.equal((await request('/api/event/refund-event/invoice',{user:other})).response.status,404);
+  const payments=await request('/api/admin/payments',{user:admin});
+  assert.equal(payments.response.status,200);assert.equal(payments.data.payments[0].refunds.length,3);
+});
 
-]ÿZ]ô\]Y\›
-	À€‹À‹^[Y[ù…À›\Ÿ\éòYZ[üJJKúô\‹€úŸKú›]\À N¬à\õÿÿ[Àôãúô\\ôJ	’TUH\Ÿ\ú»—U[XZ[›ô\öYöYYÿ]O»“TëHYO… Kúù[ä]Kõõ› 
-KYZ[ãöY
-N¬à\‹Ÿ\ùô\]X[
-
-]ÿZ]ô\]Y\›
-	À€‹À‹^[Y[ù…À›\Ÿ\éòYZ[üJJKúô\‹€úŸKú›]\Àå
-N¬à€€ú›]ô[ù]O[ô]»]J]Kõõ› 
-JÃÃ
-éç
-Kù“T”‘›ö[ô 
-Kú€XŸJL
-N¬à\‹Ÿ\ùô\]X[
-
-]ÿZ]ô\]Y\›
-	Àÿ\KŸ]ô[ù…À›\Ÿ\éòYZ[ãY]Ÿâ‘‘’	ÀõŸNûŸ]ô[ùYâ‹ôYù[ôY]ô[ù	À]Nâ‘ôYù[ô\›[ù[IÀ]ô[ù]KöX[ôò[Ÿ__JJKúô\‹€úŸKú›]\ÀåJN¬à€€ú›ö\ú›X]ÿZ]ô\]Y\›
-	Àÿ\Kÿ⁄X⁄€›]	À›\Ÿ\éòYZ[ãY]Ÿâ‘‘’	ÀõŸNû›\õ\–XÿŸ\YùùYK]ô[ùYâ‹ôYù[ôY]ô[ù	ﬂ_JN¬à\‹Ÿ\ùô\]X[
-ö\ú›úô\‹€úŸKú›]\Àå
-Nÿ\‹Ÿ\ùô\]X[
-‹ôX]YJN¬à\‹Ÿ\ùô\]X[
-⁄X⁄€›]ô\]Y\›÷ÃKõÿÿ[K	ŸI Nÿ\‹Ÿ\ùô\]X[
-⁄X⁄€›]ô\]Y\›÷ÃKú›XõZ]›\K	‹^I N¬à\‹Ÿ\ùõX]⁄
-⁄X⁄€›]ô\]Y\›÷ÃKò›\›€W›^ú›XõZ]õY\‹ÿYŸKÕKL8†´[ö€àNH	HT›ã N¬à\‹Ÿ\ùõX]⁄
-⁄X⁄€›]ô\]Y\›÷ÃKò›\›€W›^ú›XõZ]õY\‹ÿYŸKÃçH–ã N¬à\‹Ÿ\ùô\]X[
-⁄X⁄€›]ô\]Y\›÷ÃKò]]€X]X◊›^ô[òXõYùYJNÿ\‹Ÿ\ùô\]X[
-⁄X⁄€›]ô\]Y\›÷ÃKòö[[ô◊ÿYô\‹◊ÿ€€X›[€ã	‹ô\]Z\ôY	 Nÿ\‹Ÿ\ùô\]X[
-⁄X⁄€›]ô\]Y\›÷ÃKù^⁄Yÿ€€X›[€ãô[òXõYùYJNÿ\‹Ÿ\ùô\]X[
-⁄X⁄€›]ô\]Y\›÷ÃKö[ùõ⁄XŸWÿ‹ôX][€ãô[òXõYùYJNÿ\‹Ÿ\ùô\]X[
-⁄X⁄€›]ô\]Y\›÷ÃKõ[ôW⁄][\÷ÃKúöXŸWŸ]Kù^ÿôZ]ö[‹ã	⁄[ò€\⁄]ôI N¬à\‹Ÿ\ùôY\\]X[
-⁄X⁄€›]ô\]Y\›÷ÃKõò[YWÿ€€X›[€ã⁄[ô]öYX[ûŸ[òXõYùùY_Kù\⁄[ô\‹ŒûŸ[òXõYùùYK‹[€ò[ùùY__JN¬à€€ú›^[Y[ùX\õÿÿ[Àôãúô\\ôJ	‘—SP’
-àîì”H^[Y[ù»“TëH]ô[ù⁄YO… KôŸ]
-	‹ôYù[ôY]ô[ù	 N¬à€€ú›Ÿ\‹⁄[€åO\Ÿ\‹⁄[€úÀôŸ]
-^[Y[ùú›ö\W‹Ÿ\‹⁄[€ó⁄Y
-N¬à€€ú›ô\X]YX]ÿZ]ô\]Y\›
-	Àÿ\Kÿ⁄X⁄€›]	À›\Ÿ\éòYZ[ãY]Ÿâ‘‘’	ÀõŸNû›\õ\–XÿŸ\YùùYK]ô[ùYâ‹ôYù[ôY]ô[ù	ﬂ_JN¬à\‹Ÿ\ùô\]X[
-ô\X]Yúô\‹€úŸKú›]\Àå
-Nÿ\‹Ÿ\ùô\]X[
-‹ôX]YJNÿ\‹Ÿ\ùô\]X[
-ô\X]Yô]Kù\õö\ú›ô]Kù\õ
-N¬àŸ\‹⁄[€åKú›]\œIŸ^\ôY	Œ¬à\‹Ÿ\ùô\]X[
-]ÿZ]ŸXö€⁄ 	ÿ⁄X⁄€›]úŸ\‹⁄[€ãô^\ôY	ÀŸ\‹⁄[€åK	Ÿ]ùŸ^\ôY	 Kå
-N¬à€€ú›ô]ûT›]OX]ÿZ]ô\]Y\›
-ÿ\Kÿ⁄X⁄€›]…‹Ÿ\‹⁄[€åKöYX›\Ÿ\éòYZ[üJN¬à\‹Ÿ\ùô\]X[
-ô]ûT›]Kô]Kú›]\À	‹ô]ûWÿ]òZ[XõI Nÿ\‹Ÿ\ùô\]X[
-ô]ûT›]Kô]Kúô]ûP]òZ[XõKùYJN¬à€€ú›ŸX€€ôX]ÿZ]ô\]Y\›
-	Àÿ\Kÿ⁄X⁄€›]	À›\Ÿ\éòYZ[ãY]Ÿâ‘‘’	ÀõŸNû›\õ\–XÿŸ\YùùYK]ô[ùYâ‹ôYù[ôY]ô[ù	ﬂ_JN¬à\‹Ÿ\ùô\]X[
-ŸX€€ôúô\‹€úŸKú›]\Àå
-Nÿ\‹Ÿ\ùô\]X[
-ŸX€€ôô]Kò][\äNÿ\‹Ÿ\ùô\]X[
-‹ôX]YäN¬à€€ú›Ÿ\‹⁄[€åè\Ÿ\‹⁄[€úÀôŸ]
-\õÿÿ[Àôãúô\\ôJ	‘—SP’›ö\W‹Ÿ\‹⁄[€ó⁄Yîì”H^[Y[ù»“TëHYO… KôŸ]
-^[Y[ùöY
-Kú›ö\W‹Ÿ\‹⁄[€ó⁄Y
-N¬à\‹Ÿ\ùõõ›\]X[
-Ÿ\‹⁄[€åKöYŸ\‹⁄[€åãöY
-N¬àŸ\‹⁄[€åãú›]\œIÿ€€\]IŒ‹Ÿ\‹⁄[€åãú^[Y[ù‹›]\œI‹ZY	Œ¬à\‹Ÿ\ùô\]X[
-]ÿZ]ŸXö€⁄ 	ÿ⁄X⁄€›]úŸ\‹⁄[€ãò€€\]Y	ÀŸ\‹⁄[€åã	Ÿ]ù‹ZY	 Kå
-N¬à\‹Ÿ\ùõ⁄ \õÿÿ[Àôãúô\\ôJ	‘—SP’ZYÿ]îì”H^[Y[ù»“TëHYO… KôŸ]
-^[Y[ùöY
-KúZYÿ]
-N¬à\‹Ÿ\ùô\]X[
-\õÿÿ[Àôãúô\\ôJ	‘—SP’›ö\W⁄[ùõ⁄XŸW⁄Y›ö\Wÿ›\›€Y\ó⁄Yîì”H^[Y[ù»“TëHYO… KôŸ]
-^[Y[ùöY
-Kú›ö\W⁄[ùõ⁄XŸW⁄Y	⁄[ó›\›Ãâ N¬à€€ú›[ùùY\èX]ÿZ]ôY⁄\›\ä	›⁄]ò]ÿ[Z[ùùY\êö[ò[€ò\ôI N¬à\‹Ÿ\ùô\]X[
-
-]ÿZ]ô\]Y\›
-	Àÿ\KŸ]ô[ùÀ‹ôYù[ôY]ô[ù›⁄]ò]ÿ[	À›\Ÿ\éö[ùùY\ãY]Ÿâ‘‘’	ÀõŸNûÿ›\›€Y\ìò[YNâ—úô[YH\ú€€âÀ[XZ[€€ôö\õYYùùY__JJKúô\‹€úŸKú›]\À
-N¬à\‹Ÿ\ùô\]X[
-
-]ÿZ]ô\]Y\›
-	Àÿ\KŸ]ô[ùÀ‹ôYù[ôY]ô[ù›⁄]ò]ÿ[	À›\Ÿ\éòYZ[ãY]Ÿâ‘‘’	ÀõŸNûÿ›\›€Y\ìò[YNâ“›[ôIÀ[XZ[€€ôö\õYYôò[Ÿ__JJKúô\‹€úŸKú›]\À
-N¬àòZ[⁄]ò]ÿ[XZ[]ùYN¬à€€ú›⁄]ò]ÿ[X]ÿZ]ô\]Y\›
-	Àÿ\KŸ]ô[ùÀ‹ôYù[ôY]ô[ù›⁄]ò]ÿ[	À›\Ÿ\éòYZ[ãY]Ÿâ‘‘’	ÀõŸNûÿ›\›€Y\ìò[YNâ”]\›\ö›[ôIÀ[XZ[€€ôö\õYYùùY__JN¬à\‹Ÿ\ùô\]X[
-⁄]ò]ÿ[úô\‹€úŸKú›]\ÀåäNÿ\‹Ÿ\ùô\]X[
-⁄]ò]ÿ[ô]Kò€€ôö\õX][€î›]\À	‹[ô[ô… N¬à\‹Ÿ\ùô\]X[
-\õÿÿ[Àôãúô\\ôJ	‘—SP’][\»îì”H⁄]ò]ÿ[ÿ€€ôö\õX][€ú»“TëH^[Y[ù⁄YO… KôŸ]
-^[Y[ùöY
-Kò][\ÀJN¬àòZ[⁄]ò]ÿ[XZ[Yò[ŸNÿ]ÿZ]\õÿÿ[Àôõ\⁄⁄]ò]ÿ[€€ôö\õX][€ú 
-N¬à€€ú›⁄]ò]ÿ[[XZ[[õ›YöXÿ][€úÀôö[ô\›
-Y\‹ÿYŸOOõY\‹ÿYŸKú›XöôX›ö[ò€Y\ 	—Z[ôÿ[ô‹ÿô\›0ÈY›[ô»Z[ô\»⁄Y\úùYú… JN¬à\‹Ÿ\ùõX]⁄
-⁄]ò]ÿ[[XZ[ù^“Y\õZ]⁄Y\úùYôHX⁄]\›\ö›[ôK N¬à\‹Ÿ\ùõX]⁄
-⁄]ò]ÿ[[XZ[ù^—Z[ôÿ[ôŒã Nÿ\‹Ÿ\ùô\]X[
-⁄]ò]ÿ[[XZ[ùÀ	ÿYZ[êö[ò[€ò\ôI N¬à€€ú›⁄]ò]ÿ[ôXŸZ\€›[ùJ
-OOõõ›YöXÿ][€úÀôö[\äY\‹ÿYŸOOõY\‹ÿYŸKú›XöôX›ö[ò€Y\ 	—Z[ôÿ[ô‹ÿô\›0ÈY›[ô»Z[ô\»⁄Y\úùYú… JKõ[ô›¬à€€ú›[XZ[€›[ùYù\ï⁄]ò]ÿ[]⁄]ò]ÿ[ôXŸZ\€›[ù
-
-N¬à€€ú›⁄]ò]ÿ[YÿZ[èX]ÿZ]ô\]Y\›
-	Àÿ\KŸ]ô[ùÀ‹ôYù[ôY]ô[ù›⁄]ò]ÿ[	À›\Ÿ\éòYZ[ãY]Ÿâ‘‘’	ÀõŸNûÿ›\›€Y\ìò[YNâ–[ô\ôH[ôÿXôIÀ[XZ[€€ôö\õYYùùY__JN¬à\‹Ÿ\ùô\]X[
-⁄]ò]ÿ[YÿZ[ãô]Kú›XõZ]Y]⁄]ò]ÿ[ô]Kú›XõZ]Y]
-Nÿ\‹Ÿ\ùô\]X[
-⁄]ò]ÿ[ôXŸZ\€›[ù
-
-K[XZ[€›[ùYù\ï⁄]ò]ÿ[
-N¬à\‹Ÿ\ùô\]X[
-\õÿÿ[Àôãúô\\ôJî—SP’”’Sï
-
-äHàîì”H^[Y[ùŸ]ô[ù»“TëH^[Y[ù⁄YO»Së]ô[ù›\OIÿ›\›€Y\ãù⁄]ò]ÿ[ú›XõZ]Y	»äKôŸ]
-^[Y[ùöY
-KõãJN¬à€€ú›[ù[R[ùõ⁄XŸ\œX]ÿZ]ô\]Y\›
-	Àÿ\KŸ]ô[ù…À›\Ÿ\éòYZ[üJNÿ\‹Ÿ\ùô\]X[
-[ù[R[ùõ⁄XŸ\Àô]Kô]ô[ù÷ÃKö\“[ùõ⁄XŸKùYJN¬à\‹Ÿ\ùô\]X[
-[ù[R[ùõ⁄XŸ\Àô]Kô]ô[ù÷ÃKù⁄]ò]ÿ[€€ôö\õX][€î›]\À	‹Ÿ[ù	 N¬à€€ú›[ùõ⁄XŸS[öœX]ÿZ]ô\]Y\›
-	Àÿ\KŸ]ô[ù‹ôYù[ôY]ô[ù⁄[ùõ⁄XŸIÀ›\Ÿ\éòYZ[üJNÿ\‹Ÿ\ùô\]X[
-[ùõ⁄XŸS[öÀúô\‹€úŸKú›]\ÀÃäNÿ\‹Ÿ\ùô\]X[
-[ùõ⁄XŸS[öÀúô\‹€úŸKöXY\úÀôŸ]
-	€ÿÿ][€â K	⁄ŒãÀ⁄[ùõ⁄XŸKú›ö\Kò€€K⁄K›\›\â N¬à€€ú›⁄Ÿ[èX\õÿÿ[Àôãúô\\ôJ	‘—SP’›Y\››⁄Ÿ[àîì”H]ô[ù»“TëHYO… KôŸ]
-	‹ôYù[ôY]ô[ù	 Kô›Y\››⁄Ÿ[é¬à\‹Ÿ\ùô\]X[
-
-]ÿZ]ô\]Y\›
-Ÿ]ô[ù‹ôYù[ôY]ô[ù›⁄Ÿ[èI›⁄Ÿ[üX
-JKúô\‹€úŸKú›]\Àå
-N¬Çà€€ú›\‹]O^⁄YâŸ›\›ÃIÀ]ô[[ŸNôò[ŸK›]\Œâ€ôYY◊‹ô\‹€úŸIÀôX\€€éâ‹õŸX›€õ›‹ôXŸZ]ôY	À[[›[ùçNL›\úô[òﬁNâŸ]\âÀ⁄\ôŸNâÿ⁄›\›ÃIÀ^[Y[ù⁄[ù[ùúŸ\‹⁄[€åãú^[Y[ù⁄[ù[ùN¬à\‹Ÿ\ùô\]X[
-]ÿZ]ŸXö€⁄ 	ÿ⁄\ôŸKô\‹]Kò‹ôX]Y	À\‹]K	Ÿ]ùŸ\‹]W€‹[â Kå
-N¬à\‹Ÿ\ùô\]X[
-\õÿÿ[Àôãúô\\ôJ	‘—SP’›]\»îì”H^[Y[ù»“TëHYO… KôŸ]
-^[Y[ùöY
-Kú›]\À	Ÿ\‹]Y	 N¬à\‹Ÿ\ùô\]X[
-\õÿÿ[Àôãúô\\ôJ	‘—SP’›]\»îì”H]ô[ù»“TëHYO… KôŸ]
-	‹ôYù[ôY]ô[ù	 Kú›]\À	‹ZY	 N¬à\‹Ÿ\ùô\]X[
-
-]ÿZ]ô\]Y\›
-Ÿ]ô[ù‹ôYù[ôY]ô[ù›⁄Ÿ[èI›⁄Ÿ[üX
-JKúô\‹€úŸKú›]\Àå
-N¬à\‹Ÿ\ùô\]X[
-]ÿZ]ŸXö€⁄ 	ÿ⁄\ôŸKô\‹]Kù\]Y	ÀÀããô\‹]K›]\Œâ€ôYY◊‹ô\‹€úŸIﬂK	Ÿ]ùŸ\‹]W›\]Y	 Kå
-N¬à\‹Ÿ\ùô\]X[
-\õÿÿ[Àôãúô\\ôJî—SP’Kú›]\»îì”H^[Y[ùÿ[\ù»Hì“Sà^[Y[ùŸ]ô[ù»H”àKöYXKô]ô[ù⁄Y“TëHKú›ö\WŸ]ô[ù⁄YIŸ]ùŸ\‹]W›\]Y	»äKôŸ]
-
-Kú›]\À	‹Ÿ[ù	 N¬à]ÿZ]\õÿÿ[Àôõ\⁄^[Y[ù[\ù 
-N¬à\‹Ÿ\ùô\]X[
-\õÿÿ[Àôãúô\\ôJî—SP’”’Sï
-
-äHàîì”H^[Y[ùÿ[\ù»“TëH›]\œI‹[ô[ô…»äKôŸ]
-
-Kõã
-N¬à\‹Ÿ\ùô\]X[
-]ÿZ]ŸXö€⁄ 	ÿ⁄\ôŸKô\‹]Kò€‹ŸY	ÀÀããô\‹]K›]\Œâ›€€âﬂK	Ÿ]ùŸ\‹]W›€€â Kå
-N¬à\‹Ÿ\ùô\]X[
-\õÿÿ[Àôãúô\\ôJ	‘—SP’›]\»îì”H^[Y[ù»“TëHYO… KôŸ]
-^[Y[ùöY
-Kú›]\À	‹ZY	 N¬à€€ú›\‹]YYÿZ[è^Àããô\‹]KYâŸ›\›ÃâﬂN¬à\‹Ÿ\ùô\]X[
-]ÿZ]ŸXö€⁄ 	ÿ⁄\ôŸKô\‹]Kò‹ôX]Y	À\‹]YYÿZ[ã	Ÿ]ùŸ\‹]W‹ô[‹[ôY	 Kå
-N¬à\‹Ÿ\ùô\]X[
-]ÿZ]ŸXö€⁄ 	ÿ⁄\ôŸKô\‹]Kò€‹ŸY	ÀÀããô\‹]YYÿZ[ã›]\Œâ€‹›	ﬂK	Ÿ]ùŸ\‹]W€‹›	 Kå
-N¬à\‹Ÿ\ùô\]X[
-\õÿÿ[Àôãúô\\ôJ	‘—SP’›]\»îì”H^[Y[ù»“TëHYO… KôŸ]
-^[Y[ùöY
-Kú›]\À	Ÿ\‹]Y€‹›	 N¬à\‹Ÿ\ùô\]X[
-
-]ÿZ]ô\]Y\›
-Ÿ]ô[ù‹ôYù[ôY]ô[ù›⁄Ÿ[èI›⁄Ÿ[üX
-JKúô\‹€úŸKú›]\ÀäN¬à\‹Ÿ\ùô\]X[
-]ÿZ]ŸXö€⁄ 	ÿ⁄\ôŸKô\‹]Kôù[ô◊‹ôZ[ú›]Y	À\‹]YYÿZ[ã	Ÿ]ùŸù[ô◊‹ôZ[ú›]Y	 Kå
-N¬à\‹Ÿ\ùô\]X[
-\õÿÿ[Àôãúô\\ôJ	‘—SP’›]\»îì”H^[Y[ù»“TëHYO… KôŸ]
-^[Y[ùöY
-Kú›]\À	‹ZY	 N¬à\‹Ÿ\ùô\]X[
-
-]ÿZ]ô\]Y\›
-Ÿ]ô[ù‹ôYù[ôY]ô[ù›⁄Ÿ[èI›⁄Ÿ[üX
-JKúô\‹€úŸKú›]\Àå
-N¬Çà€€ú›õ‘ôX\€€èX]ÿZ]ô\]Y\›
-ÿ\KÿYZ[ã‹^[Y[ùÀ…‹^[Y[ùöYK‹ôYù[ôÿ›\Ÿ\éòYZ[ãY]Ÿâ‘‘’	ÀõŸNûÿ[[›[ùŸ[ùŒåLôX\€€éâ‹ô\]Y\›YÿûWÿ›\›€Y\âÀõ›NâﬁùH›\ûâﬂ_JN¬à\‹Ÿ\ùô\]X[
-õ‘ôX\€€ãúô\‹€úŸKú›]\À
-N¬à€€ú›\ùX[X]ÿZ]ô\]Y\›
-ÿ\KÿYZ[ã‹^[Y[ùÀ…‹^[Y[ùöYK‹ôYù[ôÿ›\Ÿ\éòYZ[ãY]Ÿâ‘‘’	ÀõŸNûÿ[[›[ùŸ[ùŒåLôX\€€éâ‹ô\]Y\›YÿûWÿ›\›€Y\âÀõ›Nâ“›[ôH]Z[ôHZ[\ú›][ô»[ôŸYúòY›âﬂ_JN¬à\‹Ÿ\ùô\]X[
-\ùX[úô\‹€úŸKú›]\ÀåäNÿ\‹Ÿ\ùô\]X[
-\ùX[ô]Kú›]\À	‹›XÿŸYYY	 N¬à\‹Ÿ\ùô\]X[
-\õÿÿ[Àôãúô\\ôJ	‘—SP’›]\»îì”H^[Y[ù»“TëHYO… KôŸ]
-^[Y[ùöY
-Kú›]\À	‹\ùX[W‹ôYù[ôY	 N¬à\‹Ÿ\ùô\]X[
-
-]ÿZ]ô\]Y\›
-Ÿ]ô[ù‹ôYù[ôY]ô[ù›⁄Ÿ[èI›⁄Ÿ[üX
-JKúô\‹€úŸKú›]\Àå
-N¬à€€ú›^\õò[ôYù[ô^⁄Yâ‹ôW›\›Ÿ^\õò[	À]ô[[ŸNôò[ŸK›]\Œâ‹[ô[ô…À[[›[ùçL›\úô[òﬁNâŸ]\âÀôX\€€éâ‹ô\]Y\›YÿûWÿ›\›€Y\âÀ^[Y[ù⁄[ù[ùúŸ\‹⁄[€åãú^[Y[ù⁄[ù[ùN¬à\‹Ÿ\ùô\]X[
-]ÿZ]ŸXö€⁄ 	‹ôYù[ôò‹ôX]Y	À^\õò[ôYù[ô	Ÿ]ù‹ôYù[ôÿ‹ôX]Y	 Kå
-N¬à\‹Ÿ\ùô\]X[
-]ÿZ]ŸXö€⁄ 	‹ôYù[ôù\]Y	ÀÀããô^\õò[ôYù[ô›]\Œâ‹›XÿŸYYY	ﬂK	Ÿ]ù‹ôYù[ô›\]Y	 Kå
-N¬à\‹Ÿ\ùô\]X[
-\õÿÿ[Àôãúô\\ôJî—SP’›]\»îì”HôYù[ô»“TëH›ö\W‹ôYù[ô⁄YI‹ôW›\›Ÿ^\õò[	»äKôŸ]
-
-Kú›]\À	‹›XÿŸYYY	 N¬à\‹Ÿ\ùô\]X[
-\õÿÿ[Àôãúô\\ôJ	‘—SP’›]\»îì”H^[Y[ù»“TëHYO… KôŸ]
-^[Y[ùöY
-Kú›]\À	‹\ùX[W‹ôYù[ôY	 N¬à\‹Ÿ\ùô\]X[
-]ÿZ]ŸXö€⁄ 	ÿ⁄\ôŸKúôYù[ôY	À⁄Yâÿ⁄›\›ÃIÀ]ô[[ŸNôò[ŸK^[Y[ù⁄[ù[ùúŸ\‹⁄[€åãú^[Y[ù⁄[ù[ù[[›[ùçNL[[›[ù‹ôYù[ôYåML›\úô[òﬁNâŸ]\âÀôYù[ôYôò[Ÿ_K	Ÿ]ùÿ⁄\ôŸW‹ôYù[ôY	 Kå
-N¬à€€ú›ù[X]ÿZ]ô\]Y\›
-ÿ\KÿYZ[ã‹^[Y[ùÀ…‹^[Y[ùöYK‹ôYù[ôÿ›\Ÿ\éòYZ[ãY]Ÿâ‘‘’	ÀõŸNû‹ôX\€€éâ‹ô\]Y\›YÿûWÿ›\›€Y\âÀõ›Nâ’ô\ùòY»⁄Y\úùYô[é»õ€›0ÈôYŸ\àô]òY»⁄\ô\ú›]]âﬂ_JN¬à\‹Ÿ\ùô\]X[
-ù[úô\‹€úŸKú›]\ÀåäNÿ\‹Ÿ\ùô\]X[
-ù[ô]Kú›]\À	‹›XÿŸYYY	 N¬à\‹Ÿ\ùô\]X[
-\õÿÿ[Àôãúô\\ôJ	‘—SP’›]\»îì”H^[Y[ù»“TëHYO… KôŸ]
-^[Y[ùöY
-Kú›]\À	‹ôYù[ôY	 N¬à\‹Ÿ\ùô\]X[
-\õÿÿ[Àôãúô\\ôJ	‘—SP’›]\»îì”H]ô[ù»“TëHYO… KôŸ]
-	‹ôYù[ôY]ô[ù	 Kú›]\À	‹ôYù[ôY	 N¬à\‹Ÿ\ùô\]X[
-
-]ÿZ]ô\]Y\›
-Ÿ]ô[ù‹ôYù[ôY]ô[ù›⁄Ÿ[èI›⁄Ÿ[üX
-JKúô\‹€úŸKú›]\ÀäN¬à\‹Ÿ\ùô\]X[
-\õÿÿ[Àôãúô\\ôJ	‘—SP’”’Sï
-
-äHàîì”H^[Y[ùÿ][\»“TëH^[Y[ù⁄YO… KôŸ]
-^[Y[ùöY
-KõãäN¬à\‹Ÿ\ùõ⁄ \õÿÿ[Àôãúô\\ôJ	‘—SP’”’Sï
-
-äHàîì”H^[Y[ùŸ]ô[ù»“TëH^[Y[ù⁄YO… KôŸ]
-^[Y[ùöY
-KõèèLLJN¬à\‹Ÿ\ùõ⁄ õ›YöXÿ][€úÀõ[ô›èMJN¬à\‹Ÿ\ùõ⁄ õ›YöXÿ][€úÀôö[\äY\‹ÿYŸOOà[Y\‹ÿYŸKú›XöôX›ö[ò€Y\ 	’⁄[€€[Y[â JKô]ô\ûJY\‹ÿYŸOOõY\‹ÿYŸKùœOOIÿYZ[êö[ò[€ò\ôI JN¬à\‹Ÿ\ùô\]X[
-\õÿÿ[Àôãúô\\ôJî—SP’”’Sï
-
-äHàîì”H^[Y[ùÿ[\ù»“TëH›]\œI‹[ô[ô…»äKôŸ]
-
-Kõã
-N¬à€€ú››\èX]ÿZ]ôY⁄\›\ä	€›\êö[ò[€ò\ôI Nÿ\‹Ÿ\ùô\]X[
-
-]ÿZ]ô\]Y\›
-	Àÿ\KŸ]ô[ù‹ôYù[ôY]ô[ù⁄[ùõ⁄XŸIÀ›\Ÿ\éõ›\üJJKúô\‹€úŸKú›]\À
-N¬à€€ú›^[Y[ùœX]ÿZ]ô\]Y\›
-	Àÿ\KÿYZ[ã‹^[Y[ù…À›\Ÿ\éòYZ[üJN¬à\‹Ÿ\ùô\]X[
-^[Y[ùÀúô\‹€úŸKú›]\Àå
-Nÿ\‹Ÿ\ùô\]X[
-^[Y[ùÀô]Kú^[Y[ù÷ÃKúôYù[ôÀõ[ô› N¬üJN¬Çù\›
-	–€€ú›[Y\àX\õK\›\ù€€úŸ[ù\»ô\]Z\ôY\ú⁄\›Y[ô[ò€YY[àH\›⁄X⁄€›]	À\ﬁ[ò 
-OOû¬à€€ú›ù^Y\èX]ÿZ]ôY⁄\›\ä	ŸX\õK\›\ùö[ò[€ò\ôI N¬à€€ú›]ô[ù]O[ô]»]J]Kõõ› 
-JÕJéç
-Kù“T”‘›ö[ô 
-Kú€XŸJL
-N¬à\‹Ÿ\ùô\]X[
-
-]ÿZ]ô\]Y\›
-	Àÿ\KŸ]ô[ù…À›\Ÿ\éòù^Y\ãY]Ÿâ‘‘’	ÀõŸNûŸ]ô[ùYâŸX\õK\›\ù	À]Nâ—X\õH›\ù\›	À]ô[ù]KöX[ôò[Ÿ__JJKúô\‹€úŸKú›]\ÀåJN¬à€€ú›Z\‹⁄[ô–€€úŸ[ùX]ÿZ]ô\]Y\›
-	Àÿ\Kÿ⁄X⁄€›]	À›\Ÿ\éòù^Y\ãY]Ÿâ‘‘’	ÀõŸNû›\õ\–XÿŸ\YùùYK]ô[ùYâŸX\õK\›\ù	ﬂ_JN¬à\‹Ÿ\ùô\]X[
-Z\‹⁄[ô–€€úŸ[ùúô\‹€úŸKú›]\À
-N¬à\‹Ÿ\ùô\]X[
-
-]ÿZ]ô\]Y\›
-	Àÿ\Kÿ⁄X⁄€›]	À›\Ÿ\éòù^Y\ãY]Ÿâ‘‘’	ÀõŸNû›\õ\–XÿŸ\YùùYK]ô[ùYâŸX\õK\›\ù	À›\›€Y\ï\Nâÿ€€ú›[Y\âÀX\õT›\ùô\]Y\›ùùYKX\õT›\ùX⁄€õ›€YŸYùùY__JJKúô\‹€úŸKú›]\Àå
-N¬à€€ú›^[Y[ùX\õÿÿ[Àôãúô\\ôJ	‘—SP’
-àîì”H^[Y[ù»“TëH]ô[ù⁄YO… KôŸ]
-	ŸX\õK\›\ù	 N¬à\‹Ÿ\ùô\]X[
-^[Y[ùò›\›€Y\ó›\K	ÿ€€ú›[Y\â N¬à\‹Ÿ\ùõ⁄ ^[Y[ùôX\õW‹›\ù‹ô\]Y\›Yÿ]
-Nÿ\‹Ÿ\ùõ⁄ ^[Y[ùôX\õW‹›\ùÿX⁄€õ›€YŸYÿ]
-N¬à€€ú›Ÿ\‹⁄[€è\Ÿ\‹⁄[€úÀôŸ]
-^[Y[ùú›ö\W‹Ÿ\‹⁄[€ó⁄Y
-N¬à\‹Ÿ\ùô\]X[
-Ÿ\‹⁄[€ãõY]Y]KôX\õT›\ùô\]Y\›	›ùYI Nÿ\‹Ÿ\ùô\]X[
-Ÿ\‹⁄[€ãõY]Y]KôX\õT›\ùX⁄€õ›€YŸY	›ùYI N¬à€€ú›⁄]ò]ÿ[X]ÿZ]ô\]Y\›
-	À›⁄Y\úùYâ Nÿ\‹Ÿ\ùô\]X[
-⁄]ò]ÿ[úô\‹€úŸKú›]\Àå
-Nÿ\‹Ÿ\ùõX]⁄
-⁄]ò]ÿ[ô]K”]\›\ãU⁄Y\úùYúŸõ‹õ][\ã N¬à€€ú›\õ\œX]ÿZ]ô\]Y\›
-	ÀÿôY[ô›[ôŸ[â Nÿ\‹Ÿ\ùô\]X[
-\õ\Àúô\‹€úŸKú›]\Àå
-Nÿ\‹Ÿ\ùõX]⁄
-\õ\Àô]KÕKL]\õ»Z[úÿ⁄YpÁ€X⁄\àŸ\Ÿ]õX⁄[à[\ÿ]ú›]Y\ã N¬à\‹Ÿ\ùõ⁄ ^[Y[ùù\õ\◊ÿXÿŸ\Yÿ]
-Nÿ\‹Ÿ\ùô\]X[
-^[Y[ùù\õ\◊›ô\ú⁄[€ã	ÃåçãLLKLLâ N¬üJN¬
+test('Consumer early-start consent is required, persisted, and included in the test checkout',async()=>{
+  const buyer=await register('early-start@finalsnap.de');
+  const eventDate=new Date(Date.now()+5*86400000).toISOString().slice(0,10);
+  assert.equal((await request('/api/events',{user:buyer,method:'POST',body:{eventId:'early-start',title:'Early start test',eventDate,trial:false}})).response.status,201);
+  const missingConsent=await request('/api/checkout',{user:buyer,method:'POST',body:{termsAccepted:true,eventId:'early-start'}});
+  assert.equal(missingConsent.response.status,400);
+  assert.equal((await request('/api/checkout',{user:buyer,method:'POST',body:{termsAccepted:true,eventId:'early-start',customerType:'consumer',earlyStartRequest:true,earlyStartAcknowledged:true}})).response.status,200);
+  const payment=app.locals.db.prepare('SELECT * FROM payments WHERE event_id=?').get('early-start');
+  assert.equal(payment.customer_type,'consumer');
+  assert.ok(payment.early_start_requested_at);assert.ok(payment.early_start_acknowledged_at);
+  const session=sessions.get(payment.stripe_session_id);
+  assert.equal(session.metadata.earlyStartRequest,'true');assert.equal(session.metadata.earlyStartAcknowledged,'true');
+  const withdrawal=await request('/widerruf');assert.equal(withdrawal.response.status,200);assert.match(withdrawal.data,/Muster-Widerrufsformular/);
+  const terms=await request('/bedingungen');assert.equal(terms.response.status,200);assert.match(terms.data,/49,90 Euro einschlie√ülich der gesetzlichen Umsatzsteuer/);
+  assert.ok(payment.terms_accepted_at);assert.equal(payment.terms_version,'2026-11-04-2');
+});
