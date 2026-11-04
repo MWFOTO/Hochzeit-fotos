@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sicherungsstatus · FinalSnap</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="site-header"><a class="brand" href="/" aria-label="FinalSnap Startseite"><span class="brand-mark">ϟ</span><span>FinalSnap</span></a><nav class="actions"><a class="button secondary" href="/ops/payments">Zahlungen &amp; Erstattungen</a><a class="button secondary" href="/dashboard">Zum Konto</a></nav></header>
+  <main class="account-page">
+    <div class="page-heading"><div><span class="eyebrow">BETRIEB &amp; DATENSCHUTZ</span><h1>Sicherungen</h1><p>Konfiguration, tägliche Läufe und Foto-Löschwarteschlange.</p></div></div>
+    <p id="status" role="status" aria-live="polite">Sicherungsstatus wird geladen …</p>
+    <section id="summary" class="plan-grid" aria-label="Sicherungsübersicht"></section>
+    <section class="event-section"><h2>Letzte Sicherungsläufe</h2><div id="runs" class="backup-runs"></div></section>
+    <p class="small">Datenbankkopien: 30 Tage. Fotokopien: höchstens 7 Tage nach aktiver Albumlöschung. Ein grüner Konfigurationsstatus ersetzt keinen dokumentierten Wiederherstellungstest.</p>
+  </main>
+  <script src="/backups-admin.js"></script>
+  <footer class="legal-footer"><a href="/impressum">Impressum</a> · <a href="/datenschutz">Datenschutz</a></footer>
+</body>
+</html>

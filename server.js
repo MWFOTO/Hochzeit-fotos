@@ -453,6 +453,12 @@ function createApp(options = {}) {
     next();
   }
   app.get('/ops/payments',paymentAdminRequired,(req,res)=>res.sendFile(path.join(__dirname,'public','payments-admin.html')));
+  app.get('/ops/backups',paymentAdminRequired,(req,res)=>res.sendFile(path.join(__dirname,'public','backups-admin.html')));
+  app.get('/api/admin/backups',paymentAdminRequired,(req,res)=>{
+    const cutoff=Date.now()-7*86400000;
+    const queued=db.prepare('SELECT COUNT(*) count,MIN(created_at) oldest FROM backup_photo_deletes').get();
+    res.json({configuration:backupService.status(),retention:{databaseDays:30,photosAfterAlbumDeletionDays:7},recentRuns:db.prepare('SELECT id,started_at,completed_at,status,db_object_key,photo_objects,photo_bytes,error FROM backup_runs ORDER BY started_at DESC LIMIT 20').all(),queuedPhotoDeletes:Number(queued.count||0),oldestQueuedPhotoDeleteAt:queued.oldest||null,staleQueuedPhotoDeletes:Number(queued.oldest&&queued.oldest<cutoff?queued.count:0)});
+  });
   app.get('/api/admin/payments',paymentAdminRequired,(req,res)=>{
     const payments=db.prepare('SELECT p.*,e.title,e.email,e.status album_status,e.event_date FROM payments p JOIN events e ON e.id=p.event_id ORDER BY p.rowid DESC LIMIT 100').all();
     res.json({payments:payments.map(payment=>({...payment,
@@ -891,7 +897,7 @@ function createApp(options = {}) {
   });
   for(const [suffix,file] of [['','gallery.html'],['/upload','upload.html'],['/gallery','gallery.html'],['/slideshow','slideshow.html'],['/games','games.html'],['/guestbook','guestbook.html']]) app.get(`/event/:eventId${suffix}`,access,(req,res)=>res.sendFile(path.join(pub,file)));
   // Only intended public assets; source code and generic HTML routes cannot bypass guards.
-  for(const file of ['style.css','design-editor.css','design-editor.js','upload.js','slideshow.js','guest-access.js','account.js','verify-email.js','password-recovery.js','games.js','guestbook.js','payments-admin.js','landing.js','success.js','gallery-init.js','admin.js','johanna-bastian.png','photographer.webp','event-wedding.jpg','event-birthday.jpg','event-summer.jpg','event-company.jpg']) app.get(`/${file}`,(req,res)=>res.sendFile(path.join(pub,file)));
+  for(const file of ['style.css','design-editor.css','design-editor.js','upload.js','slideshow.js','guest-access.js','account.js','verify-email.js','password-recovery.js','games.js','guestbook.js','payments-admin.js','backups-admin.js','landing.js','success.js','gallery-init.js','admin.js','johanna-bastian.png','photographer.webp','event-wedding.jpg','event-birthday.jpg','event-summer.jpg','event-company.jpg']) app.get(`/${file}`,(req,res)=>res.sendFile(path.join(pub,file)));
   // Liveness stays cheap for the host's restart check. Readiness checks critical dependencies.
   app.get('/health',(req,res)=>res.json({ok:true}));
   app.get('/ready',async(req,res)=>{

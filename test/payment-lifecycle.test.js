@@ -54,8 +54,13 @@ async function webhook(type,object,id){
 test('Checkout retries the same album; refund decisions and dispute events are audited and control access',async()=>{
   const admin=await register('admin@finalsnap.de');
   assert.equal((await request('/ops/payments',{user:admin})).response.status,403);
+  assert.equal((await request('/ops/backups',{user:admin})).response.status,403);
   app.locals.db.prepare('UPDATE users SET email_verified_at=? WHERE id=?').run(Date.now(),admin.id);
   assert.equal((await request('/ops/payments',{user:admin})).response.status,200);
+  assert.equal((await request('/ops/backups',{user:admin})).response.status,200);
+  const backupStatus=await request('/api/admin/backups',{user:admin});
+  assert.equal(backupStatus.response.status,200);assert.equal(backupStatus.data.configuration.enabled,false);assert.equal(backupStatus.data.configuration.configured,false);
+  assert.deepEqual(backupStatus.data.retention,{databaseDays:30,photosAfterAlbumDeletionDays:7});assert.equal(backupStatus.data.recentRuns.length,0);
   const eventDate=new Date(Date.now()+30*86400000).toISOString().slice(0,10);
   assert.equal((await request('/api/events',{user:admin,method:'POST',body:{eventId:'refund-event',title:'Refund test album',eventDate,trial:false}})).response.status,201);
   const first=await request('/api/checkout',{user:admin,method:'POST',body:{termsAccepted:true,eventId:'refund-event'}});

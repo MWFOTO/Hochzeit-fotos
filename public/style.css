@@ -925,6 +925,11 @@ label { color: #e7e8ec; font-size: 1rem; }
 .withdrawal-form { display: grid; gap: 16px; max-width: 620px; margin-top: 16px; }
 .withdrawal-form label:not(.check-label) { display: grid; gap: 7px; }
 .withdrawal-form input:not([type="checkbox"]) { width: 100%; }
+.backup-runs { display: grid; gap: 12px; }
+.backup-run, .backup-stat { border: 1px solid var(--line); border-radius: 14px; padding: 16px; background: var(--panel); }
+.backup-run h3, .backup-stat h2 { margin-top: 0; font-size: 1.1rem; }
+.backup-stat strong { font-size: 1.4rem; }
+.backup-stat p, .backup-run p { overflow-wrap: anywhere; }
 .event-tabs button[aria-pressed="true"] { color: #111a1d; background: var(--color-accent); }
 .photo-manager { color: var(--color-text); background: #ffffff09; }
 .managed-grid article, .account-page .managed-grid article { background: var(--panel-raised); }

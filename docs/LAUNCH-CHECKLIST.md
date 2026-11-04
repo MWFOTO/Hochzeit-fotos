@@ -80,6 +80,7 @@ Die konkreten Kontoschritte für Stripe Tax, Hetzner-Backups und die kontrollier
 - [x] Geordnetes Herunterfahren bei SIGTERM/SIGINT ergänzt, damit laufende Anfragen Zeit zum Beenden erhalten.
 - [x] Aktiven Live-Dienst, Region, Datenträger und Datenpfade mit Render-Dienst und Startprotokoll abgeglichen.
 - [x] App-interne Speicheralarme alle 15 Minuten ergänzt: Render-Datenträger sowie 75-%-/90-%-Schwellen der aus Fotometadaten erfassten Hetzner-Auslastung; Alarm und Erholung gehen an den Zahlungs-Alarmkontakt.
+- [x] Geschützte Betreiberansicht `/ops/backups` ergänzt: Backup-Konfiguration ohne Secretwerte, letzte Läufe und ausstehende Fotolöschungen. Der Backup-Bucket, Zugangsdaten und Wiederherstellungstest fehlen weiterhin.
 - [x] Temporäre Render-Uploads begrenzt: höchstens zwei gleichzeitige Requests, einer je Album; bei weniger als 2 GiB freiem Platz werden neue Uploads vor Dateiannahme pausiert. Veranstalterkonto zeigt Hetzner-Fotospeicher und Render-Uploadpuffer getrennt.
 - [x] Inline-JavaScript aus Landingpage, Galerie, Zahlungserfolg und Admin-Seite in eigene Dateien ausgelagert; globale Skriptrichtlinie erlaubt nur FinalSnap-Dateien. Styles und Browserdarstellung separat prüfen.
 - [ ] Den GitHub-Actions-Lauf für `/health` und `/ready` bestätigen. Der Workflow startet bei Commits auf `codex/germany-storage` und alle fünf Minuten auf `main`; GitHub-Benachrichtigungen für fehlgeschlagene Läufe und den tatsächlichen E-Mail-Empfang in den Kontoeinstellungen prüfen.
