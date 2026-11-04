@@ -24,8 +24,6 @@ services:
         value: /data/staging
       - key: TRUST_PROXY
         value: "1"
-      - key: STRIPE_TAX_ENABLED
-        value: "0"
       - key: MAX_EVENT_BYTES
         value: "26843545600"
       - key: S3_BUCKET
@@ -43,8 +41,4 @@ services:
       - key: BREVO_API_KEY
         sync: false
       - key: BREVO_SENDER_EMAIL
-        value: info@finalsnap.de
-      - key: PAYMENT_ADMIN_EMAILS
-        value: info@finalsnap.de
-      - key: PAYMENT_ALERT_EMAIL
         value: info@finalsnap.de
