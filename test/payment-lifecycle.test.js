@@ -59,7 +59,11 @@ test('Checkout retries the same album; refund decisions and dispute events are a
   assert.equal((await request('/api/events',{user:admin,method:'POST',body:{eventId:'refund-event',title:'Refund test album',eventDate,trial:false}})).response.status,201);
   const first=await request('/api/checkout',{user:admin,method:'POST',body:{eventId:'refund-event'}});
   assert.equal(first.response.status,200);assert.equal(created,1);
+  assert.equal(checkoutRequests[0].locale,'de');assert.equal(checkoutRequests[0].submit_type,'pay');
+  assert.match(checkoutRequests[0].custom_text.submit.message,/49,90 € inkl\. 19 % USt\./);
+  assert.match(checkoutRequests[0].custom_text.submit.message,/25 GB/);
   assert.equal(checkoutRequests[0].automatic_tax.enabled,true);assert.equal(checkoutRequests[0].billing_address_collection,'required');assert.equal(checkoutRequests[0].tax_id_collection.enabled,true);assert.equal(checkoutRequests[0].invoice_creation.enabled,true);assert.equal(checkoutRequests[0].line_items[0].price_data.tax_behavior,'inclusive');
+  assert.deepEqual(checkoutRequests[0].name_collection,{individual:{enabled:true},business:{enabled:true,optional:true}});
   const payment=app.locals.db.prepare('SELECT * FROM payments WHERE event_id=?').get('refund-event');
   const session1=sessions.get(payment.stripe_session_id);
   const repeated=await request('/api/checkout',{user:admin,method:'POST',body:{eventId:'refund-event'}});

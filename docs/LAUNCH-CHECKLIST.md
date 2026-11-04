@@ -27,6 +27,8 @@ Stand: 4. November 2026. Der deutsche Dienst ist live; Stripe bleibt im Testmodu
 - [ ] `STRIPE_TAX_ENABLED=1` erst nach bestätigter Testmodus-Registrierung einschalten und automatische Steuerberechnung prüfen.
 - [ ] Ein bis zwei geschlossene Testveranstaltungen durchführen; mehrere Mobilgeräte, getrennte Gästegalerien und Löschtermine prüfen.
 - [ ] Im Stripe-Testmodus Privat- und Geschäftskauf aus FinalSnap durchführen; Rechnungs-PDF, ausgewiesene 19 % USt., Endpreis 49,90 € und Rechnungslink im Veranstalterkonto prüfen.
+- [ ] Den echten Stripe-Testcheckout visuell prüfen: deutsche Zahlungsschaltfläche mit eindeutigem Zahlungsversprechen, Name/Unternehmensname und hervorgehobene Pflichtangaben unmittelbar vor der Bestellung.
+- [ ] Vertragsbestätigung mit Vertragsbedingungen und Widerrufsinformation auf dauerhaftem Datenträger zustellen und Empfang praktisch prüfen.
 - [ ] Stripe-Einstellung für automatische Zahlungsbelege prüfen. Stripe versendet keine automatischen Testbelege; den Testbeleg manuell im Stripe-Dashboard auslösen und den Live-E-Mailversand vor Freigabe prüfen.
 - [ ] Stripe-Testerstattung und Teststreitfall auslösen; Status, Albumzugang, Protokoll und Alarmmail prüfen.
 - [ ] Anzahl, Durchschnittsgröße und Gesamtvolumen der Fotos, Uploadfehler und Supportbedarf auswerten.

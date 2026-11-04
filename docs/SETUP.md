@@ -186,8 +186,14 @@ einer allgemeinen SaaS-Vermutung ableiten.
 
 Danach `STRIPE_TAX_ENABLED=1` im Render-Service setzen und manuell deployen.
 `server.js` schaltet dann Checkout-Steuer inkl. im 49,90-€-Preis,
-Pflicht-Rechnungsanschrift, optionale USt-IdNr.-Erfassung und Rechnungserstellung ein. Im Testmodus
-je einen Kauf als Privatperson und mit deutscher USt-IdNr. durchführen; bei beiden
+Pflicht-Rechnungsanschrift, USt-IdNr.-Erfassung, Name der Privatperson bzw.
+des optionalen Unternehmens und Rechnungserstellung ein. Der Checkout wird
+auf Deutsch mit einer Zahlungsschaltfläche vom Typ `pay` und einer
+Bestellzusammenfassung mit Bruttopreis, Leistungsumfang, Dauer und Anbieter
+angelegt. Die tatsächlich gerenderte Schaltfläche und Zusammenfassung müssen
+trotzdem im Stripe-Testmodus visuell geprüft werden.
+
+Im Testmodus je einen Kauf als Privatperson und mit deutscher USt-IdNr. durchführen; bei beiden
 muss der Gesamtbetrag 49,90 € bleiben und die Rechnung die Steuer ausweisen.
 Erst nach Prüfung der Rechnung-PDFs und Steuerangaben den Live-Steuersetup und
 die Preislogik für den Verkauf vorbereiten.
