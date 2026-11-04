@@ -15,12 +15,12 @@ let registrationIp=1;
 let creations=0;
 let simulatedUploadFreeBytes=10*1024**3;
 const sessions=new Map();
-const fake={webhooks:signer.webhooks,checkout:{sessions:{create:async(data,options)=>{
-  creations++;const session={id:'cs_test_'+options.idempotencyKey,livemode:false,status:'open',payment_status:'unpaid',mode:data.mode,metadata:data.metadata,currency:'eur',amount_total:data.line_items[0].price_data.unit_amount,url:'https://checkout.stripe.com/test'};sessions.set(session.id,session);return session;
+const fake={webhooks:signer.webhooks,invoices:{retrieve:async id=>({id,status:'paid',number:'TEST-001',invoice_pdf:'https://invoice.stripe.com/i/test-pdf'})},checkout:{sessions:{create:async(data,options)=>{
+  creations++;const session={id:'cs_test_'+options.idempotencyKey,livemode:false,status:'open',payment_status:'unpaid',mode:data.mode,metadata:data.metadata,currency:'eur',amount_total:data.line_items[0].price_data.unit_amount,invoice:'in_test_'+creations,url:'https://checkout.stripe.com/test'};sessions.set(session.id,session);return session;
 },retrieve:async id=>sessions.get(id),expire:async id=>{const session=sessions.get(id);session.status='expired';return session;}}}};
 const sentMail=[];
 let failNextContractConfirmation=false;
-const app=createApp({mailer:async message=>{if(message.subject.includes('Vertragsbestätigung')&&failNextContractConfirmation){failNextContractConfirmation=false;throw new Error('temporary delivery failure');}sentMail.push(message);},DB_PATH:path.join(tmp,'events.db'),UPLOAD_DIR:path.join(tmp,'uploads'),BASE_URL:'http://localhost:3000',STRIPE_WEBHOOK_SECRET:signing,stripe:fake,MAX_EVENT_PHOTOS:2,TRUST_PROXY:'1',uploadCapacityStatfs:()=>({bavail:simulatedUploadFreeBytes,bsize:1})});
+const app=createApp({mailer:async message=>{if(message.subject.includes('Bestellbestätigung')&&failNextContractConfirmation){failNextContractConfirmation=false;throw new Error('temporary delivery failure');}sentMail.push(message);},DB_PATH:path.join(tmp,'events.db'),UPLOAD_DIR:path.join(tmp,'uploads'),BASE_URL:'http://localhost:3000',STRIPE_WEBHOOK_SECRET:signing,stripe:fake,MAX_EVENT_PHOTOS:2,TRUST_PROXY:'1',uploadCapacityStatfs:()=>({bavail:simulatedUploadFreeBytes,bsize:1})});
 const server=app.listen(0);
 const origin=`http://127.0.0.1:${server.address().port}`;
 after(()=>{server.close();app.locals.db.close();fs.rmSync(tmp,{recursive:true,force:true});});
@@ -73,8 +73,8 @@ test('Checkout idempotency, signature, unpaid/amount/live rejection and delayed 
   await app.locals.flushContractConfirmations();
   const deliveredConfirmation=app.locals.db.prepare('SELECT * FROM contract_confirmations WHERE payment_id=?').get(confirmation.payment_id);
   assert.equal(deliveredConfirmation.status,'sent');assert.equal(deliveredConfirmation.attempts,2);assert.equal(deliveredConfirmation.recipient,'');
-  const contractMail=sentMail.find(message=>message.subject.includes('Vertragsbestätigung'));
-  assert.ok(contractMail);assert.match(contractMail.text,/49,90 EUR/);assert.match(contractMail.text,/Widerrufsinformation/);assert.match(contractMail.text,/Muster-Widerrufsformular/);
+  const contractMail=sentMail.find(message=>message.subject.includes('Bestellbestätigung'));
+  assert.ok(contractMail);assert.match(contractMail.text,/49,90 €/);assert.match(contractMail.text,/WIDERRUFSBELEHRUNG/i);assert.match(contractMail.text,/Muster-Widerrufsformular/);assert.match(contractMail.html,/Bestellung bestätigt/);assert.match(contractMail.text,/Die PDF-Rechnung ist als Datei angehängt/);assert.equal(contractMail.attachments[0].name,'FinalSnap-Rechnung-TEST-001.pdf');assert.equal(contractMail.attachments[0].url,'https://invoice.stripe.com/i/test-pdf');
   const expiry=app.locals.db.prepare('SELECT expires_at FROM events WHERE id=?').get('birthday').expires_at;
   assert.equal(await webhook(paid,{id:'evt_paid'}),200);assert.equal(await webhook(paid,{id:'evt_second'}),200);
   assert.equal(app.locals.db.prepare('SELECT expires_at FROM events WHERE id=?').get('birthday').expires_at,expiry);

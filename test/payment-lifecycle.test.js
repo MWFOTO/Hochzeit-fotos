@@ -16,7 +16,7 @@ const notifications=[];
 let failWithdrawalMail=false;
 const fake={
   webhooks:signer.webhooks,
-  invoices:{retrieve:async id=>({id,invoice_pdf:'https://invoice.stripe.com/i/test-pdf'})},
+  invoices:{retrieve:async id=>({id,status:'paid',number:'TEST-001',invoice_pdf:'https://invoice.stripe.com/i/test-pdf'})},
   checkout:{sessions:{
     create:async(data,options)=>{
       created++;
@@ -67,8 +67,9 @@ test('Checkout retries the same album; refund decisions and dispute events are a
   assert.equal(first.response.status,200);assert.equal(created,1);
   assert.equal(checkoutRequests[0].locale,'de');assert.equal(checkoutRequests[0].submit_type,'pay');
   assert.match(checkoutRequests[0].integration_identifier,/^finalsnap-[a-z]{8}$/);
-  assert.match(checkoutRequests[0].custom_text.submit.message,/49,90 € inkl\. 19 % USt\./);
-  assert.match(checkoutRequests[0].custom_text.submit.message,/25 GB/);
+  assert.match(checkoutRequests[0].custom_text.submit.message,/TESTBETRIEB/);
+  assert.match(checkoutRequests[0].custom_text.submit.message,/49,90 € \(inkl\. 19 % deutscher USt\.\)/);
+  assert.match(checkoutRequests[0].custom_text.submit.message,/250 MB/);
   assert.equal(checkoutRequests[0].automatic_tax.enabled,true);assert.equal(checkoutRequests[0].billing_address_collection,'required');assert.equal(checkoutRequests[0].tax_id_collection.enabled,true);assert.equal(checkoutRequests[0].invoice_creation.enabled,true);assert.equal(checkoutRequests[0].line_items[0].price_data.tax_behavior,'inclusive');assert.equal(checkoutRequests[0].line_items[0].price_data.product_data.tax_code,'txcd_10103000');assert.equal('payment_method_types' in checkoutRequests[0],false);
   assert.deepEqual(checkoutRequests[0].name_collection,{individual:{enabled:true},business:{enabled:true,optional:true}});
   const payment=app.locals.db.prepare('SELECT * FROM payments WHERE event_id=?').get('refund-event');

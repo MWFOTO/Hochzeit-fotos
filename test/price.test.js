@@ -9,8 +9,10 @@ const {createApp}=require('../server');
 test('new events and checkout use 49.90 EUR; existing quoted orders keep 34.90 EUR',async()=>{
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'finalsnap-price-'));
   const amounts=[];
+  const checkoutMessages=[];
   const stripe={checkout:{sessions:{create:async data=>{
     amounts.push(data.line_items[0].price_data.unit_amount);
+    checkoutMessages.push(data.custom_text.submit.message);
     return {id:`cs_price_${amounts.length}`,livemode:false,status:'open',url:'https://checkout.stripe.com/test'};
   }}}};
   const app=createApp({DB_PATH:path.join(root,'events.db'),UPLOAD_DIR:path.join(root,'uploads'),BASE_URL:'http://localhost:3000',STRIPE_WEBHOOK_SECRET:'whsec_test',stripe});
@@ -31,6 +33,7 @@ test('new events and checkout use 49.90 EUR; existing quoted orders keep 34.90 E
     db.prepare('UPDATE events SET amount_cents=3490 WHERE id=?').run('existing-price');
     for(const id of ['new-price','existing-price'])assert.equal((await request('/api/checkout',{termsAccepted:true,eventId:id})).status,200);
     assert.deepEqual(amounts,[4990,3490]);
+    assert.match(checkoutMessages[0],/49,90 €/);assert.match(checkoutMessages[1],/34,90 €/);assert.match(checkoutMessages[1],/kein echtes Geld eingezogen/);
     assert.deepEqual(db.prepare('SELECT amount_cents FROM payments ORDER BY amount_cents DESC').all().map(row=>row.amount_cents),[4990,3490]);
   } finally {await new Promise(resolve=>server.close(resolve));db.close();fs.rmSync(root,{recursive:true,force:true});}
 });

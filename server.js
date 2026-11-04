@@ -14,6 +14,7 @@ const { openDatabase } = require('./db');
 const { createPhotoStorage } = require('./photo-storage');
 const { createBackupService } = require('./backup-service');
 const { createOperationsMonitor } = require('./operations-monitor');
+const { createContractConfirmation } = require('./contract-confirmation');
 const { createUploadCapacity, GiB, MiB, MIN_UPLOAD_FREE_BYTES, uploadDiskWarningThreshold } = require('./upload-capacity');
 const scrypt = promisify(crypto.scrypt);
 const PLANS = { event:{label:'FinalSnap Fotoalbum',months:3,retentionDays:90,priceCents:4990}, '1m':{label:'1 Monat (alt)',months:1,priceCents:1900,legacy:true}, '3m':{label:'3 Monate (alt)',months:3,priceCents:2900,legacy:true}, '6m':{label:'6 Monate (alt)',months:6,priceCents:3900,legacy:true}, '12m':{label:'12 Monate (alt)',months:12,priceCents:5900,legacy:true} };
@@ -163,45 +164,18 @@ function createApp(options = {}) {
     }
   }
   async function flushContractConfirmations() {
-    const pending=db.prepare("SELECT c.*,p.amount_cents,p.customer_type,p.early_start_requested_at,p.early_start_acknowledged_at,p.terms_version,e.id album_id,e.title,e.event_date,e.email FROM contract_confirmations c JOIN payments p ON p.id=c.payment_id JOIN events e ON e.id=p.event_id WHERE c.status='pending' ORDER BY c.created_at LIMIT 20").all();
+    const pending=db.prepare("SELECT c.*,p.amount_cents,p.customer_type,p.early_start_requested_at,p.early_start_acknowledged_at,p.terms_version,p.stripe_invoice_id,e.id album_id,e.title,e.event_date,e.email,e.status event_status FROM contract_confirmations c JOIN payments p ON p.id=c.payment_id JOIN events e ON e.id=p.event_id WHERE c.status='pending' ORDER BY c.created_at LIMIT 20").all();
     for(const confirmation of pending){
       try{
         if(!mailer)throw new Error('Brevo-Versand ist nicht eingerichtet.');
-        const body=[
-          'Vertragsbestätigung – FinalSnap Fotoalbum',
-          '',
-          'Dein Vertrag ist nach bestätigtem Zahlungseingang zustande gekommen.',
-          `Anbieter: Matthias Wendland – Matthias Wendland Fotografie, Kupferweg 10, 33334 Gütersloh, Deutschland; info@finalsnap.de.`,
-          `Produkt: FinalSnap Fotoalbum für „${confirmation.title}“ (${confirmation.album_id}).`,
-          `Preis: einmalig ${(confirmation.amount_cents/100).toFixed(2).replace('.',',')} EUR einschließlich 19 % deutscher Umsatzsteuer.`,
-          `Kundentyp bei Bestellung: ${confirmation.customer_type==='business'?'Geschäftskunde':'Verbraucher'}.`,
-          `Leistungsbeginn: ${confirmation.event_date||'mit Freischaltung'}. Leistungszeitraum: bis zu 90 Tage ab Veranstaltungsdatum, für Upload, Ansicht und Download.`,
-          'Leistungsumfang: bis zu 25 GB verarbeitete Fotos je Veranstaltung; Uploads werden auf höchstens 2.560 Pixel längste Kante verkleinert und als JPEG komprimiert; Originaldateien und Videos sind nicht enthalten. Nach Ende des Albumzeitraums endet der Zugang und Fotos sowie Gästebucheinträge werden nach dem beschriebenen Löschablauf entfernt.',
-          '',
-          'VERTRAGSBEDINGUNGEN – Fassung '+(confirmation.terms_version||TERMS_VERSION),
-          'Anbieter: Matthias Wendland – Matthias Wendland Fotografie, Kupferweg 10, 33334 Gütersloh, Deutschland; info@finalsnap.de.',
-          '1. Geltung: Diese Bedingungen gelten für das kostenpflichtige FinalSnap-Fotoalbum. Verbraucher und Unternehmen können buchen. Unternehmen handeln bei einer Geschäftskundenbuchung im Rahmen ihrer gewerblichen oder selbstständigen Tätigkeit. Zwingende Verbraucherrechte bleiben unberührt.',
-          '2. Vertrag und Preis: Ein Fotoalbum je Veranstaltung kostet einmalig 49,90 Euro einschließlich der gesetzlichen Umsatzsteuer. Es gibt keine laufende Abonnementgebühr. Der Vertrag kommt mit bestätigter Zahlung und Freischaltung zustande.',
-          '3. Leistung: Das Album beginnt am angegebenen Veranstaltungsdatum und ist ab diesem Datum 90 Tage für Upload, Ansicht und Download verfügbar. Danach endet der Zugang; Albumfotos und Gästebucheinträge werden nach dem vorgesehenen Löschablauf entfernt. Eine zusätzliche Downloadphase ist nicht enthalten. Bis zu 25 vorab hochgeladene Testfotos bleiben bei Buchung erhalten und zählen zum Speicherplatz. Je Veranstaltung stehen bis zu 25 GB für verarbeitete Fotos zur Verfügung. Uploads werden auf höchstens 2.560 Pixel längste Kante verkleinert und als JPEG komprimiert; Originaldateien und Videos sind nicht enthalten.',
-          '4. Nutzung: Der Veranstalter verwaltet das Album und teilt Gästen Link oder QR-Code. Er ist dafür verantwortlich, Zugänge nur berechtigten Gästen zu geben, Gäste geeignet zu informieren und nur Inhalte mit den erforderlichen Rechten zu teilen. Unzulässige Inhalte können gemeldet und entfernt werden.',
-          '5. Verfügbarkeit und Support: Für die Nutzung sind Internetverbindung, geeignetes Gerät und aktueller Browser erforderlich. Wir bemühen uns um zuverlässigen Betrieb, schulden aber keine ununterbrochene oder jederzeit fehlerfreie Verfügbarkeit. Wartung und Störungen können den Dienst beeinträchtigen. Support: info@finalsnap.de. Gesetzliche Rechte bleiben bestehen.',
-          '6. Zahlung und Erstattung: Die einmalige Zahlung erfolgt über Stripe. Nach erfolgreicher Zahlung wird der Albumdienst freigeschaltet. Ein Zahlungsbeleg oder eine Rechnung wird bereitgestellt, sobald die erforderlichen Rechnungsangaben erhoben wurden. Gesetzliche Erstattungsansprüche bleiben unberührt. Eine freiwillige vollständige Erstattung beendet nach ihrer Bestätigung den Albumzugang; zwingende Rechte haben Vorrang.',
-          '7. Datenschutz und Löschung: Einzelheiten zur Verarbeitung und zu Dienstleistern stehen unter '+baseUrl.origin+'/datenschutz. Die Albumlaufzeit steht in Abschnitt 3. Gesetzliche Aufbewahrungspflichten für Zahlungs- und Buchungsunterlagen bleiben unberührt.',
-          '8. Recht: Es gilt deutsches Recht. Bei Verbrauchern gilt diese Rechtswahl nur, soweit dadurch nicht der Schutz zwingender Bestimmungen ihres gewöhnlichen Aufenthaltsstaates entzogen wird.',
-          '',
-          'WIDERRUFSBELEHRUNG FÜR VERBRAUCHER',
-          'Sie können binnen vierzehn Tagen ab Vertragsschluss ohne Angabe von Gründen widerrufen. Zur Ausübung können Sie die ständig verfügbare Widerrufsfunktion in Ihrem Kundenkonto unter '+baseUrl.origin+'/dashboard verwenden oder Matthias Wendland – Matthias Wendland Fotografie, Kupferweg 10, 33334 Gütersloh, Deutschland, info@finalsnap.de, mittels einer eindeutigen Erklärung (zum Beispiel Brief oder E-Mail) informieren. Zur Fristwahrung genügt die rechtzeitige Absendung.',
-          'Im Fall des Widerrufs erstatten wir alle erhaltenen Zahlungen unverzüglich und spätestens binnen vierzehn Tagen ab Eingang Ihrer Mitteilung mit demselben Zahlungsmittel, sofern nichts anderes vereinbart wurde. Für die Rückzahlung berechnen wir kein Entgelt.',
-          'Wenn Sie ausdrücklich verlangen, dass der entgeltliche Dienst während der Widerrufsfrist beginnt, kann bei einem späteren Widerruf angemessener Wertersatz für bis dahin erbrachte Leistungen anfallen, sofern die gesetzlichen Voraussetzungen erfüllt sind. Das Widerrufsrecht bei einer Dienstleistung erlischt erst mit vollständiger Vertragserfüllung und nur, wenn Sie dem vorzeitigen Beginn ausdrücklich zugestimmt und Ihre Kenntnis vom Erlöschen bei vollständiger Erfüllung bestätigt haben. Das vorzeitige Verlangen und die Bestätigung werden nur eingeholt, wenn der Albumdienst in der Widerrufsfrist beginnen soll.',
-          'Muster-Widerrufsformular: An Matthias Wendland – Matthias Wendland Fotografie, Kupferweg 10, 33334 Gütersloh, Deutschland, info@finalsnap.de: Hiermit widerrufe ich den Vertrag über das FinalSnap-Fotoalbum für die Veranstaltung __________. Bestellt am __________. Name __________. Anschrift __________. Datum __________. Unterschrift (nur bei Papiermitteilung) __________.',
-          'Die Widerrufsinformation und das Musterformular stehen zusätzlich unter '+baseUrl.origin+'/widerruf. Die elektronische Widerrufsfunktion ist im angemeldeten Kundenkonto unter „Vertrag widerrufen“ verfügbar.',
-          confirmation.early_start_requested_at&&confirmation.early_start_acknowledged_at?'Bei deiner Bestellung wurden ein ausdrückliches Verlangen nach vorzeitigem Leistungsbeginn und die Bestätigung der Widerrufsfolgen mit Zeitstempel gespeichert.':'Für diese Bestellung wurde kein vorzeitiger Leistungsbeginn innerhalb der Widerrufsfrist angefordert.',
-          '',
-          'Muster-Widerrufsformular (für Verbraucher): An Matthias Wendland – Matthias Wendland Fotografie, Kupferweg 10, 33334 Gütersloh, info@finalsnap.de. Hiermit widerrufe ich den Vertrag über das FinalSnap Fotoalbum für die Veranstaltung __________. Bestellt am __________. Name __________. Anschrift __________. Datum __________.',
-          '',
-          'Bitte bewahre diese E-Mail als Vertragsbestätigung auf. Fragen: info@finalsnap.de.'
-        ].join('\n');
-        await mailer({to:confirmation.recipient,subject:'Deine Vertragsbestätigung und Widerrufsinformation · FinalSnap',text:body});
+        if(!confirmation.stripe_invoice_id||!stripe?.invoices?.retrieve)throw new Error('Die Stripe-Rechnung ist noch nicht verfügbar.');
+        const invoice=await stripe.invoices.retrieve(confirmation.stripe_invoice_id);
+        if(invoice.status!=='paid'||!invoice.invoice_pdf)throw new Error('Die bezahlte Stripe-PDF-Rechnung ist noch nicht verfügbar.');
+        const invoiceUrl=new URL(invoice.invoice_pdf);
+        if(invoiceUrl.protocol!=='https:'||!['invoice.stripe.com','pay.stripe.com'].includes(invoiceUrl.hostname))throw new Error('Stripe hat keinen gültigen sicheren Rechnungslink geliefert.');
+        const message=createContractConfirmation({confirmation,baseUrl:baseUrl.origin,storageLimitBytes:eventStorageLimit({status:confirmation.event_status,event_date:confirmation.event_date,created_at:confirmation.created_at},cfg),invoiceNumber:invoice.number,invoiceUrl:invoice.invoice_pdf,isTestMode:testMode({status:confirmation.event_status,event_date:confirmation.event_date,created_at:confirmation.created_at})});
+        const safeInvoiceName=String(invoice.number||confirmation.album_id).replace(/[^a-zA-Z0-9_-]/g,'-');
+        await mailer({to:confirmation.recipient,...message,attachments:[{name:`FinalSnap-Rechnung-${safeInvoiceName}.pdf`,url:invoice.invoice_pdf}]});
         db.prepare("UPDATE contract_confirmations SET status='sent',recipient='',attempts=attempts+1,last_error=NULL,sent_at=? WHERE payment_id=?").run(Date.now(),confirmation.payment_id);
       }catch(error){
         db.prepare("UPDATE contract_confirmations SET attempts=attempts+1,last_error=? WHERE payment_id=?").run(String(error.message||error).slice(0,300),confirmation.payment_id);
@@ -548,6 +522,8 @@ function createApp(options = {}) {
     const productTaxCode=String(cfg.STRIPE_PRODUCT_TAX_CODE||'').trim();
     if(taxEnabled&&!productTaxCode)return fail(res,503,'Die Steuerkategorie für den Test-Checkout ist noch nicht eingerichtet.');
     if(taxEnabled)priceData.product_data.tax_code=productTaxCode;
+    const checkoutAmount=(payment.amount_cents/100).toFixed(2).replace('.',',');
+    const taxDescription=taxEnabled?'inkl. 19 % deutscher USt.':'Steuer ist in diesem Testlauf nicht aktiviert';
     const params={
       mode:'payment',
       integration_identifier:`finalsnap-${Array.from(crypto.randomBytes(8),value=>String.fromCharCode(97+value%26)).join('')}`,
@@ -560,7 +536,7 @@ function createApp(options = {}) {
       name_collection:{individual:{enabled:true},business:{enabled:true,optional:true}},
       invoice_creation:{enabled:true},
       line_items:[{price_data:priceData,quantity:1}],
-      custom_text:{submit:{message:'Einmalig 49,90 € inkl. 19 % USt. pro Veranstaltung. Bis zu 25 GB Fotos; Upload, Ansicht und Download für 90 Tage ab Veranstaltungsdatum. Anbieter: Matthias Wendland Fotografie (Einzelunternehmen), Gütersloh.'}},
+      custom_text:{submit:{message:`TESTBETRIEB – Es wird kein echtes Geld eingezogen. Gesamtbetrag: ${checkoutAmount} € (${taxDescription}). Testalbum: höchstens 250 MB. Anbieter: Matthias Wendland Fotografie (Einzelunternehmen), Gütersloh.`}},
       metadata:{eventId:e.id,paymentId:payment.id,attemptId:attempt.id,customerType,earlyStartRequest:String(earlyStartNeeded),earlyStartAcknowledged:String(earlyStartNeeded),termsAccepted:'true',termsVersion:TERMS_VERSION},
       success_url:`${baseUrl.origin}/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url:`${baseUrl.origin}/dashboard`
