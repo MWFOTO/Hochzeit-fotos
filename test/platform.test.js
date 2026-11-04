@@ -228,7 +228,7 @@ test('Free trial quota, compression, counters and upgrade preserve photos and gu
   const row=app.locals.db.prepare('SELECT stripe_session_id FROM payments WHERE event_id=?').get('trial-event');const session=sessions.get(row.stripe_session_id);session.payment_status='paid';
   assert.equal(await webhook(session),200);
   event=(await request('/api/events',{user:trialUser})).data.events.find(e=>e.id==='trial-event');assert.equal(event.status,'paid');assert.equal(event.photoCount,25);assert.equal(event.guest_token,trialToken);
-  assert.equal((await request('/api/storage',{user:trialUser})).status,200);assert.equal((await request('/api/storage')).status,401);
+  const storageStatus=await request('/api/storage',{user:trialUser});assert.equal(storageStatus.status,200);assert.equal(storageStatus.data.location,'server-disk');assert.equal(storageStatus.data.uploadDisk.minimumFreeBytes,2*1024**3);assert.equal(typeof storageStatus.data.uploadDisk.freeBytes,'number');assert.equal((await request('/api/storage')).status,401);
 });
 
 test('Email verification uses expiring single-use tokens without plaintext storage',async()=>{

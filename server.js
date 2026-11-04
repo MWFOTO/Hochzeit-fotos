@@ -14,6 +14,7 @@ const { openDatabase } = require('./db');
 const { createPhotoStorage } = require('./photo-storage');
 const { createBackupService } = require('./backup-service');
 const { createOperationsMonitor } = require('./operations-monitor');
+const { createUploadCapacity, GiB, MiB, MIN_UPLOAD_FREE_BYTES, uploadDiskWarningThreshold } = require('./upload-capacity');
 const scrypt = promisify(crypto.scrypt);
 const PLANS = { event:{label:'FinalSnap Fotoalbum',months:3,retentionDays:90,priceCents:4990}, '1m':{label:'1 Monat (alt)',months:1,priceCents:1900,legacy:true}, '3m':{label:'3 Monate (alt)',months:3,priceCents:2900,legacy:true}, '6m':{label:'6 Monate (alt)',months:6,priceCents:3900,legacy:true}, '12m':{label:'12 Monate (alt)',months:12,priceCents:5900,legacy:true} };
 const RETENTION_MS = 90*86400000;
@@ -90,6 +91,7 @@ function createApp(options = {}) {
   const db = openDatabase(cfg.DB_PATH || path.join(__dirname,'events.db'));
   const backupService=createBackupService({config:cfg,db,mailer});
   const operationsMonitor=createOperationsMonitor({config:cfg,db,mailer});
+  const uploadCapacity=createUploadCapacity({root,maxConcurrent:2});
   // Unpaid draft events from the earlier one-trial-per-account flow can now
   // use the same free 25-photo test as newly created events.
   db.prepare("UPDATE events SET status='trial', trial_used=1 WHERE status='pending' AND owner_id IS NOT NULL AND deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM payments WHERE payments.event_id=events.id)").run();
@@ -310,12 +312,17 @@ function createApp(options = {}) {
   });
   app.post('/api/auth/logout',loginRequired,(req,res)=>{db.prepare('DELETE FROM sessions WHERE token_hash=?').run(req.session.token_hash);res.clearCookie('event_session',{path:'/'});res.json({success:true});});
   app.get('/api/storage',loginRequired,(req,res)=>{
+    const disk=fs.statfsSync(root);
+    const diskFreeBytes=Number(disk.bavail)*Number(disk.bsize);
+    const diskTotalBytes=Number(disk.blocks)*Number(disk.bsize);
+    const uploadDisk={freeBytes:diskFreeBytes,totalBytes:diskTotalBytes,warning:diskFreeBytes<uploadDiskWarningThreshold(diskTotalBytes),uploadsPaused:diskFreeBytes<MIN_UPLOAD_FREE_BYTES,minimumFreeBytes:MIN_UPLOAD_FREE_BYTES};
     if (photoStorage.mode === 's3') {
       const usedBytes = Number(db.prepare('SELECT COALESCE(SUM(bytes),0) bytes FROM photos').get().bytes);
       const freeBytes = Math.max(0, storageLimit - usedBytes);
-      return res.json({freeBytes,totalBytes:storageLimit,warning:freeBytes<200*1024**2,uploadsPaused:freeBytes<100*1024**2,location:'object-storage'});
+      const warning=freeBytes<200*MiB||uploadDisk.warning;
+      return res.json({freeBytes,totalBytes:storageLimit,usedBytes,warning,uploadsPaused:freeBytes<100*MiB||uploadDisk.uploadsPaused,location:'object-storage',uploadDisk});
     }
-    const disk=fs.statfsSync(root);const freeBytes=Number(disk.bavail)*Number(disk.bsize);res.json({freeBytes,totalBytes:Number(disk.blocks)*Number(disk.bsize),warning:freeBytes<200*1024**2,uploadsPaused:freeBytes<100*1024**2,location:'server-disk'});
+    res.json({freeBytes:diskFreeBytes,totalBytes:diskTotalBytes,usedBytes:diskTotalBytes-diskFreeBytes,warning:uploadDisk.warning,uploadsPaused:uploadDisk.uploadsPaused,location:'server-disk',uploadDisk});
   });
   app.get('/api/plans',(req,res)=>res.json(Object.fromEntries(Object.entries(PLANS).map(([key,plan])=>[key,{...plan,photoLimit:key==='event'?null:Number(cfg.MAX_EVENT_PHOTOS||2000),storageLimitMB:Math.floor(Number(cfg.MAX_EVENT_BYTES||25*1024**3)/1024**2),storageLimitGB:Number((Number(cfg.MAX_EVENT_BYTES||25*1024**3)/1024**3).toFixed(1))}]))));
   app.get('/api/events',loginRequired,(req,res)=>{
@@ -553,6 +560,11 @@ function createApp(options = {}) {
     if(req.event.owner_id && deletingUsers.has(req.event.owner_id)) return fail(res,409,'Das Konto wird gerade gelöscht. Uploads sind gesperrt.');
     if(!active(req.event)) return fail(res,402,'Der Albumzeitraum ist beendet. Fotos können noch während der Downloadphase angesehen und heruntergeladen werden.');
     if(busy.has(req.event.id)) return fail(res,429,'Upload läuft bereits. Bitte kurz warten.');
+    const capacity=uploadCapacity.acquire();
+    if(!capacity.ok){
+      if(capacity.reason==='concurrency')res.set('Retry-After','60');
+      return fail(res,capacity.reason==='disk'?503:429,capacity.reason==='disk'?'Der temporäre Uploadspeicher ist gerade stark belegt. Bitte in einigen Minuten erneut versuchen.':'Der Fotospeicher verarbeitet gerade andere Uploads. Bitte in einer Minute erneut versuchen.');
+    }
     busy.add(req.event.id);
     upload(req,res,async err=>{
       const written=[];
@@ -589,7 +601,7 @@ function createApp(options = {}) {
         db.prepare('UPDATE events SET upload_successes=upload_successes+1 WHERE id=?').run(req.event.id);
         res.json({success:true,count:written.length,pending:!!req.event.moderation});
       } catch(error) {db.prepare('UPDATE events SET upload_failures=upload_failures+1 WHERE id=?').run(req.event.id);for(const f of written){try{if(photoStorage.mode==='s3'){await photoStorage.deletePhoto(req.event.id,f.filename);await backupService.deletePhoto(req.event.id,f.filename);}else fs.rmSync(f.dest,{force:true});}catch(cleanupError){console.error('Upload-Aufräumen fehlgeschlagen:',cleanupError.message);}}if(error.code==='PHOTO_STORAGE_UNAVAILABLE')console.error('Hetzner Object Storage:',error.cause?.message||error.message);fail(res,error.code==='PHOTO_STORAGE_UNAVAILABLE'?503:400,error.message);}
-      finally {for(const f of req.files||[]) fs.rmSync(f.path,{force:true});if(photoStorage.mode==='s3')for(const f of written)fs.rmSync(f.dest,{force:true});busy.delete(req.event.id);}
+      finally {for(const f of req.files||[]) fs.rmSync(f.path,{force:true});if(photoStorage.mode==='s3')for(const f of written)fs.rmSync(f.dest,{force:true});busy.delete(req.event.id);capacity.release();}
     });
   });
   function photoUrl(req,p) {return `/uploads/${req.event.id}/${p.filename}${own(req,req.event)?'':`?token=${req.event.guest_token}`}`;}

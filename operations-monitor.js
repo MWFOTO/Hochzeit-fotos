@@ -1,5 +1,6 @@
 const fs=require('node:fs');
 const path=require('node:path');
+const {uploadDiskWarningThreshold}=require('./upload-capacity');
 
 const GiB=1024**3;
 
@@ -51,7 +52,7 @@ function createOperationsMonitor({config,db,mailer,dependencies={}}){
     busy=true;
     try{
       const disk=statfs(root),free=Number(disk.bavail)*Number(disk.bsize),total=Number(disk.blocks)*Number(disk.bsize);
-      const diskWarn=Math.max(1*GiB,total*.15);
+      const diskWarn=uploadDiskWarningThreshold(total);
       await transition('render-disk-low',free<diskWarn,free,'Render-Datenträger wird knapp',
         `Auf dem Render-Datenträger sind noch ${(free/GiB).toFixed(2)} GiB von ${(total/GiB).toFixed(2)} GiB frei. Temporäre Uploads und SQLite nutzen diesen Datenträger. Bitte Speicherbelegung und laufende Uploads prüfen.`,
         `Der Render-Datenträger hat wieder ausreichend freien Platz: ${(free/GiB).toFixed(2)} GiB von ${(total/GiB).toFixed(2)} GiB frei.`,free>=diskWarn+256*1024**2);

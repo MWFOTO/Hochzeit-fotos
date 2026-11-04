@@ -31,7 +31,7 @@ Stand: 4. November 2026. Der deutsche Dienst ist live; Stripe bleibt im Testmodu
 - [ ] Stripe-Testerstattung und Teststreitfall auslösen; Status, Albumzugang, Protokoll und Alarmmail prüfen.
 - [ ] Anzahl, Durchschnittsgröße und Gesamtvolumen der Fotos, Uploadfehler und Supportbedarf auswerten.
 - [ ] Android/iPhone, HEIF-Unterstützung, Kamera, mehrere Uploads, langsames Netz, Verbindungsabbrüche und ZIP-Downloads testen.
-- [ ] Gleichzeitige Uploads prüfen; derzeit wird pro Event nur ein Uploadauftrag gleichzeitig verarbeitet.
+- [ ] Begrenzung mit zwei gleichzeitigen Uploads aus verschiedenen Events unter Last sowie Verhalten bei erreichtem 2-GiB-Uploadreservewert praktisch prüfen.
 - [ ] 10-GB-Render-Disk und Hetzner-Speicherverbrauch in den Anbieter-Dashboards beobachten.
 - [ ] Anbieter- und Datenflüsse für Render, Hetzner, Brevo, Stripe und GitHub vollständig prüfen und dokumentieren.
 - [ ] Separaten Hetzner-Sicherungs-Bucket in Falkenstein anlegen, Zugang/Schlüssel setzen, Versioning und Lifecycle-Regel prüfen; dann `BACKUP_ENABLED=1` aktivieren.
@@ -72,6 +72,7 @@ Stand: 4. November 2026. Der deutsche Dienst ist live; Stripe bleibt im Testmodu
 - [x] Geordnetes Herunterfahren bei SIGTERM/SIGINT ergänzt, damit laufende Anfragen Zeit zum Beenden erhalten.
 - [x] Aktiven Live-Dienst, Region, Datenträger und Datenpfade mit Render-Dienst und Startprotokoll abgeglichen.
 - [x] App-interne Speicheralarme alle 15 Minuten ergänzt: Render-Datenträger sowie 75-%-/90-%-Schwellen der aus Fotometadaten erfassten Hetzner-Auslastung; Alarm und Erholung gehen an den Zahlungs-Alarmkontakt.
+- [x] Temporäre Render-Uploads begrenzt: höchstens zwei gleichzeitige Requests, einer je Album; bei weniger als 2 GiB freiem Platz werden neue Uploads vor Dateiannahme pausiert. Veranstalterkonto zeigt Hetzner-Fotospeicher und Render-Uploadpuffer getrennt.
 - [ ] Externe Erreichbarkeitsüberwachung und Benachrichtigung für `/health` und `/ready` einrichten.
 - [ ] Hetzner-Verbrauchs-/Kostenalarm im Anbieter-Konto einrichten; der App-Alarm ist eine Speicher-Schätzung und kein Rechnungsalarm.
 - [ ] Konsistente tägliche SQLite-Sicherung und Fotosicherung an einem unabhängigen Ort einrichten.

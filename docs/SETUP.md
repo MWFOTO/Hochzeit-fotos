@@ -270,8 +270,10 @@ Backups nach vereinbarter Frist löschen. Restore regelmäßig auf einer Kopie t
   ausstehenden Queue und werden minütlich erneut versucht.
 
 20 MB pro Eingangsdatei, maximal 10 Dateien pro Request, maximal 40 Megapixel
-beim Dekodieren. Disk-Staging begrenzt den RAM-Verbrauch; Upload-Requests werden
-pro Event nacheinander zugelassen. Fotoanzahl und Bytes gelten für die neu
+beim Dekodieren. Disk-Staging begrenzt den RAM-Verbrauch; global werden maximal
+zwei Upload-Requests gleichzeitig zugelassen, pro Event nur einer. Bei weniger
+als 2 GiB freiem Staging-Datenträger werden neue Requests vor Empfang der Dateien
+abgewiesen. Fotoanzahl und Bytes gelten für die neu
 kodierten Dateien plus importierte Bestandsbilder. Erreichtes Limit stoppt den
 kompletten Request; bereits geschriebene Dateien werden zurückgenommen.
 Keine Video-/SVG-/GIF-Uploads. Neue Fotos als JPEG, hohe Qualität, Metadaten entfernt.

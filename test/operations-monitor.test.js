@@ -19,7 +19,7 @@ test('storage monitor sends threshold alerts once and recovery notices after hys
   await monitor.check();assert.equal(sent.at(-1).subject,'FinalSnap: Hetzner-Fotospeicher bei 90 %');
   assert.equal(sent.length,3);
 
-  free=2*GiB;db.prepare('UPDATE photos SET bytes=600').run();
+  free=3*GiB;db.prepare('UPDATE photos SET bytes=600').run();
   await monitor.check();
   assert.deepEqual(sent.slice(-3).map(item=>item.subject),[
     'FinalSnap: wieder normal – Render-Datenträger wird knapp',
