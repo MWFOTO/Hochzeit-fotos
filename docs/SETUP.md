@@ -20,10 +20,11 @@
 7. Generische `stripe trigger`-Sessions enthalten keine lokale Bestellung und
    können daher nicht zur Freischaltung dienen. Den wirklichen App-Checkout testen.
 
-## Separater Testservice auf Render – erst nach Freigabe einrichten
+## Separater Testservice auf Render – nur falls später benötigt
 
-Produktiven Service unverändert lassen. Kein Blueprint mit kostenpflichtigen
-Ressourcen wird automatisch angelegt.
+Der aktuelle Dienst `finalsnap-deutschland` läuft in Frankfurt unter
+`https://finalsnap.de`. Vor Änderungen immer Dienst-ID, Region und Branch prüfen;
+der ältere Dienst in Ohio ist vom Deutschland-Dienst getrennt.
 
 | Einstellung | Wert |
 | --- | --- |
@@ -53,17 +54,15 @@ Zusätzlich prüft `/ready` Datenbank, Upload-Datenträger und Object Storage. F
 
 ## Zielbetrieb Deutschland: Render Frankfurt plus Hetzner Object Storage
 
-Diese Zielumgebung ist vorbereitet, aber noch nicht erstellt oder bereitgestellt.
-Der bestehende Render-Dienst in Ohio kann nicht in eine andere Region verschoben
-werden. Für Deutschland muss ein neuer Render-Dienst in Frankfurt angelegt und die
-Anwendungsdaten müssen dorthin migriert werden.
+Der deutsche Dienst `finalsnap-deutschland` ist unter `https://finalsnap.de` live.
+Der ältere Dienst in Ohio ist getrennt und darf nicht für Kundendaten eingesetzt
+werden. Vor jeder Änderung die Dienst-ID und Region im Render-Dashboard prüfen.
 
-**Deutschland ist eine feste Standortvorgabe für den Produktivbetrieb.** Vor dem
-Start müssen App, Datenbank, temporäre Uploads, Fotos, Sicherungen und relevante
-Protokolle auf ausdrücklich in Deutschland gewählten Standorten liegen. Ein
-EU-Standort in einem anderen Land genügt dafür nicht. Der aktuelle Render-Testdienst
-liegt in Ohio (USA) und darf daher nicht als Produktivumgebung für Kundendaten
-verwendet werden. Er bleibt bis zum geprüften Umzug ein bestehender Teststand.
+**Deutschland ist die Standortvorgabe für App und dauerhafte Kundendaten.** Die
+App und SQLite laufen in Frankfurt; der konfigurierte Hetzner-Fotospeicher-Endpunkt
+ist Nürnberg (`nbg1`). Damit ist nicht automatisch belegt, dass E-Mail, Zahlung,
+Quellcode-Builds, Supportzugriffe und Backups ausschließlich in Deutschland
+verarbeitet werden. Diese Anbieter- und Datenflüsse sind separat zu prüfen.
 
 | Einstellung | Wert |
 | --- | --- |
@@ -128,16 +127,16 @@ die ein noch gültiges Album vorzeitig entfernen könnte. Backups der SQLite-Dat
 Provider-Logs und deren eigene Aufbewahrungsfristen müssen vor dem Produktivbetrieb
 separat eingerichtet und geprüft werden.
 
-Der Hetzner-Grundpreis enthält 1 TB Speicher und ein Kontingent für ausgehenden
-Traffic; die Anwendung begrenzt den Speicher standardmäßig auf 900 GiB. Das ist keine
+Der Hetzner Object Storage hat ein gemeinsames Speicher- und Traffic-Kontingent;
+die Anwendung begrenzt den Speicher standardmäßig auf 900 GiB. Das ist keine
 Traffic-Sperre. Bei sehr großen Downloads kann zusätzlicher Egress berechnet
-werden. Die aktuellen Tarife sind vor der Bestellung zu prüfen.
+werden. Die aktuellen Tarife sind vor dem Verkauf zu prüfen.
 
-Render bietet Frankfurt als Region. Der neue Dienst und der Hetzner-Bucket müssen
-jeweils ausdrücklich in Deutschland angelegt werden. Für Hetzner kommen
+Render und Hetzner sind auf deutsche Standorte konfiguriert: Frankfurt und
+Nürnberg (`nbg1`). Für Hetzner kommen grundsätzlich
 Nürnberg (`nbg1`) oder Falkenstein (`fsn1`) infrage, Helsinki nicht. Das erfüllt
 die Standortvorgabe für App, Upload-Verarbeitung und dauerhafte Fotospeicherung;
-die vorhandene Ohio-Instanz erfüllt sie nicht. Das belegt aber nicht automatisch
+der ältere Ohio-Dienst erfüllt sie nicht. Das belegt aber nicht automatisch
 den Standort aller weiteren Dienste. Brevo dokumentiert Datenverarbeitung innerhalb
 der EU, mit Speicherung unter anderem in Belgien; das ist EU-, aber nicht
 Deutschland-exklusiv. GitHub ist der Quellcode- und Build-Ausgangspunkt und Stripe
@@ -148,7 +147,7 @@ bleiben sie für den Produktivbetrieb offen und dürfen nicht stillschweigend al
 deutsch behandelt werden.
 
 Im Stripe-Testmodus einen Webhook für
-`https://DEIN-TESTSERVICE/api/stripe/webhook` anlegen:
+`https://finalsnap.de/api/stripe/webhook` im Stripe-Testmodus anlegen:
 `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
 `checkout.session.async_payment_failed`, `checkout.session.expired`,
 `refund.created`, `refund.updated`, `refund.failed`, `charge.refunded`,

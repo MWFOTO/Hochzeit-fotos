@@ -1,10 +1,11 @@
 # FinalSnap – Aufgaben bis zum öffentlichen Start
 
-Stand: 12. Oktober 2026. Die Anwendung bleibt im Stripe-Testmodus. Dieser Plan ist keine rechtliche Freigabe.
+Stand: 4. November 2026. Der deutsche Dienst ist live; Stripe bleibt im Testmodus. Dieser Plan ist keine rechtliche Freigabe.
 
 ## Erledigt, mit Grenzen
 - [x] Registrierung, Anmeldung und Veranstalterkonto.
 - [x] Brevo für Bestätigungsmails und Passwort-Zurücksetzen angebunden; vom Betreiber im echten Postfach getestet.
+- [x] Brevo-Absender `info@finalsnap.de` ist aktiv; Brevo meldet die Domain `finalsnap.de` als authentifiziert.
 - [x] QR-Gästezugang ohne Konto, Upload, Kamera-Auswahl, Galerie und Diashow.
 - [x] In der aktuellen Testphase: je Veranstaltung bis zu 25 kostenlose Testfotos; vor dem Veranstaltungsdatum vorbereiten.
 - [x] Fotoverwaltung, Mehrfachauswahl, Moderation und Löschung.
@@ -12,29 +13,33 @@ Stand: 12. Oktober 2026. Die Anwendung bleibt im Stripe-Testmodus. Dieser Plan i
 - [x] Stripe-Testcheckout, Webhook-Prüfung und Übergang vom Testalbum zur Zahlung.
 - [x] Grundlegende Zugriffskontrollen, Origin/CSRF-Schutz, Rate Limits und Upload-Prüfung; noch keine vollständige Sicherheitsprüfung.
 - [x] Speicheranzeige, Uploadzähler und Warnung bei wenig freiem Disk-Speicher.
+- [x] Aktiver Dienst `finalsnap-deutschland` in Frankfurt; `/health` und `/ready` geprüft.
+- [x] Fotospeicher über Hetzner Object Storage in Nürnberg konfiguriert; Render-Disk enthält SQLite und temporäre Uploads.
+- [x] Checkout-Wiederholungen, dokumentierte manuelle Erstattungen sowie Refund-/Streitfall-Protokollierung und Meldungen implementiert.
+- [x] Öffentliche Preisangabe: 49,90 € Endpreis inkl. 19 % USt.; Pakettext nennt 25 GB und 90 Tage ab Veranstaltungsdatum.
 - [x] Gästefotos sind pro Browser getrennt: Gäste sehen nur eigene Uploads; Veranstalter sehen alle. Gleicher Browser bedeutet dieselbe anonyme Gästesitzung.
-- [x] 90-tägige Nur-Lese-Downloadphase nach dem Albumzeitraum; davor zwölf Monate ab Veranstaltungsdatum online.
+- [x] 90 Tage Upload, Ansicht und Download ab Veranstaltungsdatum; danach automatische Löschung ohne zusätzliche Downloadphase.
 - [x] FinalSnap als Arbeitsmarke, Paketkarten und Übernahme der Auswahl von der Landingpage.
-- [x] 20 automatisierte Tests bestehen. Mobile End-to-End- und Lasttests bleiben offen.
+- [x] 27 automatisierte Tests bestanden beim letzten Code-Deploy. Mobile End-to-End- und Lasttests bleiben offen.
 
 ## Als Nächstes: Praxistests und Infrastruktur
 - [ ] Ein bis zwei geschlossene Testveranstaltungen durchführen; mehrere Mobilgeräte, getrennte Gästegalerien und Löschtermine prüfen.
+- [ ] Im Stripe-Testmodus Privat- und Geschäftskauf aus FinalSnap durchführen; Rechnungs-PDF, ausgewiesene 19 % USt., Endpreis 49,90 € und Kundenbestätigung prüfen.
+- [ ] Stripe-Testerstattung und Teststreitfall auslösen; Status, Albumzugang, Protokoll und Alarmmail prüfen.
 - [ ] Anzahl, Durchschnittsgröße und Gesamtvolumen der Fotos, Uploadfehler und Supportbedarf auswerten.
 - [ ] Android/iPhone, HEIF-Unterstützung, Kamera, mehrere Uploads, langsames Netz, Verbindungsabbrüche und ZIP-Downloads testen.
 - [ ] Gleichzeitige Uploads prüfen; derzeit wird pro Event nur ein Uploadauftrag gleichzeitig verarbeitet.
-- [ ] Aktuelle 1-GB-Disk vor jeder Testveranstaltung auf freien Platz prüfen.
-- [ ] Hosting-Region prüfen: aktueller Render-Service steht in Ohio; gewünschter Zielstandort und Datentransfers vor Marktstart klären.
-- [ ] App, PostgreSQL und privaten Fotospeicher planen; Anbieter, Standort, Zugriffe, Kosten und Migration bewerten.
-- [ ] Daten sichern und Wiederherstellung testen, bevor produktive Daten umgezogen werden.
-- [ ] Vollständigen Umzug mit Rückweg und Datenabgleich vorbereiten; alte Disk erst nach Prüfung abbauen.
+- [ ] 10-GB-Render-Disk und Hetzner-Speicherverbrauch in den Anbieter-Dashboards beobachten.
+- [ ] Anbieter- und Datenflüsse für Render, Hetzner, Brevo, Stripe und GitHub vollständig prüfen und dokumentieren.
+- [ ] Unabhängige Datenbank- und Fotosicherungen einrichten und Wiederherstellung testen.
+- [ ] Vor größeren Datenbankänderungen einen konsistenten Sicherungs- und Rückweg nachweisen.
 
 ## Angebot – Arbeitsmodell, vor Verkauf noch bestätigen
-- [x] Ein Kernpaket je Veranstaltung: 34,90 € als vorläufiger Arbeitspreis.
+- [x] Ein Kernpaket je Veranstaltung: 49,90 € Endpreis inkl. 19 % USt.
 - [x] Keine feste Fotoanzahl; Zielgrenze bis zu 25 GB verarbeitete Fotos je Event.
-- [x] Start am Veranstaltungsdatum; zwölf Monate online und danach 90 Tage Nur-Lese-Download.
+- [x] Start am Veranstaltungsdatum; 90 Tage Upload, Ansicht und Download, danach automatische Löschung.
 - [x] Bis zu 25 Testfotos für die Vorbereitung; bei Buchung bleiben sie erhalten und zählen zum Event-Speicher.
-- [ ] Praxistest, Providerkapazität, aktuelle Hosting-Umgebungswerte und Kosten vor Verkauf prüfen.
-- [ ] Arbeitspreis anhand Speicher, Downloadverkehr, Zahlungsgebühren, Steuern und Support bestätigen.
+- [ ] Kosten für Render, Hetzner, Zahlungsverkehr und Support anhand tatsächlicher Pilotnutzung prüfen.
 - [ ] 25-GB-Grenze, Speicherwarnung und Uploadverhalten bei vollem Speicher in Hosting und Nutzerhinweisen bestätigen.
 - [ ] Videos bleiben zunächst außerhalb des Kernpakets; Grußbox als spätere Option kalkulieren und umsetzen.
 - [ ] Fotospiegel und persönliche Begleitung separat kalkulieren; Landingpage-Anfragen sind kein bestätigtes Miet-/Serviceangebot.
@@ -46,6 +51,7 @@ Stand: 12. Oktober 2026. Die Anwendung bleibt im Stripe-Testmodus. Dieser Plan i
 - [ ] Bildrechte, abgebildete Dritte, Minderjährige und Meldung unzulässiger Inhalte berücksichtigen.
 - [ ] Auftragsverarbeitungsverträge, Unterauftragnehmer und mögliche Drittlandtransfers prüfen.
 - [ ] Datenschutzerklärung, Nutzungsbedingungen/AGB, Impressum und Verbraucher-Checkout rechtlich prüfen lassen.
+- [ ] Checkout-Vorvertragstexte, Widerrufsablauf und Leistungsbeginn passend zur konkreten Produktklassifikation festlegen.
 - [ ] Speicherfristen begründen; keine vermeintlich gesetzliche 3-/6-Monatsfrist behaupten.
 - [ ] Löschkonzept für Originale, Vorschaubilder, Tokens, Konten, Logs und Backups erstellen und technisch testen.
 - [ ] Externe Wiederherstellung/Backup- und Provider-Log-Aufbewahrung passend zur 90-Tage-Frist prüfen; App-Löschung allein löscht keine außerhalb der App vorhandenen Kopien.
@@ -59,7 +65,7 @@ Stand: 12. Oktober 2026. Die Anwendung bleibt im Stripe-Testmodus. Dieser Plan i
 ## Sicherheit und Betrieb
 - [x] Schneller Liveness-Endpunkt `/health` und Abhängigkeitsprüfung `/ready` ergänzt; Ready meldet Datenbank-, Uploadspeicher- und Object-Storage-Ausfälle mit HTTP 503.
 - [x] Geordnetes Herunterfahren bei SIGTERM/SIGINT ergänzt, damit laufende Anfragen Zeit zum Beenden erhalten.
-- [ ] Tatsächlichen Live-Dienst, Region, Tarif und Datenpfade im Anbieter-Konto verifizieren; die Projektdokumentation und Render-Kontoabfrage stimmen noch nicht überein.
+- [x] Aktiven Live-Dienst, Region, Datenträger und Datenpfade mit Render-Dienst und Startprotokoll abgeglichen.
 - [ ] Externe Erreichbarkeitsüberwachung und Benachrichtigung für `/health` und `/ready` einrichten.
 - [ ] Warnungen für niedrigen freien Speicher, Annäherung an das Object-Storage-Limit und ungewöhnliche Anbieter-Verbrauchskosten einrichten.
 - [ ] Konsistente tägliche SQLite-Sicherung und Fotosicherung an einem unabhängigen Ort einrichten.
@@ -74,6 +80,7 @@ Stand: 12. Oktober 2026. Die Anwendung bleibt im Stripe-Testmodus. Dieser Plan i
 - [ ] Sicherheitsheader/CSP prüfen; inline Scripts soweit sinnvoll entfernen.
 - [ ] HTTPS, Domain, sichere Cookies und DNS-/Mail-Authentifizierung prüfen.
 - [ ] Brevo-IP-Freigaben für die künftige Hosting-Region aktualisieren; Schutz eingeschaltet lassen.
+- [x] FinalSnap-Absenderdomain bei Brevo authentifiziert und Absender aktiv.
 - [ ] Fehlerüberwachung, Erreichbarkeitsprüfung, Kosten-/Speicheralarme und Supportkontakt einrichten.
 - [ ] Backups verschlüsseln, Zugriff begrenzen und Wiederherstellung einschließlich bereits gelöschter Daten testen.
 - [ ] Deployment, Datenbankmigrationen und Rücknahme fehlerhafter Releases dokumentieren.
@@ -88,6 +95,7 @@ Stand: 12. Oktober 2026. Die Anwendung bleibt im Stripe-Testmodus. Dieser Plan i
 ## Letzte Freigabe
 - [ ] Belastbare Kapazität, erfolgreiche Wiederherstellung, Zugriffsschutz und Löschung nachweisen.
 - [ ] Pakete, Bruttopreise, Abrechnung, Steuer-/Rechnungsablauf, Rückerstattung und Support festlegen.
+- [ ] `STRIPE_TAX_ENABLED=1` erst im Testmodus nach bestätigter Stripe-Steuerkonfiguration einschalten und die beiden Testkäufe abnehmen.
 - [ ] Stripe-Livemodus separat implementieren; Live-Schlüssel sind aktuell absichtlich im Code gesperrt.
 - [ ] Rechte/Datenschutz/Verkaufsunterlagen fertig prüfen lassen.
 - [ ] Öffentlichen Start und echte Zahlungen ausdrücklich durch Matthias freigeben lassen.

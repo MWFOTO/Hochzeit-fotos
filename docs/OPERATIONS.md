@@ -1,24 +1,24 @@
 # FinalSnap – Betriebsablauf
 
-Stand: 1. November 2026. Arbeitsunterlage; der Live-Betrieb und externe Überwachung sind damit nicht eingerichtet.
+Stand: 4. November 2026. FinalSnap ist auf Render Frankfurt live; echte Zahlungen und externer Verkauf bleiben gesperrt.
 
 ## Bekannter Betriebsstand
 
 - Deutschland ist eine feste Vorgabe für den Produktivbetrieb. Ein Dienst außerhalb Deutschlands ist dafür nicht freigegeben.
-- Im Render-Arbeitsbereich „test hochzeit“ läuft `Hochzeit-fotos` (`srv-da2ohr49v7es73cnb2j0`) in Ohio, USA. Er hängt an `https://hochzeit-fotos.onrender.com` und nutzt eine 1-GB-Persistent-Disk unter `/data`. Diese Umgebung erfüllt die Standortvorgabe nicht und darf nicht für den Verkauf mit Kundendaten weiterverwendet werden.
-- Im Render-Arbeitsbereich „hochzeit upload“ wurde kein Dienst gefunden. Dort ist nach jetzigem Stand nichts Laufendes zu löschen.
-- Render bietet Frankfurt als deutsche Region. Da Render die Region eines bestehenden Dienstes nicht nachträglich ändert, braucht es für den Umzug einen neuen Dienst in Frankfurt.
-- Das Zielsetup aus Render Frankfurt und privatem Hetzner Object Storage ist vorbereitet. Der Betreiber meldet, den Bucket erstellt zu haben; Standort, Sichtbarkeit und Zugangsdaten sind noch nicht über die Anbieteroberfläche verifiziert.
-- Der neue Render-Dienst, Datenbank-Backups und externe Alarmierung sind noch nicht eingerichtet oder bereitgestellt.
+- Der aktive Dienst heißt `finalsnap-deutschland` (`srv-dbkbkmnf3r2c7399hr9g`), läuft in Frankfurt und ist unter `https://finalsnap.de` erreichbar. Er hängt am GitHub-Zweig `codex/germany-storage`; Auto-Deploy ist ausgeschaltet.
+- Die aktive Render Persistent Disk ist 10 GB groß und unter `/data` eingehängt. SQLite liegt unter `/data/events.db`; temporäre Uploads liegen unter `/data/staging`.
+- Der aktive Prozess meldet den temporären Uploadspeicher und prüft Hetzner Object Storage beim Bereitschaftscheck. Der konfigurierte S3-Endpunkt ist Nürnberg (`nbg1`); die Anwendung verlangt im Produktionsbetrieb SSE-C-Verschlüsselung.
+- Ein älterer Ohio-Dienst existiert getrennt. Vor Kundendaten stets prüfen, dass ausschließlich `finalsnap-deutschland` verwendet wird.
+- Unabhängige Datenbank-/Fotosicherungen, ein Wiederherstellungstest und externe Alarmierung sind noch nicht eingerichtet.
 - Brevo dokumentiert EU-weite Verarbeitung und Datenspeicherung auch in Belgien; das erfüllt keine strikte Deutschland-only-Vorgabe. GitHub als Quellcode-/Build-Dienst und Stripe für spätere Zahlungen benötigen eine eigene Standortprüfung. Bis zur Klärung ist eine vollständige Deutschland-Zusage für alle Dienste nicht belegt.
 - Die App nutzt SQLite und ist auf eine Instanz ausgelegt. Keine zweite Instanz und keine horizontale Skalierung aktivieren, solange die Datenbank nicht umgestellt ist.
-- Zahlungen bleiben im Stripe-Testmodus.
+- Zahlungen bleiben technisch auf Stripe-Testmodus gesperrt. `STRIPE_TAX_ENABLED=0`; USt.-Rechnungen wurden im Stripe-Testcheckout noch nicht abgenommen.
 
 ## Erreichbarkeit und Bereitschaft
 
 - `GET /health` ist der schnelle Liveness-Endpunkt für den Prozess.
 - `GET /ready` prüft SQLite, mindestens 100 MiB freien Upload-Speicher und den konfigurierten Fotospeicher. Bei einem Fehler antwortet die App mit HTTP 503, ohne interne Details öffentlich auszugeben.
-- Vor dem Produktivbetrieb einen externen Erreichbarkeitsmonitor auf `/health` und eine separate Alarmierung für `/ready` einrichten. Diese Überwachung ist derzeit nicht konfiguriert.
+- Vor Annahme echter Zahlungen einen externen Erreichbarkeitsmonitor für `/health` und `/ready` mit Alarmkontakt einrichten. Diese Überwachung ist derzeit nicht konfiguriert.
 - Bei wiederholtem Fehler zuerst Providerstatus und Runtime-Logs ansehen, dann Datenbank, Upload-Datenträger und Object Storage prüfen. Nicht durch mehrfaches Neustarten versuchen, einen Speicher- oder Datenbankfehler zu beheben.
 
 ## Speicherbetrieb
@@ -58,7 +58,7 @@ Supportfälle mit Event-Kurzname, Zeitpunkt, Gerät/Browser und genauer Fehlerme
 
 ## Noch einzurichten
 
-- Tatsächlichen Live-Dienst im richtigen Anbieter-Konto identifizieren und Region, Tarif sowie Speicherpfade dokumentieren.
+- Tarif, Standort und Datenpfade regelmäßig in den Anbieter-Konten prüfen und dieses Runbook aktuell halten.
 - Mindestens einen Erreichbarkeitsmonitor mit Benachrichtigung für Ausfälle einrichten.
 - Warnungen für niedrigen Datenträgerspeicher, Annäherung an das 900-GiB-Limit und ungewöhnlichen Anbieter-Verbrauch einrichten.
 - SQLite- und Foto-Backups an einem unabhängigen Ziel einrichten und Wiederherstellung nachweisen.
