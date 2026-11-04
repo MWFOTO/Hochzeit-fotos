@@ -1,908 +1,1259 @@
-const express = require('express');
-const multer = require('multer');
-const helmet = require('helmet');
-const { rateLimit } = require('express-rate-limit');
-const Stripe = require('stripe');
-const sharp = require('sharp');
-const QRCode = require('qrcode');
-const archiver = require('archiver');
-const crypto = require('node:crypto');
-const { promisify } = require('node:util');
-const fs = require('node:fs');
-const path = require('node:path');
-const { openDatabase } = require('./db');
-const { createPhotoStorage } = require('./photo-storage');
-const { createBackupService } = require('./backup-service');
-const { createOperationsMonitor } = require('./operations-monitor');
-const { createUploadCapacity, GiB, MiB, MIN_UPLOAD_FREE_BYTES, uploadDiskWarningThreshold } = require('./upload-capacity');
-const scrypt = promisify(crypto.scrypt);
-const PLANS = { event:{label:'FinalSnap Fotoalbum',months:3,retentionDays:90,priceCents:4990}, '1m':{label:'1 Monat (alt)',months:1,priceCents:1900,legacy:true}, '3m':{label:'3 Monate (alt)',months:3,priceCents:2900,legacy:true}, '6m':{label:'6 Monate (alt)',months:6,priceCents:3900,legacy:true}, '12m':{label:'12 Monate (alt)',months:12,priceCents:5900,legacy:true} };
-const TERMS_VERSION = '2026-11-04';
-const RETENTION_MS = 90*86400000;
-// Event deadlines use calendar days in Europe/Berlin, including DST changes.
-function eventDeadline(date) {
-  const day=new Date(`${date}T12:00:00Z`);
-  day.setUTCDate(day.getUTCDate()+90);
-  return berlinMidnight(day.toISOString().slice(0,10));
-}
-function retentionUntil(e) {
-  if(!e?.expires_at)return null;
-  // Undated legacy albums keep their existing expiry/download policy.
-  return e.event_date ? Math.min(e.expires_at,eventDeadline(e.event_date)) : e.expires_at+RETENTION_MS;
-}
-const TEST_PHOTO_LIMIT = 25;
-const TEST_STORAGE_BYTES = 250*1024**2;
-const MAX_UPLOAD_FILE_BYTES = 20*1024*1024;
-const hash = value => crypto.createHash('sha256').update(value).digest('hex');
-const random = () => crypto.randomBytes(32).toString('hex');
-const fail = (res, status, error) => res.status(status).json({error});
-const wrap = fn => (req,res,next) => Promise.resolve(fn(req,res,next)).catch(next);
-const berlinParts = new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/Berlin',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'});
-function berlinMidnight(date) {
-  const match=/^(\d{4})-(\d{2})-(\d{2})$/.exec(String(date||''));
-  if(!match)return NaN;
-  const [,year,month,day]=match.map(Number);
-  const target=Date.UTC(year,month-1,day);
-  let instant=target;
-  for(let i=0;i<3;i++) {
-    const parts=Object.fromEntries(berlinParts.formatToParts(new Date(instant)).map(part=>[part.type,part.value]));
-    const local=Date.UTC(Number(parts.year),Number(parts.month)-1,Number(parts.day),Number(parts.hour),Number(parts.minute),Number(parts.second));
-    instant+=target-local;
-  }
-  return instant;
-}
-function addMonthsToDate(date,months) {
-  const [year,month,day]=date.split('-').map(Number), first=new Date(Date.UTC(year,month-1,1));
-  first.setUTCMonth(first.getUTCMonth()+months);
-  const last=new Date(Date.UTC(first.getUTCFullYear(),first.getUTCMonth()+1,0)).getUTCDate();
-  first.setUTCDate(Math.min(day,last));
-  return first.toISOString().slice(0,10);
-}
-function validEventDate(value,now=Date.now()) {
-  if(!/^\d{4}-\d{2}-\d{2}$/.test(String(value||'')) || !Number.isFinite(berlinMidnight(value)))return false;
-  const [year,month,day]=value.split('-').map(Number);
-  if(new Date(Date.UTC(year,month-1,day)).toISOString().slice(0,10)!==value)return false;
-  const parts=Object.fromEntries(berlinParts.formatToParts(new Date(now)).map(part=>[part.type,part.value]));
-  const today=`${parts.year}-${parts.month}-${parts.day}`;
-  return value>=today && value<=addMonthsToDate(today,24);
-}
-const startAt = e => e?.event_date ? berlinMidnight(e.event_date) : Number(e?.created_at||0);
-const testMode = e => !!e && (e.status==='trial' || (e.status==='paid' && startAt(e)>Date.now()));
-const eventStorageLimit = (e,cfg) => testMode(e)?Math.min(TEST_STORAGE_BYTES,Number(cfg.MAX_EVENT_BYTES||25*1024**3)):Number(cfg.MAX_EVENT_BYTES||25*1024**3);
-const eventPhotoLimit = (e,cfg={}) => testMode(e)?TEST_PHOTO_LIMIT:e?.status==='pilot'?Number(cfg.MAX_EVENT_PHOTOS||2000):null;
-const active = e => e && ['paid','trial','pilot'].includes(e.status) && Math.min(e.expires_at,retentionUntil(e)) > Date.now() && !e.deleted_at;
-const readable = e => e && ['paid','trial','pilot'].includes(e.status) && retentionUntil(e) > Date.now() && !e.deleted_at;
-function createApp(options = {}) {
-  const cfg = {...process.env, ...options};
-  const mailer=options.mailer||require('./mailer').createMailer(cfg);
-  if (cfg.STRIPE_SECRET_KEY && !cfg.STRIPE_SECRET_KEY.startsWith('sk_test_')) throw new Error('Phase 1 erlaubt ausschlieÃŸlich Stripe-TestschlÃ¼ssel.');
-  const configuredBase = String(cfg.BASE_URL || cfg.RENDER_EXTERNAL_URL || '').trim();
-  const platformDomain = String(cfg.SLIPLANE_DOMAIN || '').trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
-  const unresolvedBase = /\$\{?[A-Za-z_][A-Za-z0-9_]*\}?/.test(configuredBase);
-  const base = configuredBase && !unresolvedBase
-    ? configuredBase
-    : platformDomain ? `https://${platformDomain}` : 'http://localhost:3000';
-  const baseUrl = new URL(base);
-  if (baseUrl.pathname !== '/' || baseUrl.search || baseUrl.hash || baseUrl.username || !['http:','https:'].includes(baseUrl.protocol)) throw new Error('BASE_URL muss eine HTTP(S)-Origin sein.');
-  if (cfg.NODE_ENV === 'production' && (baseUrl.protocol !== 'https:' || !cfg.DB_PATH || !cfg.UPLOAD_DIR)) throw new Error('HTTPS, DB_PATH und UPLOAD_DIR sind im Hosting erforderlich.');
-  const root = path.resolve(cfg.UPLOAD_DIR || path.join(__dirname,'uploads'));
-  fs.mkdirSync(root, {recursive:true});
-  const photoStorage = options.photoStorage || createPhotoStorage(cfg);
-  const storageLimit = Number(cfg.S3_MAX_STORAGE_BYTES || 900 * 1024 ** 3);
-  if (!Number.isSafeInteger(storageLimit) || storageLimit <= 100 * 1024 ** 2) throw new Error('S3_MAX_STORAGE_BYTES muss grÃ¶ÃŸer als 100 MiB sein.');
-  const db = openDatabase(cfg.DB_PATH || path.join(__dirname,'events.db'));
-  const backupService=createBackupService({config:cfg,db,mailer});
-  const operationsMonitor=createOperationsMonitor({config:cfg,db,mailer});
-  const uploadCapacity=createUploadCapacity({root,maxConcurrent:2,statfs:options.uploadCapacityStatfs});
-  // Unpaid draft events from the earlier one-trial-per-account flow can now
-  // use the same free 25-photo test as newly created events.
-  db.prepare("UPDATE events SET status='trial', trial_used=1 WHERE status='pending' AND owner_id IS NOT NULL AND deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM payments WHERE payments.event_id=events.id)").run();
-  // Operator-only pilot provisioning. No guest endpoint can enable a pilot.
-  // The original capability and owner remain unchanged; deleted albums stay deleted.
-  if (cfg.PILOT_EVENT_ID) {
-    const expires = Date.parse(cfg.PILOT_ENDS_AT || '');
-    if (!Number.isFinite(expires) || !/^[a-z0-9][a-z0-9_-]{2,63}$/.test(cfg.PILOT_EVENT_ID)) throw new Error('Pilot-Konfiguration ungÃ¼ltig.');
-    const title = String(cfg.PILOT_TITLE || '').trim();
-    if (title.length > 120) throw new Error('Pilot-Titel zu lang.');
-    db.prepare("UPDATE events SET status='pilot', expires_at=?, title=CASE WHEN ?='' THEN title ELSE ? END WHERE id=? AND owner_id IS NOT NULL AND deleted_at IS NULL AND status IN ('pending','trial','pilot')").run(expires,title,title,cfg.PILOT_EVENT_ID);
-  }
-  const stripe = options.stripe || (cfg.STRIPE_SECRET_KEY ? new Stripe(cfg.STRIPE_SECRET_KEY) : null);
-  const paymentAdminEmails=new Set(String(cfg.PAYMENT_ADMIN_EMAILS||'').split(',').map(email=>email.trim().toLowerCase()).filter(Boolean));
-  const app = express();
-  if (cfg.TRUST_PROXY === '1') app.set('trust proxy', 1);
-  app.use(helmet({contentSecurityPolicy:{directives:{'script-src':["'self'"], 'script-src-attr':["'none'"], 'img-src':["'self'",'data:','blob:'], 'upgrade-insecure-requests': baseUrl.protocol === 'https:' ? [] : null}}}));
-  app.use((req,res,next)=>{ res.set('Cache-Control','no-store'); next(); });
-  const lookup = id => db.prepare('SELECT * FROM events WHERE id=?').get(id);
-  const own = (req,e) => !!(req.user && e && e.owner_id === req.user.id);
-  const deletingUsers = new Set();
-  const readDesign = e => {
-    try { return JSON.parse(e?.design_json || '{}'); }
-    catch { return {}; }
-  };
-  const publicDesign = e => {
-    const design=readDesign(e);
-    return {
-      title:typeof design.title==='string'?design.title:e?.title||'Veranstaltung',
-      occasion:['wedding','birthday','summer','company','jubilee','graduation','other'].includes(design.occasion)?design.occasion:'other',
-      theme:['afterglow','midnight','garden'].includes(design.theme)?design.theme:'afterglow',
-      accent:/^#[0-9a-f]{6}$/i.test(design.accent||'')?design.accent:'#e99a69',
-      font:['classic','palatino','modern','verdana','relaxed','typewriter'].includes(design.font)?design.font:'classic',
-      hasCover:typeof design.coverFilename==='string'&&/^[a-z0-9-]+\.jpg$/.test(design.coverFilename)
-    };
-  };
-  const relevantPaymentEvents=new Set(['refund.created','refund.updated','refund.failed','charge.refunded','charge.dispute.created','charge.dispute.updated','charge.dispute.closed','charge.dispute.funds_reinstated','charge.dispute.funds_withdrawn','invoice.finalized','invoice.finalization_failed','invoice.paid','invoice.payment_failed']);
-  const paymentAlertEvents=new Set(['refund.created','refund.updated','refund.failed','charge.refunded','charge.dispute.created','charge.dispute.updated','charge.dispute.closed','charge.dispute.funds_reinstated','charge.dispute.funds_withdrawn','invoice.finalization_failed','invoice.payment_failed']);
-  function paymentForStripeObject(object) {
-    const paymentIntent=typeof object.payment_intent==='string'?object.payment_intent:object.payment_intent?.id;
-    if(paymentIntent){const payment=db.prepare('SELECT * FROM payments WHERE stripe_payment_intent_id=?').get(paymentIntent);if(payment)return payment;}
-    const paymentId=object.metadata?.paymentId;
-    if(paymentId){const payment=db.prepare('SELECT * FROM payments WHERE id=?').get(paymentId);if(payment)return payment;}
-    const charge=typeof object.charge==='string'?object.charge:object.charge?.id;
-    if(charge){const refund=db.prepare('SELECT payment_id FROM refunds WHERE stripe_refund_id=?').get(charge);if(refund)return db.prepare('SELECT * FROM payments WHERE id=?').get(refund.payment_id);}
-    return null;
-  }
-  function auditPaymentEvent({stripeEventId=null,paymentId,source,eventType,status,amountCents=null,actorEmail=null,note=null,details={}}) {
-    const id=crypto.randomUUID(),now=Date.now();
-    db.prepare('INSERT INTO payment_events (id,stripe_event_id,payment_id,source,event_type,status,amount_cents,actor_email,note,details_json,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)').run(id,stripeEventId,paymentId,source,eventType,status,amountCents,actorEmail,note,JSON.stringify(details),now);
-    if(paymentAlertEvents.has(eventType)||eventType.startsWith('manual.refund.'))db.prepare('INSERT INTO payment_alerts (event_id,status,attempts,created_at) VALUES (?,\'pending\',0,?)').run(id,now);
-    return id;
-  }
-  async function flushPaymentAlerts() {
-    const pending=db.prepare("SELECT a.event_id,a.attempts,p.id payment_id,p.event_id album_id,p.amount_cents,e.event_type,e.status,e.amount_cents event_amount,e.note,e.details_json FROM payment_alerts a JOIN payment_events e ON e.id=a.event_id JOIN payments p ON p.id=e.payment_id ORDER BY e.created_at LIMIT 20").all();
-    const recipient=String(cfg.PAYMENT_ALERT_EMAIL||[...paymentAdminEmails][0]||cfg.BREVO_SENDER_EMAIL||'').trim();
-    for(const alert of pending){
-      try{
-        if(!recipient||!mailer)throw new Error(!recipient?'PAYMENT_ALERT_EMAIL fehlt.':'Brevo-Versand ist nicht eingerichtet.');
-        const info=JSON.parse(alert.details_json||'{}');
-        await mailer({to:recipient,subject:`FinalSnap Zahlung: ${alert.event_type}`,text:[`Zahlungsereignis: ${alert.event_type}`,`Status: ${alert.status}`,`Album-ID: ${alert.album_id}`,`Zahlungs-ID: ${alert.payment_id}`,`Betrag: ${((alert.event_amount??alert.amount_cents??alert.amount_cents??0)/100).toFixed(2)} EUR`,alert.note?`Notiz: ${alert.note}`:'',`Details: ${JSON.stringify(info)}`,'PrÃ¼fen: Stripe Dashboard und interner Zahlungsablauf.'].filter(Boolean).join('\n')});
-        db.prepare("UPDATE payment_alerts SET status='sent',attempts=attempts+1,last_error=NULL,sent_at=? WHERE event_id=?").run(Date.now(),alert.event_id);
-      }catch(error){
-        db.prepare('UPDATE payment_alerts SET attempts=attempts+1,last_error=? WHERE event_id=?').run(String(error.message||error).slice(0,300),alert.event_id);
-        console.error('Zahlungsalarm konnte nicht versendet werden:',String(error.message||error));
-      }
-    }
-  }
-  async function flushContractConfirmations() {
-    const pending=db.prepare("SELECT c.*,p.amount_cents,p.customer_type,p.early_start_requested_at,p.early_start_acknowledged_at,p.terms_version,e.id album_id,e.title,e.event_date,e.email FROM contract_confirmations c JOIN payments p ON p.id=c.payment_id JOIN events e ON e.id=p.event_id WHERE c.status='pending' ORDER BY c.created_at LIMIT 20").all();
-    for(const confirmation of pending){
-      try{
-        if(!mailer)throw new Error('Brevo-Versand ist nicht eingerichtet.');
-        const body=[
-          'VertragsbestÃ¤tigung â€“ FinalSnap Fotoalbum',
-          '',
-          'Dein Vertrag ist nach bestÃ¤tigtem Zahlungseingang zustande gekommen.',
-          `Anbieter: Matthias Wendland â€“ Matthias Wendland Fotografie, Kupferweg 10, 33334 GÃ¼tersloh, Deutschland; info@finalsnap.de.`,
-          `Produkt: FinalSnap Fotoalbum fÃ¼r â€ž${confirmation.title}â€œ (${confirmation.album_id}).`,
-          `Preis: einmalig ${(confirmation.amount_cents/100).toFixed(2).replace('.',',')} EUR einschlieÃŸlich 19 % deutscher Umsatzsteuer.`,
-          `Kundentyp bei Bestellung: ${confirmation.customer_type==='business'?'GeschÃ¤ftskunde':'Verbraucher'}.`,
-          `Leistungsbeginn: ${confirmation.event_date||'mit Freischaltung'}. Leistungszeitraum: bis zu 90 Tage ab Veranstaltungsdatum, fÃ¼r Upload, Ansicht und Download.`,
-          'Leistungsumfang: bis zu 25 GB verarbeitete Fotos je Veranstaltung; Uploads werden auf hÃ¶chstens 2.560 Pixel lÃ¤ngste Kante verkleinert und als JPEG komprimiert; Originaldateien und Videos sind nicht enthalten. Nach Ende des Albumzeitraums endet der Zugang und Fotos sowie GÃ¤stebucheintrÃ¤ge werden nach dem beschriebenen LÃ¶schablauf entfernt.',
-          '',
-          'VERTRAGSBEDINGUNGEN â€“ Fassung '+(confirmation.terms_version||TERMS_VERSION),
-          'Anbieter: Matthias Wendland â€“ Matthias Wendland Fotografie, Kupferweg 10, 33334 GÃ¼tersloh, Deutschland; info@finalsnap.de.',
-          '1. Geltung: Diese Bedingungen gelten fÃ¼r das kostenpflichtige FinalSnap-Fotoalbum. Verbraucher und Unternehmen kÃ¶nnen buchen. Unternehmen handeln bei einer GeschÃ¤ftskundenbuchung im Rahmen ihrer gewerblichen oder selbststÃ¤ndigen TÃ¤tigkeit. Zwingende Verbraucherrechte bleiben unberÃ¼hrt.',
-          '2. Vertrag und Preis: Ein Fotoalbum je Veranstaltung kostet einmalig 49,90 Euro einschlieÃŸlich der gesetzlichen Umsatzsteuer. Es gibt keine laufende AbonnementgebÃ¼hr. Der Vertrag kommt mit bestÃ¤tigter Zahlung und Freischaltung zustande.',
-          '3. Leistung: Das Album beginnt am angegebenen Veranstaltungsdatum und ist ab diesem Datum 90 Tage fÃ¼r Upload, Ansicht und Download verfÃ¼gbar. Danach endet der Zugang; Albumfotos und GÃ¤stebucheintrÃ¤ge werden nach dem vorgesehenen LÃ¶schablauf entfernt. Eine zusÃ¤tzliche Downloadphase ist nicht enthalten. Bis zu 25 vorab hochgeladene Testfotos bleiben bei Buchung erhalten und zÃ¤hlen zum Speicherplatz. Je Veranstaltung stehen bis zu 25 GB fÃ¼r verarbeitete Fotos zur VerfÃ¼gung. Uploads werden auf hÃ¶chstens 2.560 Pixel lÃ¤ngste Kante verkleinert und als JPEG komprimiert; Originaldateien und Videos sind nicht enthalten.',
-          '4. Nutzung: Der Veranstalter verwaltet das Album und teilt GÃ¤sten Link oder QR-Code. Er ist dafÃ¼r verantwortlich, ZugÃ¤nge nur berechtigten GÃ¤sten zu geben, GÃ¤ste geeignet zu informieren und nur Inhalte mit den erforderlichen Rechten zu teilen. UnzulÃ¤ssige Inhalte kÃ¶nnen gemeldet und entfernt werden.',
-          '5. VerfÃ¼gbarkeit und Support: FÃ¼r die Nutzung sind Internetverbindung, geeignetes GerÃ¤t und aktueller Browser erforderlich. Wir bemÃ¼hen uns um zuverlÃ¤ssigen Betrieb, schulden aber keine ununterbrochene oder jederzeit fehlerfreie VerfÃ¼gbarkeit. Wartung und StÃ¶rungen kÃ¶nnen den Dienst beeintrÃ¤chtigen. Support: info@finalsnap.de. Gesetzliche Rechte bleiben bestehen.',
-          '6. Zahlung und Erstattung: Die einmalige Zahlung erfolgt Ã¼ber Stripe. Nach erfolgreicher Zahlung wird der Albumdienst freigeschaltet. Ein Zahlungsbeleg oder eine Rechnung wird bereitgestellt, sobald die erforderlichen Rechnungsangaben erhoben wurden. Gesetzliche ErstattungsansprÃ¼che bleiben unberÃ¼hrt. Eine freiwillige vollstÃ¤ndige Erstattung beendet nach ihrer BestÃ¤tigung den Albumzugang; zwingende Rechte haben Vorrang.',
-          '7. Datenschutz und LÃ¶schung: Einzelheiten zur Verarbeitung und zu Dienstleistern stehen unter '+baseUrl.origin+'/datenschutz. Die Albumlaufzeit steht in Abschnitt 3. Gesetzliche Aufbewahrungspflichten fÃ¼r Zahlungs- und Buchungsunterlagen bleiben unberÃ¼hrt.',
-          '8. Recht: Es gilt deutsches Recht. Bei Verbrauchern gilt diese Rechtswahl nur, soweit dadurch nicht der Schutz zwingender Bestimmungen ihres gewÃ¶hnlichen Aufenthaltsstaates entzogen wird.',
-          '',
-          'WIDERRUFSBELEHRUNG FÃœR VERBRAUCHER',
-          'Sie kÃ¶nnen binnen vierzehn Tagen ab Vertragsschluss ohne Angabe von GrÃ¼nden widerrufen. Zur AusÃ¼bung mÃ¼ssen Sie Matthias Wendland â€“ Matthias Wendland Fotografie, Kupferweg 10, 33334 GÃ¼tersloh, Deutschland, info@finalsnap.de, mittels einer eindeutigen ErklÃ¤rung (zum Beispiel Brief oder E-Mail) Ã¼ber Ihren Entschluss informieren. Zur Fristwahrung genÃ¼gt die rechtzeitige Absendung.',
-          'Im Fall des Widerrufs erstatten wir alle erhaltenen Zahlungen unverzÃ¼glich und spÃ¤testens binnen vierzehn Tagen ab Eingang Ihrer Mitteilung mit demselben Zahlungsmittel, sofern nichts anderes vereinbart wurde. FÃ¼r die RÃ¼ckzahlung berechnen wir kein Entgelt.',
-          'Wenn Sie ausdrÃ¼cklich verlangen, dass der entgeltliche Dienst wÃ¤hrend der Widerrufsfrist beginnt, kann bei einem spÃ¤teren Widerruf angemessener Wertersatz fÃ¼r bis dahin erbrachte Leistungen anfallen, sofern die gesetzlichen Voraussetzungen erfÃ¼llt sind. Das Widerrufsrecht bei einer Dienstleistung erlischt erst mit vollstÃ¤ndiger VertragserfÃ¼llung und nur, wenn Sie dem vorzeitigen Beginn ausdrÃ¼cklich zugestimmt und Ihre Kenntnis vom ErlÃ¶schen bei vollstÃ¤ndiger ErfÃ¼llung bestÃ¤tigt haben. Das vorzeitige Verlangen und die BestÃ¤tigung werden nur eingeholt, wenn der Albumdienst in der Widerrufsfrist beginnen soll.',
-          'Muster-Widerrufsformular: An Matthias Wendland â€“ Matthias Wendland Fotografie, Kupferweg 10, 33334 GÃ¼tersloh, Deutschland, info@finalsnap.de: Hiermit widerrufe ich den Vertrag Ã¼ber das FinalSnap-Fotoalbum fÃ¼r die Veranstaltung __________. Bestellt am __________. Name __________. Anschrift __________. Datum __________. Unterschrift (nur bei Papiermitteilung) __________.',
-          'Die Widerrufsinformation und das Musterformular stehen zusÃ¤tzlich unter '+baseUrl.origin+'/widerruf',
-          confirmation.early_start_requested_at&&confirmation.early_start_acknowledged_at?'Bei deiner Bestellung wurden ein ausdrÃ¼ckliches Verlangen nach vorzeitigem Leistungsbeginn und die BestÃ¤tigung der Widerrufsfolgen mit Zeitstempel gespeichert.':'FÃ¼r diese Bestellung wurde kein vorzeitiger Leistungsbeginn innerhalb der Widerrufsfrist angefordert.',
-          '',
-          'Muster-Widerrufsformular (fÃ¼r Verbraucher): An Matthias Wendland â€“ Matthias Wendland Fotografie, Kupferweg 10, 33334 GÃ¼tersloh, info@finalsnap.de. Hiermit widerrufe ich den Vertrag Ã¼ber das FinalSnap Fotoalbum fÃ¼r die Veranstaltung __________. Bestellt am __________. Name __________. Anschrift __________. Datum __________.',
-          '',
-          'Bitte bewahre diese E-Mail als VertragsbestÃ¤tigung auf. Fragen: info@finalsnap.de.'
-        ].join('\n');
-        await mailer({to:confirmation.recipient,subject:'Deine VertragsbestÃ¤tigung und Widerrufsinformation Â· FinalSnap',text:body});
-        db.prepare("UPDATE contract_confirmations SET status='sent',recipient='',attempts=attempts+1,last_error=NULL,sent_at=? WHERE payment_id=?").run(Date.now(),confirmation.payment_id);
-      }catch(error){
-        db.prepare("UPDATE contract_confirmations SET attempts=attempts+1,last_error=? WHERE payment_id=?").run(String(error.message||error).slice(0,300),confirmation.payment_id);
-        console.error('VertragsbestÃ¤tigung konnte nicht versendet werden:',String(error.message||error));
-      }
-    }
-  }
-  function refreshRefundState(paymentId) {
-    const payment=db.prepare('SELECT * FROM payments WHERE id=?').get(paymentId);
-    const refunded=Number(db.prepare("SELECT COALESCE(SUM(amount_cents),0) amount FROM refunds WHERE payment_id=? AND status='succeeded'").get(paymentId).amount);
-    if(refunded>=payment.amount_cents){
-      db.prepare("UPDATE payments SET status='refunded',refunded_at=COALESCE(refunded_at,?) WHERE id=?").run(Date.now(),paymentId);
-      db.prepare("UPDATE events SET status='refunded' WHERE id=? AND status='paid'").run(payment.event_id);
-    }else if(refunded>0){
-      db.prepare("UPDATE payments SET status='partially_refunded' WHERE id=? AND status!='disputed'").run(paymentId);
-    }else{
-      db.prepare("UPDATE payments SET status='paid',refunded_at=NULL WHERE id=? AND status IN ('refunded','partially_refunded','disputed_lost')").run(paymentId);
-      db.prepare("UPDATE events SET status='paid' WHERE id=? AND status='refunded'").run(payment.event_id);
-    }
-    return refunded;
-  }
-  function fulfill(notification) {
-    const object=notification.data.object,type=notification.type;
-    if(notification.livemode!==false||object.livemode===true)throw new Error('Live-Webhook gesperrt');
-    if(db.prepare('SELECT 1 FROM webhook_receipts WHERE id=?').get(notification.id))return false;
-    const checkoutTypes=new Set(['checkout.session.completed','checkout.session.async_payment_succeeded','checkout.session.async_payment_failed','checkout.session.expired']);
-    if(!checkoutTypes.has(type)&&!relevantPaymentEvents.has(type)){db.prepare('INSERT INTO webhook_receipts VALUES (?,?)').run(notification.id,Date.now());return false;}
-    let payment;
-    if(checkoutTypes.has(type))payment=db.prepare('SELECT p.* FROM payments p LEFT JOIN payment_attempts a ON a.payment_id=p.id WHERE p.stripe_session_id=? OR a.stripe_session_id=? LIMIT 1').get(object.id,object.id);
-    else payment=paymentForStripeObject(object);
-    if(!payment)throw new Error(`Unbekanntes Zahlungsereignis ${type}; Webhook erneut zustellen`);
-    let alert=paymentAlertEvents.has(type);
-    db.transaction(()=>{
-      const now=Date.now();
-      db.prepare('INSERT INTO webhook_receipts VALUES (?,?)').run(notification.id,now);
-      const attempt=db.prepare('SELECT * FROM payment_attempts WHERE stripe_session_id=?').get(object.id);
-      if(checkoutTypes.has(type)){
-        const metadata=object.metadata||{};
-        const consentMatches=(metadata.customerType||'consumer')===payment.customer_type&&(metadata.earlyStartRequest||'false')===String(!!payment.early_start_requested_at)&&(metadata.earlyStartAcknowledged||'false')===String(!!payment.early_start_acknowledged_at)&&(metadata.termsAccepted||'false')===String(!!payment.terms_accepted_at)&&(metadata.termsVersion||'')===(payment.terms_version||'');
-        if(object.currency!=='eur'||object.amount_total!==payment.amount_cents||object.mode!=='payment'||metadata.paymentId!==payment.id||metadata.eventId!==payment.event_id||!consentMatches)throw new Error('Zahlungsdaten stimmen nicht Ã¼berein');
-        if(attempt)db.prepare('UPDATE payment_attempts SET status=?,updated_at=? WHERE id=?').run(type==='checkout.session.expired'?'expired':type==='checkout.session.async_payment_failed'?'failed':object.payment_status==='paid'?'paid':'complete',now,attempt.id);
-        if(object.payment_intent){const pi=typeof object.payment_intent==='string'?object.payment_intent:object.payment_intent.id;db.prepare('UPDATE payments SET stripe_payment_intent_id=? WHERE id=?').run(pi,payment.id);}
-        if(object.invoice||object.customer){const invoice=typeof object.invoice==='string'?object.invoice:object.invoice?.id;const customer=typeof object.customer==='string'?object.customer:object.customer?.id;db.prepare('UPDATE payments SET stripe_invoice_id=COALESCE(?,stripe_invoice_id),stripe_customer_id=COALESCE(?,stripe_customer_id) WHERE id=?').run(invoice,customer,payment.id);}
-        if(['checkout.session.completed','checkout.session.async_payment_succeeded'].includes(type)&&object.payment_status==='paid'&&payment.status==='pending'){
-          const e=lookup(payment.event_id);
-          if(['pending','trial'].includes(e.status)&&!e.deleted_at){const eventEnd=e.event_date?eventDeadline(e.event_date):e.expires_at||now+payment.months*30*86400000;db.prepare("UPDATE events SET status='paid',expires_at=? WHERE id=?").run(eventEnd,e.id);db.prepare("UPDATE payments SET status='paid' WHERE id=?").run(payment.id);db.prepare("INSERT OR IGNORE INTO contract_confirmations (payment_id,recipient,status,attempts,created_at) VALUES (?,?,'pending',0,?)").run(payment.id,e.email,now);}
-        }
-      }else if(type.startsWith('refund.')||type==='charge.refunded'){
-        const refund=type==='charge.refunded'?null:object;
-        const amount=Number(refund?.amount??object.amount_refunded??0),refundStatus=type==='refund.failed'?'failed':refund?.status==='succeeded'||type==='charge.refunded'?'succeeded':'pending';
-        if(refund){
-          const known=db.prepare('SELECT * FROM refunds WHERE stripe_refund_id=?').get(refund.id)||db.prepare('SELECT * FROM refunds WHERE id=?').get(refund.metadata?.decisionId||'');
-          if(known)db.prepare('UPDATE refunds SET stripe_refund_id=COALESCE(stripe_refund_id,?),status=?,updated_at=? WHERE id=?').run(refund.id,refundStatus,now,known.id);
-          else db.prepare("INSERT INTO refunds (id,payment_id,stripe_refund_id,amount_cents,reason,decision_note,actor_email,status,created_at,updated_at) VALUES (?,?,?,?,'stripe','Von Stripe gemeldet','Stripe',?,?,?)").run(crypto.randomUUID(),payment.id,refund.id,amount,refundStatus,now,now);
-        }else if(object.refunded){db.prepare("UPDATE refunds SET status='succeeded',updated_at=? WHERE payment_id=? AND status IN ('submitted','pending')").run(now,payment.id);}
-        refreshRefundState(payment.id);
-        alert=true;
-      }else if(type.startsWith('charge.dispute.')){
-        if(type==='charge.dispute.created'||type==='charge.dispute.updated'||type==='charge.dispute.funds_withdrawn')db.prepare("UPDATE payments SET status='disputed' WHERE id=? AND status NOT IN ('refunded','disputed_lost')").run(payment.id);
-        if(type==='charge.dispute.closed'){
-          if(['won','warning_closed'].includes(object.status)){db.prepare("UPDATE payments SET status='paid' WHERE id=? AND status IN ('disputed','disputed_lost')").run(payment.id);db.prepare("UPDATE events SET status='paid' WHERE id=? AND status='refunded'").run(payment.event_id);refreshRefundState(payment.id);}
-          else if(object.status==='lost'){db.prepare("UPDATE payments SET status='disputed_lost',refunded_at=? WHERE id=?").run(now,payment.id);db.prepare("UPDATE events SET status='refunded' WHERE id=? AND status='paid'").run(payment.event_id);}
-        }
-        if(type==='charge.dispute.funds_reinstated'){db.prepare("UPDATE payments SET status='paid',refunded_at=NULL WHERE id=? AND status='disputed_lost'").run(payment.id);db.prepare("UPDATE events SET status='paid' WHERE id=? AND status='refunded'").run(payment.event_id);refreshRefundState(payment.id);}
-        alert=true;
-      }
-      const safeDetails={objectId:object.id,status:object.status||object.payment_status||null,reason:object.reason||null,amount:object.amount??object.amount_refunded??object.amount_total??null,currency:object.currency||null,paymentIntent:typeof object.payment_intent==='string'?object.payment_intent:object.payment_intent?.id||null,charge:typeof object.charge==='string'?object.charge:object.charge?.id||null};
-      const eventId=auditPaymentEvent({stripeEventId:notification.id,paymentId:payment.id,source:'stripe',eventType:type,status:object.status||object.payment_status||'received',amountCents:safeDetails.amount,details:safeDetails});
-      if(alert&&!db.prepare('SELECT 1 FROM payment_alerts WHERE event_id=?').get(eventId))db.prepare("INSERT INTO payment_alerts (event_id,status,attempts,created_at) VALUES (?,'pending',0,?)").run(eventId,now);
-    })();
-    return true;
-  }
-  app.post('/api/stripe/webhook', express.raw({type:'application/json',limit:'1mb'}),async(req,res)=>{
-    if (!stripe || !cfg.STRIPE_WEBHOOK_SECRET) return fail(res,503,'Stripe noch nicht eingerichtet.');
-    let event;
-    try { event = stripe.webhooks.constructEvent(req.body,req.headers['stripe-signature'],cfg.STRIPE_WEBHOOK_SECRET); }
-    catch { return fail(res,400,'UngÃ¼ltige Webhook-Signatur.'); }
-    try { fulfill(event); await flushContractConfirmations(); await flushPaymentAlerts(); res.json({received:true}); }
-    catch(err) { console.error('Webhook:',err.message); fail(res,500,'ZahlungsbestÃ¤tigung konnte nicht verarbeitet werden.'); }
-  });
-  app.use(express.json({limit:'32kb'}));
-  app.use((req,res,next)=>{
-    const match = /(?:^|;\s*)event_session=([a-f0-9]{64})(?:;|$)/.exec(req.headers.cookie || '');
-    if(match) {
-      const session = db.prepare('SELECT s.*, u.email, u.email_verified_at FROM sessions s JOIN users u ON u.id=s.user_id WHERE token_hash=? AND expires_at>?').get(hash(match[1]),Date.now());
-      if(session) {req.user={id:session.user_id,email:session.email}; req.session=session;}
-    }
-    next();
-  });
-  // Guest uploads are unauthenticated but must originate from the application.
-  app.use((req,res,next)=>{
-    if (!['POST','PATCH','DELETE','PUT'].includes(req.method)) return next();
-    if(req.headers.origin !== baseUrl.origin) return fail(res,403,'UngÃ¼ltige Herkunft der Anfrage.');
-    if(req.user && req.headers['x-csrf-token'] !== req.session.csrf) return fail(res,403,'Sicherheits-Token fehlt.');
-    next();
-  });
-  const authLimit=rateLimit({windowMs:15*60*1000,limit:20,standardHeaders:'draft-8',legacyHeaders:false});
-  const uploadLimit=rateLimit({windowMs:60*1000,limit:20,standardHeaders:'draft-8',legacyHeaders:false});
-  const guestbookLimit=rateLimit({windowMs:15*60*1000,limit:5,standardHeaders:'draft-8',legacyHeaders:false});
-  function loginRequired(req,res,next) { if(!req.user) return fail(res,401,'Bitte anmelden.'); if(deletingUsers.has(req.user.id)) return fail(res,409,'KontolÃ¶schung lÃ¤uft. Bitte kurz warten.'); next(); }
-  async function passwordHash(password,salt=random()) {return `${salt}:${(await scrypt(password,salt,64)).toString('hex')}`;}
-  function startSession(req,res,user) {
-    const token=random(), csrf=random();
-    db.prepare('INSERT INTO sessions VALUES (?,?,?,?)').run(hash(token),user.id,csrf,Date.now()+7*86400000);
-    res.cookie('event_session',token,{httpOnly:true,secure:baseUrl.protocol==='https:',sameSite:'lax',maxAge:7*86400000,path:'/'});
-    res.json({user:{id:user.id,email:user.email},csrf});
-  }
-  app.post('/api/auth/register',authLimit,wrap(async(req,res)=>{
-    const email=String(req.body.email||'').trim().toLowerCase(), password=req.body.password;
-    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length>254 || typeof password!=='string' || password.length<12 || password.length>128) return fail(res,400,'GÃ¼ltige E-Mail und Passwort mit 12â€“128 Zeichen erforderlich.');
-    const encoded=await passwordHash(password);
-    const user={id:crypto.randomUUID(),email};
-    try {db.prepare('INSERT INTO users (id,email,password_hash,created_at) VALUES (?,?,?,?)').run(user.id,email,encoded,Date.now());}
-    catch(err) {if(err.code==='SQLITE_CONSTRAINT_UNIQUE') return fail(res,409,'Registrierung nicht mÃ¶glich. Bitte anmelden.'); throw err;}
-    if(mailer){const token=random();db.prepare('INSERT INTO email_verifications VALUES (?,?,?)').run(hash(token),user.id,Date.now()+86400000);
-      try{await mailer({to:email,subject:'Willkommen bei FinalSnap â€“ bestÃ¤tige deine E-Mail',text:`Dein Konto ist erstellt.\nBestÃ¤tige deine E-Mail-Adresse: ${baseUrl.origin}/verify-email#${token}\nDer Link gilt 24 Stunden.\nDein Veranstalterkonto: ${baseUrl.origin}/dashboard\nFalls du kein Konto erstellt hast, ignoriere diese Nachricht.`});}
-      catch{db.prepare('DELETE FROM email_verifications WHERE token_hash=?').run(hash(token));console.error('Registrierungs-E-Mail konnte nicht zugestellt werden.');}}
-    startSession(req,res,user);
-  }));
-  app.post('/api/auth/login',authLimit,wrap(async(req,res)=>{
-    const user=db.prepare('SELECT * FROM users WHERE email=?').get(String(req.body.email||'').trim().toLowerCase());
-    const password=req.body.password;
-    if(typeof password!=='string' || password.length>128) return fail(res,401,'Anmeldedaten stimmen nicht.');
-    const [salt,stored]=(user?.password_hash || `${'0'.repeat(64)}:${'0'.repeat(128)}`).split(':');
-    const derived=await scrypt(password,salt,64);
-    if(!crypto.timingSafeEqual(Buffer.from(stored,'hex'),derived) || !user) return fail(res,401,'Anmeldedaten stimmen nicht.');
-    startSession(req,res,user);
-  }));
-  app.get('/api/auth/me',loginRequired,(req,res)=>res.json({user:req.user,csrf:req.session.csrf,emailVerified:!!db.prepare('SELECT email_verified_at FROM users WHERE id=?').get(req.user.id).email_verified_at,emailDeliveryAvailable:!!mailer}));
-  app.post('/api/auth/forgot-password',authLimit,wrap(async(req,res)=>{
-    if(!mailer)return fail(res,503,'Passwort zurÃ¼cksetzen ist noch nicht verfÃ¼gbar: Der E-Mail-Versand wird gerade eingerichtet.');
-    const user=db.prepare('SELECT * FROM users WHERE email=?').get(String(req.body.email||'').trim().toLowerCase());
-    if(user){const token=random();db.prepare('INSERT INTO password_resets VALUES (?,?,?)').run(hash(token),user.id,Date.now()+3600000);
-      try{await mailer({to:user.email,subject:'Passwort zurÃ¼cksetzen Â· FinalSnap',text:`Neues Passwort festlegen: ${baseUrl.origin}/reset-password#${token}\nDieser Link ist eine Stunde gÃ¼ltig. Falls du ihn nicht angefordert hast, ignoriere diese Nachricht.`});}catch{db.prepare('DELETE FROM password_resets WHERE token_hash=?').run(hash(token));}}
-    res.json({success:true,message:'Falls ein Konto existiert, erhÃ¤ltst du einen Link zum ZurÃ¼cksetzen.'});
-  }));
-  app.post('/api/auth/reset-password',authLimit,wrap(async(req,res)=>{
-    const token=String(req.body.token||''),password=req.body.password;
-    if(!/^[a-f0-9]{64}$/.test(token)||typeof password!=='string'||password.length<12||password.length>128)return fail(res,400,'GÃ¼ltigen Link und Passwort mit 12â€“128 Zeichen verwenden.');
-    const encoded=await passwordHash(password);
-    const changed=db.transaction(()=>{const record=db.prepare('SELECT * FROM password_resets WHERE token_hash=? AND expires_at>?').get(hash(token),Date.now());if(!record)return false;
-      db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(encoded,record.user_id);db.prepare('DELETE FROM password_resets WHERE user_id=?').run(record.user_id);db.prepare('DELETE FROM sessions WHERE user_id=?').run(record.user_id);return true;})();
-    if(!changed)return fail(res,400,'Link ungÃ¼ltig oder abgelaufen. Bitte einen neuen anfordern.');res.clearCookie('event_session',{path:'/'});res.json({success:true});
-  }));
-  app.post('/api/auth/request-verification',authLimit,loginRequired,wrap(async(req,res)=>{
-    if(!mailer)return fail(res,503,'E-Mail-Versand ist noch nicht eingerichtet.');
-    const token=random();const expires=Date.now()+86400000;
-    db.prepare('INSERT INTO email_verifications VALUES (?,?,?)').run(hash(token),req.user.id,expires);
-    try{await mailer({to:req.user.email,subject:'BestÃ¤tige deine E-Mail-Adresse Â· FinalSnap',text:`BestÃ¤tige deine E-Mail-Adresse: ${baseUrl.origin}/verify-email#${token}\nDieser Link ist 24 Stunden gÃ¼ltig. Falls du ihn nicht angefordert hast, ignoriere diese Nachricht.`});}
-    catch(error){db.prepare('DELETE FROM email_verifications WHERE token_hash=?').run(hash(token));console.error('BestÃ¤tigungsmail: Versandstatus',Number(error.deliveryStatus)||'Netzwerkfehler');return fail(res,503,error.deliveryHint||'E-Mail-Versand nicht erreichbar. Bitte spÃ¤ter erneut versuchen.');}
-    res.json({success:true});
-  }));
-  app.post('/api/auth/verify-email',authLimit,(req,res)=>{
-    const token=String(req.body.token||'');if(!/^[a-f0-9]{64}$/.test(token))return fail(res,400,'BestÃ¤tigungslink ungÃ¼ltig oder abgelaufen.');
-    const verification=db.prepare('SELECT * FROM email_verifications WHERE token_hash=? AND expires_at>?').get(hash(token),Date.now());
-    if(!verification)return fail(res,400,'BestÃ¤tigungslink ungÃ¼ltig oder abgelaufen.');
-    db.transaction(()=>{db.prepare('UPDATE users SET email_verified_at=? WHERE id=?').run(Date.now(),verification.user_id);db.prepare('DELETE FROM email_verifications WHERE user_id=?').run(verification.user_id);})();res.json({success:true});
-  });
-  app.post('/api/auth/logout',loginRequired,(req,res)=>{db.prepare('DELETE FROM sessions WHERE token_hash=?').run(req.session.token_hash);res.clearCookie('event_session',{path:'/'});res.json({success:true});});
-  app.get('/api/storage',loginRequired,(req,res)=>{
-    const disk=fs.statfsSync(root);
-    const diskFreeBytes=Number(disk.bavail)*Number(disk.bsize);
-    const diskTotalBytes=Number(disk.blocks)*Number(disk.bsize);
-    const uploadDisk={freeBytes:diskFreeBytes,totalBytes:diskTotalBytes,warning:diskFreeBytes<uploadDiskWarningThreshold(diskTotalBytes),uploadsPaused:diskFreeBytes<MIN_UPLOAD_FREE_BYTES,minimumFreeBytes:MIN_UPLOAD_FREE_BYTES};
-    if (photoStorage.mode === 's3') {
-      const usedBytes = Number(db.prepare('SELECT COALESCE(SUM(bytes),0) bytes FROM photos').get().bytes);
-      const freeBytes = Math.max(0, storageLimit - usedBytes);
-      const warning=freeBytes<200*MiB||uploadDisk.warning;
-      return res.json({freeBytes,totalBytes:storageLimit,usedBytes,warning,uploadsPaused:freeBytes<100*MiB||uploadDisk.uploadsPaused,location:'object-storage',uploadDisk});
-    }
-    res.json({freeBytes:diskFreeBytes,totalBytes:diskTotalBytes,usedBytes:diskTotalBytes-diskFreeBytes,warning:uploadDisk.warning,uploadsPaused:uploadDisk.uploadsPaused,location:'server-disk',uploadDisk});
-  });
-  app.get('/api/plans',(req,res)=>res.json(Object.fromEntries(Object.entries(PLANS).map(([key,plan])=>[key,{...plan,photoLimit:key==='event'?null:Number(cfg.MAX_EVENT_PHOTOS||2000),storageLimitMB:Math.floor(Number(cfg.MAX_EVENT_BYTES||25*1024**3)/1024**2),storageLimitGB:Number((Number(cfg.MAX_EVENT_BYTES||25*1024**3)/1024**3).toFixed(1))}]))));
-  app.get('/api/events',loginRequired,(req,res)=>{
-    const events=db.prepare(`SELECT e.*, COUNT(p.id) photoCount, COALESCE(SUM(p.bytes),0) storageBytes
-      FROM events e LEFT JOIN photos p ON p.event_id=e.id
-      WHERE e.owner_id=? AND e.deleted_at IS NULL GROUP BY e.id ORDER BY e.created_at DESC`).all(req.user.id);
-    res.json({events:events.map(e=>{const payment=db.prepare('SELECT customer_type,early_start_requested_at,early_start_acknowledged_at,terms_accepted_at,terms_version,stripe_invoice_id FROM payments WHERE event_id=?').get(e.id);return {...e,expires_at:e.event_date?retentionUntil(e):e.expires_at,storageLimitBytes:eventStorageLimit(e,cfg),photoLimit:eventPhotoLimit(e,cfg),checkoutStarted:!!payment,customerType:payment?.customer_type||null,earlyStartRequested:!!payment?.early_start_requested_at,earlyStartAcknowledged:!!payment?.early_start_acknowledged_at,termsAccepted:!!payment?.terms_accepted_at,termsVersion:payment?.terms_version||null,hasInvoice:!!payment?.stripe_invoice_id,readOnly:!active(e)&&readable(e),retentionUntil:retentionUntil(e),startsAt:startAt(e),guestUrl:readable(e)?`${baseUrl.origin}/event/${e.id}?token=${e.guest_token}`:null};})});
-  });
-  app.get('/api/event/:eventId/invoice',loginRequired,owner,wrap(async(req,res)=>{
-    const payment=db.prepare('SELECT stripe_invoice_id FROM payments WHERE event_id=?').get(req.event.id);
-    if(!payment?.stripe_invoice_id||!stripe?.invoices?.retrieve)return fail(res,404,'FÃ¼r dieses Album ist noch kein Stripe-Beleg verfÃ¼gbar.');
-    let invoice;
-    try{invoice=await stripe.invoices.retrieve(payment.stripe_invoice_id);}catch(error){console.error('Stripe-Beleg konnte nicht geladen werden:',String(error.message||error));return fail(res,502,'Der Beleg ist gerade nicht erreichbar. Bitte spÃ¤ter erneut versuchen.');}
-    const url=invoice.invoice_pdf||invoice.hosted_invoice_url;
-    if(!url)return fail(res,409,'Stripe erstellt den Beleg noch. Bitte spÃ¤ter erneut versuchen.');
-    let parsed;try{parsed=new URL(url);}catch{return fail(res,502,'Stripe hat keinen gÃ¼ltigen Beleg-Link geliefert.');}
-    if(parsed.protocol!=='https:')return fail(res,502,'Stripe hat keinen sicheren Beleg-Link geliefert.');
-    res.redirect(302,parsed.href);
-  }));
-  app.post('/api/events',loginRequired,(req,res)=>{
-    const id=String(req.body.eventId||''); const plan=PLANS.event; const title=String(req.body.title||'').trim(),eventDate=String(req.body.eventDate||'');
-    if(!/^[a-z0-9][a-z0-9_-]{2,63}$/.test(id) || !title || title.length>120 || !validEventDate(eventDate)) return fail(res,400,'Bitte Event-ID, Titel und ein Veranstaltungsdatum innerhalb der nÃ¤chsten 24 Monate angeben.');
-    if(lookup(id) || fs.existsSync(path.join(root,id))) return fail(res,409,'Event-ID bereits vergeben, auch fÃ¼r Bestandsdaten.');
-    // During the test-only phase each newly created event can use the 25-photo
-    // trial. Checkout remains a Stripe test checkout and can never charge live.
-    const trial=req.body.trial!==false;
-    const expiresAt=eventDeadline(eventDate);
-    db.prepare('INSERT INTO events (id,email,plan,amount_cents,status,created_at,owner_id,title,event_date,guest_token,moderation,guestbook_moderation,expires_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)').run(id,req.user.email,'event',plan.priceCents,'pending',Date.now(),req.user.id,title,eventDate,random(),req.body.moderation===true?1:0,req.body.guestbookModeration===false?0:1,expiresAt);
-    if(trial)db.prepare("UPDATE events SET status='trial', trial_used=1 WHERE id=?").run(id);
-    res.status(201).json({eventId:id,trial:!!trial,eventDate});
-  });
-  app.get('/api/event/:eventId/availability',(req,res)=>res.json({available:/^[a-z0-9][a-z0-9_-]{2,63}$/.test(req.params.eventId)&&!lookup(req.params.eventId)&&!fs.existsSync(path.join(root,req.params.eventId))}));
-  function owner(req,res,next) { const e=lookup(req.params.eventId); if(!own(req,e)) return fail(res,404,'Event nicht gefunden.'); req.event=e; next(); }
-  function paymentAdminRequired(req,res,next) {
-    if(!req.user)return fail(res,401,'Bitte anmelden.');
-    const user=db.prepare('SELECT email_verified_at FROM users WHERE id=?').get(req.user.id);
-    if(!user?.email_verified_at||!paymentAdminEmails.has(String(req.user.email||'').toLowerCase()))return fail(res,403,'Kein Zugriff auf die Zahlungsverwaltung.');
-    next();
-  }
-  app.get('/ops/payments',paymentAdminRequired,(req,res)=>res.sendFile(path.join(__dirname,'public','payments-admin.html')));
-  app.get('/api/admin/payments',paymentAdminRequired,(req,res)=>{
-    const payments=db.prepare('SELECT p.*,e.title,e.email,e.status album_status,e.event_date FROM payments p JOIN events e ON e.id=p.event_id ORDER BY p.rowid DESC LIMIT 100').all();
-    res.json({payments:payments.map(payment=>({...payment,
-      refunded_cents:Number(db.prepare("SELECT COALESCE(SUM(amount_cents),0) amount FROM refunds WHERE payment_id=? AND status='succeeded'").get(payment.id).amount),
-      attempts:db.prepare('SELECT id,attempt_no,status,created_at,updated_at FROM payment_attempts WHERE payment_id=? ORDER BY attempt_no DESC').all(payment.id),
-      refunds:db.prepare('SELECT id,stripe_refund_id,amount_cents,reason,decision_note,actor_email,status,created_at,updated_at FROM refunds WHERE payment_id=? ORDER BY created_at DESC').all(payment.id),
-      events:db.prepare('SELECT e.event_type,e.status,e.amount_cents,e.actor_email,e.note,e.details_json,e.created_at,a.status alert_status,a.attempts alert_attempts,a.last_error alert_error FROM payment_events e LEFT JOIN payment_alerts a ON a.event_id=e.id WHERE e.payment_id=? ORDER BY e.created_at DESC LIMIT 30').all(payment.id).map(event=>({...event,details:JSON.parse(event.details_json||'{}')}))
-    }))});
-  });
-  app.post('/api/admin/payments/:paymentId/refunds',paymentAdminRequired,wrap(async(req,res)=>{
-    const payment=db.prepare('SELECT * FROM payments WHERE id=?').get(req.params.paymentId);
-    if(!payment)return fail(res,404,'Zahlung nicht gefunden.');
-    if(!stripe||!payment.stripe_payment_intent_id)return fail(res,409,'FÃ¼r diese Zahlung ist keine erstattungsfÃ¤hige Stripe-Zahlungsreferenz vorhanden.');
-    if(!['paid','partially_refunded'].includes(payment.status))return fail(res,409,'Diese Zahlung kann aktuell nicht manuell erstattet werden.');
-    const reason=String(req.body?.reason||'requested_by_customer');
-    if(!['duplicate','fraudulent','requested_by_customer'].includes(reason))return fail(res,400,'Bitte einen gÃ¼ltigen Erstattungsgrund wÃ¤hlen.');
-    const note=String(req.body?.note||'').trim();
-    if(note.length<20||note.length>2000)return fail(res,400,'Bitte die Entscheidung mit mindestens 20 Zeichen dokumentieren.');
-    const already=Number(db.prepare("SELECT COALESCE(SUM(amount_cents),0) amount FROM refunds WHERE payment_id=? AND status IN ('requested','submitted','pending','succeeded')").get(payment.id).amount);
-    const remaining=Math.max(0,payment.amount_cents-already);
-    const amount=req.body?.amountCents===undefined?remaining:Number(req.body.amountCents);
-    if(!Number.isSafeInteger(amount)||amount<=0||amount>remaining)return fail(res,400,'Der Erstattungsbetrag Ã¼berschreitet den noch offenen Betrag.');
-    const refundId=crypto.randomUUID(),now=Date.now();
-    db.prepare("INSERT INTO refunds (id,payment_id,amount_cents,reason,decision_note,actor_email,status,created_at,updated_at) VALUES (?,?,?,?,?,?,'requested',?,?)").run(refundId,payment.id,amount,reason,note,req.user.email,now,now);
-    auditPaymentEvent({paymentId:payment.id,source:'manual',eventType:'manual.refund.requested',status:'requested',amountCents:amount,actorEmail:req.user.email,note,details:{refundId,reason}});
-    try{
-      const refund=await stripe.refunds.create({payment_intent:payment.stripe_payment_intent_id,amount,reason,metadata:{paymentId:payment.id,decisionId:refundId}},{idempotencyKey:`finalsnap-refund-${refundId}`});
-      if(refund.livemode!==false)throw new Error('Live-Erstattung gesperrt');
-      const status=refund.status==='succeeded'?'succeeded':refund.status==='failed'?'failed':'pending';
-      db.prepare('UPDATE refunds SET stripe_refund_id=?,status=?,updated_at=? WHERE id=?').run(refund.id,status,Date.now(),refundId);
-      auditPaymentEvent({paymentId:payment.id,source:'manual',eventType:`manual.refund.${status}`,status,amountCents:amount,actorEmail:req.user.email,note,details:{refundId,stripeRefundId:refund.id,reason}});
-      refreshRefundState(payment.id);
-      await flushPaymentAlerts();
-      return res.status(202).json({id:refundId,refundId,status,amountCents:amount});
-    }catch(error){
-      const message=String(error.message||error).slice(0,300);
-      const definitiveFailure=['StripeInvalidRequestError','StripeAuthenticationError','StripePermissionError','StripeCardError'].includes(error.type)||error.code==='resource_missing';
-      const refundStatus=definitiveFailure?'failed':'submitted';
-      db.prepare('UPDATE refunds SET status=?,updated_at=? WHERE id=?').run(refundStatus,Date.now(),refundId);
-      auditPaymentEvent({paymentId:payment.id,source:'manual',eventType:definitiveFailure?'manual.refund.failed':'manual.refund.uncertain',status:refundStatus,amountCents:amount,actorEmail:req.user.email,note,details:{refundId,error:message}});
-      await flushPaymentAlerts();
-      console.error('Erstattung fehlgeschlagen:',message);
-      if(!definitiveFailure)return res.status(202).json({id:refundId,refundId,status:refundStatus,amountCents:amount,message:'Stripe hat den Status nicht eindeutig bestÃ¤tigt. Der Vorgang ist gegen eine doppelte Erstattung gesperrt; bitte den Stripe-Testmodus prÃ¼fen.'});
-      return fail(res,502,'Stripe konnte die Erstattung nicht bestÃ¤tigen. Bitte Zahlungsstatus in Stripe prÃ¼fen, bevor du es erneut versuchst.');
-    }
-  }));
-  app.post('/api/checkout',loginRequired,wrap(async(req,res)=>{
-    const e=lookup(String(req.body.eventId||''));
-    if(!own(req,e))return fail(res,404,'Event nicht gefunden.');
-    if(!['pending','trial'].includes(e.status)||e.deleted_at||(e.status==='trial'&&!active(e)))return fail(res,409,'Dieses Event kann nicht bezahlt werden.');
-    if(!stripe||!cfg.STRIPE_WEBHOOK_SECRET)return fail(res,503,'Stripe-Testmodus noch nicht eingerichtet.');
-    if(req.body.termsAccepted!==true)return fail(res,400,'Bitte bestÃ¤tige vor dem Checkout die Leistungsbedingungen.');
-    const customerType=['consumer','business'].includes(req.body.customerType)?req.body.customerType:'consumer';
-    const earlyStartNeeded=customerType==='consumer'&&!!e.event_date&&startAt(e)<Date.now()+14*86400000;
-    if(earlyStartNeeded&&(req.body.earlyStartRequest!==true||req.body.earlyStartAcknowledged!==true))return fail(res,400,'Bitte bestÃ¤tige den mÃ¶glichen vorzeitigen Leistungsbeginn und die Hinweise zum Widerruf.');
-    const earlyStartRequestedAt=earlyStartNeeded?Date.now():null;
-    const earlyStartAcknowledgedAt=earlyStartNeeded?earlyStartRequestedAt:null;
-    if(req.body.plan!==undefined){const plan=PLANS[req.body.plan];if(!plan)return fail(res,400,'Bitte ein gÃ¼ltiges Paket wÃ¤hlen.');if(req.body.plan!==e.plan)return fail(res,409,'Das Paket und der Preis fÃ¼r dieses Album sind bereits festgelegt.');}
-    let payment=db.prepare('SELECT * FROM payments WHERE event_id=?').get(e.id);
-    if(!payment){const plan=PLANS[e.plan];db.prepare('INSERT INTO payments (id,event_id,amount_cents,months) VALUES (?,?,?,?)').run(crypto.randomUUID(),e.id,e.amount_cents,plan.months);payment=db.prepare('SELECT * FROM payments WHERE event_id=?').get(e.id);}
-    if(['refunded','disputed','disputed_lost'].includes(payment.status))return fail(res,409,'FÃ¼r diese Zahlung ist aktuell kein neuer Checkout mÃ¶glich. Bitte kontaktiere den Support.');
-    let attempt=db.prepare('SELECT * FROM payment_attempts WHERE payment_id=? ORDER BY attempt_no DESC LIMIT 1').get(payment.id);
-    let session=null;
-    if(attempt&&attempt.status==='open'&&!attempt.stripe_session_id.startsWith('creating_')){
-      try{session=await stripe.checkout.sessions.retrieve(attempt.stripe_session_id);}catch(error){if(error.code!=='resource_missing')throw error;db.prepare("UPDATE payment_attempts SET status='expired',updated_at=? WHERE id=?").run(Date.now(),attempt.id);attempt=null;}
-      if(session&&session.livemode!==false)throw new Error('Live-Checkout gesperrt');
-      if(session?.status==='open'&&session.metadata?.customerType===customerType&&session.metadata?.earlyStartRequest===String(earlyStartNeeded))return res.json({url:session.url||`${baseUrl.origin}/success?session_id=${session.id}`,attempt:attempt.attempt_no});
-      if(session?.status==='open'){
-        await stripe.checkout.sessions.expire(session.id);
-        db.prepare("UPDATE payment_attempts SET status='expired',updated_at=? WHERE id=?").run(Date.now(),attempt.id);
-        attempt=null;
-      }
-      if(session?.status==='expired')db.prepare("UPDATE payment_attempts SET status='expired',updated_at=? WHERE id=?").run(Date.now(),attempt.id);
-      else if(session?.status==='complete'&&session.payment_status!=='paid')return fail(res,409,'Die Zahlung wird noch verarbeitet. Bitte aktualisiere die Seite in KÃ¼rze.');
-      else if(session?.payment_status==='paid')return fail(res,409,'Die Zahlung ist bereits eingegangen. Bitte lade dein Album neu.');
-      if(session?.status==='complete')db.prepare("UPDATE payment_attempts SET status='failed',updated_at=? WHERE id=?").run(Date.now(),attempt.id);
-      if(session?.status==='expired'||session?.status==='complete')attempt=null;
-    }
-    if(!attempt||!['open','creating'].includes(attempt.status)){
-      const attemptNo=Number(db.prepare('SELECT COALESCE(MAX(attempt_no),0)+1 n FROM payment_attempts WHERE payment_id=?').get(payment.id).n);
-      const id=crypto.randomUUID(),placeholder=`creating_${id}`;
-      db.prepare("INSERT INTO payment_attempts (id,payment_id,stripe_session_id,attempt_no,status,created_at,updated_at) VALUES (?,?,?,?, 'creating',?,?)").run(id,payment.id,placeholder,attemptNo,Date.now(),Date.now());
-      attempt=db.prepare('SELECT * FROM payment_attempts WHERE id=?').get(id);
-    }
-    const taxEnabled=String(cfg.STRIPE_TAX_ENABLED||'0')==='1';
-    const priceData={currency:'eur',unit_amount:payment.amount_cents,tax_behavior:'inclusive',product_data:{name:PLANS[e.plan].label}};
-    if(taxEnabled&&cfg.STRIPE_PRODUCT_TAX_CODE)priceData.product_data.tax_code=cfg.STRIPE_PRODUCT_TAX_CODE;
-    const params={
-      mode:'payment',
-      locale:'de',
-      submit_type:'pay',
-      payment_method_types:['card'],
-      customer_email:e.email,
-      customer_creation:'always',
-      line_items:[{price_data:priceData,quantity:1}],
-      custom_text:{submit:{message:'Einmalig 49,90 â‚¬ inkl. 19 % USt. pro Veranstaltung. Bis zu 25 GB Fotos; Upload, Ansicht und Download fÃ¼r 90 Tage ab Veranstaltungsdatum. Anbieter: Matthias Wendland Fotografie (Einzelunternehmen), GÃ¼tersloh.'}},
-      metadata:{eventId:e.id,paymentId:payment.id,attemptId:attempt.id,customerType,earlyStartRequest:String(earlyStartNeeded),earlyStartAcknowledged:String(earlyStartNeeded),termsAccepted:'true',termsVersion:TERMS_VERSION},
-      success_url:`${baseUrl.origin}/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url:`${baseUrl.origin}/dashboard`
-    };
-    if(taxEnabled){
-      params.automatic_tax={enabled:true};
-      params.billing_address_collection='required';
-      params.tax_id_collection={enabled:true};
-      params.name_collection={individual:{enabled:true},business:{enabled:true,optional:true}};
-      params.invoice_creation={enabled:true};
-    }
-    try{session=await stripe.checkout.sessions.create(params,{idempotencyKey:`finalsnap-checkout-${attempt.id}`});}
-    catch(error){console.error('Stripe-Testcheckout fehlgeschlagen:',error.type||error.code||'Stripe-Fehler');return fail(res,502,'Der Test-Checkout konnte gerade nicht geÃ¶ffnet werden. Es wurde keine Zahlung bestÃ¤tigt. Bitte versuche es erneut.');}
-    if(session.livemode!==false){console.error('Checkout mit Live-Modus abgewiesen.');return fail(res,503,'Der Checkout wurde aus SicherheitsgrÃ¼nden blockiert. FinalSnap akzeptiert derzeit nur Stripe-Testzahlungen.');}
-    const now=Date.now();
-    db.transaction(()=>{
-      db.prepare('UPDATE payments SET customer_type=?,early_start_requested_at=?,early_start_acknowledged_at=?,terms_accepted_at=?,terms_version=? WHERE id=?').run(customerType,earlyStartRequestedAt,earlyStartAcknowledgedAt,now,TERMS_VERSION,payment.id);
-      db.prepare("UPDATE payment_attempts SET stripe_session_id=?,status='open',updated_at=? WHERE id=?").run(session.id,now,attempt.id);
-      db.prepare('UPDATE payments SET stripe_session_id=? WHERE id=?').run(session.id,payment.id);
-      db.prepare('UPDATE events SET stripe_session_id=? WHERE id=?').run(session.id,e.id);
-    })();
-    res.json({url:session.url||`${baseUrl.origin}/success?session_id=${session.id}`,attempt:attempt.attempt_no});
-  }));
-  app.get('/api/checkout/:sessionId',loginRequired,(req,res)=>{
-    const e=db.prepare('SELECT e.* FROM events e JOIN payments p ON p.event_id=e.id LEFT JOIN payment_attempts a ON a.payment_id=p.id WHERE e.stripe_session_id=? OR p.stripe_session_id=? OR a.stripe_session_id=? LIMIT 1').get(req.params.sessionId,req.params.sessionId,req.params.sessionId);
-    if(!own(req,e))return fail(res,404,'Bestellung nicht gefunden.');
-    const payment=db.prepare('SELECT * FROM payments WHERE event_id=?').get(e.id);
-    const attempt=db.prepare('SELECT status FROM payment_attempts WHERE stripe_session_id=?').get(req.params.sessionId);
-    const status=['refunded','disputed_lost'].includes(payment?.status)?'refunded':payment?.status==='disputed'?'disputed':['expired','failed'].includes(attempt?.status)?'retry_available':payment?.status==='paid'?'paid':e.status;
-    res.json({eventId:e.id,status,retryAvailable:status==='retry_available',expiresAt:e.event_date?retentionUntil(e):e.expires_at});
-  });
-  function access(req,res,next) {
-    const e=lookup(req.params.eventId);
-    if(!readable(e)) return fail(res,402,'Album und Downloadzeitraum sind abgelaufen.');
-    if(!own(req,e)) {
-      const token=req.query.token || req.headers['x-event-token'];
-      if(typeof token!=='string' || !e.guest_token || Buffer.byteLength(token)!==Buffer.byteLength(e.guest_token) || !crypto.timingSafeEqual(Buffer.from(token),Buffer.from(e.guest_token))) return fail(res,403,'GÃ¼ltiger Veranstaltungslink erforderlich.');
-      const cookieName=`finalsnap_guest_${e.id}`;
-      const escapedName=cookieName.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
-      const match=new RegExp(`(?:^|;\\s*)${escapedName}=([a-f0-9]{64})(?:;|$)`).exec(req.headers.cookie||'');
-      let guestToken=match?.[1];
-      if(!guestToken) {
-        guestToken=random();
-        res.cookie(cookieName,guestToken,{httpOnly:true,secure:baseUrl.protocol==='https:',sameSite:'lax',maxAge:Math.max(0,Math.min(500*86400000,retentionUntil(e)-Date.now())),path:'/'});
-      }
-      req.guestTokenHash=hash(guestToken);
-    }
-    req.event=e; next();
-  }
-  app.get('/api/event/:eventId/design',loginRequired,owner,(req,res)=>{
-    if(!readable(req.event))return fail(res,402,'FÃ¼r dieses Event ist noch kein GÃ¤stezugang verfÃ¼gbar.');
-    res.json({event:{id:req.event.id,title:req.event.title,eventDate:req.event.event_date},design:publicDesign(req.event)});
-  });
-  app.patch('/api/event/:eventId/design',loginRequired,owner,(req,res)=>{
-    if(!readable(req.event))return fail(res,402,'FÃ¼r dieses Event ist noch kein GÃ¤stezugang verfÃ¼gbar.');
-    const value=req.body?.design;
-    if(!value||typeof value!=='object'||Array.isArray(value))return fail(res,400,'Bitte ein gÃ¼ltiges Design senden.');
-    const title=String(value.title||'').trim();
-    const occasion=String(value.occasion||'');
-    const theme=String(value.theme||'');
-    const accent=String(value.accent||'');
-    const font=String(value.font||'');
-    if(!title||title.length>80||!['wedding','birthday','summer','company','jubilee','graduation','other'].includes(occasion)||!['afterglow','midnight','garden'].includes(theme)||!/^#[0-9a-f]{6}$/i.test(accent)||!['classic','palatino','modern','verdana','relaxed','typewriter'].includes(font))return fail(res,400,'Bitte prÃ¼fe Titel, Anlass, Vorlage, Farbe und Schrift.');
-    const design={...readDesign(req.event),title,occasion,theme,accent,font};
-    db.prepare('UPDATE events SET design_json=? WHERE id=?').run(JSON.stringify(design),req.event.id);
-    res.json({success:true,design:publicDesign(lookup(req.event.id))});
-  });
-  app.patch('/api/event/:eventId',loginRequired,owner,(req,res)=>{
-    const updates=[];
-    if(req.body.eventDate!==undefined) {
-      if(startAt(req.event)<=Date.now())return fail(res,409,'Das Veranstaltungsdatum kann nach Beginn der Sammlung nicht mehr geÃ¤ndert werden.');
-      if(!validEventDate(req.body.eventDate))return fail(res,400,'Bitte ein gÃ¼ltiges Veranstaltungsdatum innerhalb der nÃ¤chsten 24 Monate angeben.');
-      updates.push(['event_date',req.body.eventDate]);updates.push(['expires_at',eventDeadline(req.body.eventDate)]);
-    }
-    if(typeof req.body.moderation==='boolean')updates.push(['moderation',req.body.moderation?1:0]);
-    if(typeof req.body.guestbookModeration==='boolean')updates.push(['guestbook_moderation',req.body.guestbookModeration?1:0]);
-    if(!updates.length)return fail(res,400,'Mindestens eine gÃ¼ltige Freigabeeinstellung ist erforderlich.');
-    for(const [column,value] of updates)db.prepare(`UPDATE events SET ${column}=? WHERE id=?`).run(value,req.event.id);
-    res.json({success:true});
-  });
-  app.post('/api/event/:eventId/rotate-token',loginRequired,owner,(req,res)=>{db.prepare('UPDATE events SET guest_token=? WHERE id=?').run(random(),req.event.id);res.json({success:true});});
-  app.get('/api/event/:eventId/qr',loginRequired,owner,wrap(async(req,res)=>{
-    if(!readable(req.event)) return fail(res,402,'Album und Downloadzeitraum sind abgelaufen.');
-    const url=`${baseUrl.origin}/event/${req.event.id}?token=${req.event.guest_token}`;
-    res.type('png').attachment(`${req.event.id}-qr.png`).send(await QRCode.toBuffer(url,{width:1200,margin:4,errorCorrectionLevel:'M'}));
-  }));
-  // Disk staging bounds RAM usage. Re-encoding validates content and strips EXIF/GPS.
-  const temp=path.join(root,'.tmp');fs.mkdirSync(temp,{recursive:true});
-  const upload=multer({dest:temp,limits:{fileSize:MAX_UPLOAD_FILE_BYTES,files:10,fields:0,parts:10}}).array('photos',10);
-  const designCoverUpload=multer({dest:temp,limits:{fileSize:8*1024*1024,files:1,fields:0,parts:1}}).single('cover');
-  app.get('/api/event/:eventId/design-cover',access,wrap(async(req,res)=>{
-    const filename=readDesign(req.event).coverFilename;
-    if(typeof filename!=='string'||!/^design-[a-z0-9-]+\.jpg$/.test(filename))return fail(res,404,'Kein Titelmotiv vorhanden.');
-    res.type('jpeg').set('Cache-Control','private, no-store');
-    if(photoStorage.mode==='local')return res.sendFile(path.join(root,req.event.id,filename));
-    const stream=await photoStorage.getStream(req.event.id,filename);
-    stream.on('error',()=>res.destroy());stream.pipe(res);
-  }));
-  app.post('/api/event/:eventId/design-cover',loginRequired,owner,uploadLimit,(req,res,next)=>designCoverUpload(req,res,err=>err?next(err):next()),wrap(async(req,res)=>{
-    if(!readable(req.event))return fail(res,402,'FÃ¼r dieses Event ist noch kein GÃ¤stezugang verfÃ¼gbar.');
-    if(!req.file)return fail(res,400,'Bitte wÃ¤hle ein Titelmotiv aus.');
-    const processed=path.join(temp,`${random()}.jpg`);
-    const filename=`design-${crypto.randomUUID()}.jpg`;
-    let stored=false;
-    try {
-      await sharp(req.file.path).rotate().resize(2000,2000,{fit:'inside',withoutEnlargement:true}).jpeg({quality:84,mozjpeg:true}).toFile(processed);
-      if(photoStorage.mode==='local') {
-        const eventDirectory=path.join(root,req.event.id);
-        await fs.promises.mkdir(eventDirectory,{recursive:true});
-        await fs.promises.copyFile(processed,path.join(eventDirectory,filename));
-      } else await photoStorage.put(req.event.id,filename,processed);
-      stored=true;
-      const previous=readDesign(req.event).coverFilename;
-      const next={...readDesign(req.event),coverFilename:filename};
-      db.prepare('UPDATE events SET design_json=? WHERE id=?').run(JSON.stringify(next),req.event.id);
-      if(typeof previous==='string'&&/^design-[a-z0-9-]+\.jpg$/.test(previous)){await photoStorage.deletePhoto(req.event.id,previous);await backupService.deletePhoto(req.event.id,previous);}
-      res.json({success:true,design:publicDesign(lookup(req.event.id))});
-    } catch(error) {
-      if(stored)try{await photoStorage.deletePhoto(req.event.id,filename);await backupService.deletePhoto(req.event.id,filename);}catch(cleanupError){console.error('Designmotiv konnte nicht aufgerÃ¤umt werden:',cleanupError.message);}
-      throw error;
-    } finally {
-      fs.rmSync(req.file.path,{force:true});
-      fs.rmSync(processed,{force:true});
-    }
-  }));
-  const busy=new Set();
-  let remoteStorageReservedBytes=0;
-  app.post('/api/event/:eventId/upload',uploadLimit,access,(req,res,next)=>{
-    if(req.event.owner_id && deletingUsers.has(req.event.owner_id)) return fail(res,409,'Das Konto wird gerade gelÃ¶scht. Uploads sind gesperrt.');
-    if(!active(req.event)) return fail(res,402,'Der Albumzeitraum ist beendet. Fotos kÃ¶nnen noch wÃ¤hrend der Downloadphase angesehen und heruntergeladen werden.');
-    if(busy.has(req.event.id)) return fail(res,429,'Upload lÃ¤uft bereits. Bitte kurz warten.');
-    const capacity=uploadCapacity.acquire();
-    if(!capacity.ok){
-      if(capacity.reason==='concurrency')res.set('Retry-After','60');
-      return fail(res,capacity.reason==='disk'?503:429,capacity.reason==='disk'?'Der temporÃ¤re Uploadspeicher ist gerade stark belegt. Bitte in einigen Minuten erneut versuchen.':'Der Fotospeicher verarbeitet gerade andere Uploads. Bitte in einer Minute erneut versuchen.');
-    }
-    busy.add(req.event.id);
-    upload(req,res,async err=>{
-      const written=[];
-      try {
-        if(err) throw err;
-        const disk=fs.statfsSync(root);if(Number(disk.bavail)*Number(disk.bsize)<100*1024**2)throw new Error('Fotospeicher vorÃ¼bergehend ausgelastet. Bitte den Veranstalter informieren.');
-        if(!req.files?.length) return fail(res,400,'Keine Fotos empfangen.');
-        const dir=photoStorage.mode==='local'?path.join(root,req.event.id):temp;if(photoStorage.mode==='local')fs.mkdirSync(dir,{recursive:true});
-        const total=db.prepare('SELECT COUNT(*) count, COALESCE(SUM(bytes),0) bytes FROM photos WHERE event_id=?').get(req.event.id);
-        const photoLimit=eventPhotoLimit(req.event),storageLimit=eventStorageLimit(req.event,cfg);
-        if(photoLimit!==null&&total.count+req.files.length>photoLimit) throw new Error('Die 25 kostenlosen Testfotos sind genutzt. Nach bestÃ¤tigter Buchung gilt das Eventpaket ab dem Veranstaltungsdatum.');
-        let bytes=total.bytes;
-        for(const file of req.files) {
-          const image=sharp(file.path,{limitInputPixels:40000000,animated:false});
-          const meta=await image.metadata();
-          if(!['jpeg','png','webp','heif'].includes(meta.format)) throw new Error('Nur JPEG, PNG, WebP und unterstÃ¼tzte HEIF-Bilder erlaubt.');
-          const id=crypto.randomUUID(), filename=`${id}.jpg`, dest=path.join(dir,filename);
-          written.push({id,filename,dest});
-          await image.rotate().resize({width:2560,height:2560,fit:'inside',withoutEnlargement:true}).jpeg({quality:82,mozjpeg:true}).toFile(dest);
-          const size=fs.statSync(dest).size;if(size>MAX_UPLOAD_FILE_BYTES)throw new Error('Dieses Foto ist nach der Verarbeitung zu groÃŸ. Bitte eine kleinere Datei hochladen.');bytes+=size;written[written.length-1].bytes=size;
-          if(bytes>storageLimit) throw new Error('Der Fotospeicher dieses Albums ist ausgeschÃ¶pft. Bitte den Veranstalter informieren.');
-        }
-        if(photoStorage.mode==='s3') {
-          const usedBytes=Number(db.prepare('SELECT COALESCE(SUM(bytes),0) bytes FROM photos').get().bytes);
-          const incomingBytes=written.reduce((sum,file)=>sum+file.bytes,0);
-          if(usedBytes+remoteStorageReservedBytes+incomingBytes>storageLimit) throw new Error('Der gemeinsame Fotospeicher ist ausgeschÃ¶pft. Bitte den Veranstalter informieren.');
-          remoteStorageReservedBytes+=incomingBytes;
-          try {for(const file of written) await photoStorage.put(req.event.id,file.filename,file.dest);}
-          finally {remoteStorageReservedBytes-=incomingBytes;}
-        }
-        // Recheck expiry after processing and before publication.
-        if(!active(lookup(req.event.id))) throw new Error('Event inzwischen abgelaufen.');
-        db.transaction(()=>{for(const f of written) db.prepare('INSERT INTO photos (id,event_id,filename,bytes,approved,created_at,uploader_token_hash) VALUES (?,?,?,?,?,?,?)').run(f.id,req.event.id,f.filename,f.bytes,req.event.moderation?0:1,Date.now(),req.guestTokenHash||null);})();
-        db.prepare('UPDATE events SET upload_successes=upload_successes+1 WHERE id=?').run(req.event.id);
-        res.json({success:true,count:written.length,pending:!!req.event.moderation});
-      } catch(error) {db.prepare('UPDATE events SET upload_failures=upload_failures+1 WHERE id=?').run(req.event.id);for(const f of written){try{if(photoStorage.mode==='s3'){await photoStorage.deletePhoto(req.event.id,f.filename);await backupService.deletePhoto(req.event.id,f.filename);}else fs.rmSync(f.dest,{force:true});}catch(cleanupError){console.error('Upload-AufrÃ¤umen fehlgeschlagen:',cleanupError.message);}}if(error.code==='PHOTO_STORAGE_UNAVAILABLE')console.error('Hetzner Object Storage:',error.cause?.message||error.message);fail(res,error.code==='PHOTO_STORAGE_UNAVAILABLE'?503:400,error.message);}
-      finally {for(const f of req.files||[]) fs.rmSync(f.path,{force:true});if(photoStorage.mode==='s3')for(const f of written)fs.rmSync(f.dest,{force:true});busy.delete(req.event.id);capacity.release();}
-    });
-  });
-  function photoUrl(req,p) {return `/uploads/${req.event.id}/${p.filename}${own(req,req.event)?'':`?token=${req.event.guest_token}`}`;}
-  app.get('/api/event/:eventId/info',access,(req,res)=>{
-    const canManage=own(req,req.event);
-    const photoCount=canManage
-      ? db.prepare('SELECT COUNT(*) count FROM photos WHERE event_id=?').get(req.event.id).count
-      : db.prepare('SELECT COUNT(*) count FROM photos WHERE event_id=? AND uploader_token_hash=?').get(req.event.id,req.guestTokenHash).count;
-    res.json({title:req.event.title,eventDate:req.event.event_date,startsAt:startAt(req.event),expiresAt:req.event.event_date?retentionUntil(req.event):req.event.expires_at,retentionUntil:retentionUntil(req.event),readOnly:!active(req.event),moderation:!!req.event.moderation,guestbookModeration:!!req.event.guestbook_moderation,trial:req.event.status==='trial',preEventTest:req.event.status==='paid'&&startAt(req.event)>Date.now(),testMode:testMode(req.event),photoCount,photoLimit:eventPhotoLimit(req.event,cfg),storageBytes:Number(db.prepare('SELECT COALESCE(SUM(bytes),0) bytes FROM photos WHERE event_id=?').get(req.event.id).bytes),storageLimitBytes:eventStorageLimit(req.event,cfg),pilot:req.event.status==='pilot',canManage,design:publicDesign(req.event)});
-  });
-  app.get('/api/event/:eventId/guestbook',access,(req,res)=>{
-    const entries=own(req,req.event)
-      ? db.prepare('SELECT id,guest_name name,message,approved,created_at createdAt FROM guestbook_entries WHERE event_id=? ORDER BY created_at DESC LIMIT 200').all(req.event.id)
-      : db.prepare('SELECT id,guest_name name,message,approved,created_at createdAt FROM guestbook_entries WHERE event_id=? AND approved=1 ORDER BY created_at DESC LIMIT 200').all(req.event.id);
-    res.json({entries,canManage:own(req,req.event),moderation:!!req.event.guestbook_moderation});
-  });
-  app.post('/api/event/:eventId/guestbook',guestbookLimit,access,(req,res)=>{
-    if(!active(req.event))return fail(res,402,'Das Album ist in der Downloadphase. Neue GÃ¤stebucheintrÃ¤ge sind geschlossen.');
-    const name=String(req.body.name||'').trim(),message=String(req.body.message||'').trim();
-    if(name.length>40||!message||message.length>500)return fail(res,400,'Bitte einen Namen mit hÃ¶chstens 40 und eine Nachricht mit hÃ¶chstens 500 Zeichen eingeben.');
-    if(db.prepare('SELECT COUNT(*) count FROM guestbook_entries WHERE event_id=?').get(req.event.id).count>=500)return fail(res,429,'Das GÃ¤stebuch ist voll. Bitte wende dich an den Veranstalter.');
-    const approved=req.event.guestbook_moderation?0:1,id=crypto.randomUUID();
-    db.prepare('INSERT INTO guestbook_entries (id,event_id,guest_name,message,approved,created_at) VALUES (?,?,?,?,?,?)').run(id,req.event.id,name,message,approved,Date.now());
-    res.status(201).json({success:true,pending:!approved});
-  });
-  app.patch('/api/event/:eventId/guestbook/:entryId',loginRequired,owner,(req,res)=>{
-    if(typeof req.body.approved!=='boolean')return fail(res,400,'Freigabe muss true oder false sein.');
-    const result=db.prepare('UPDATE guestbook_entries SET approved=? WHERE id=? AND event_id=?').run(req.body.approved?1:0,req.params.entryId,req.event.id);
-    if(!result.changes)return fail(res,404,'Eintrag nicht gefunden.');res.json({success:true});
-  });
-  app.delete('/api/event/:eventId/guestbook/:entryId',loginRequired,owner,(req,res)=>{
-    const result=db.prepare('DELETE FROM guestbook_entries WHERE id=? AND event_id=?').run(req.params.entryId,req.event.id);
-    if(!result.changes)return fail(res,404,'Eintrag nicht gefunden.');res.json({success:true});
-  });
-  app.get('/api/event/:eventId/photos',access,(req,res)=>{
-    const admin=own(req,req.event)&&req.query.manage==='1';
-    const photos=own(req,req.event)
-      ? db.prepare(`SELECT * FROM photos WHERE event_id=? ${admin?'':'AND approved=1'} ORDER BY created_at,id`).all(req.event.id)
-      : db.prepare('SELECT * FROM photos WHERE event_id=? AND approved=1 AND uploader_token_hash=? ORDER BY created_at,id').all(req.event.id,req.guestTokenHash);
-    res.json({photos:photos.map(p=>({id:p.id,url:photoUrl(req,p),timestamp:p.created_at,approved:!!p.approved})),serverTime:Date.now()});
-  });
-  app.get('/uploads/:eventId/:filename',access,wrap(async(req,res)=>{
-    const p=db.prepare('SELECT * FROM photos WHERE event_id=? AND filename=?').get(req.event.id,req.params.filename);
-    if(!p || (!p.approved && !own(req,req.event))) return fail(res,404,'Foto nicht gefunden.');
-    if(!own(req,req.event) && p.uploader_token_hash!==req.guestTokenHash) return fail(res,404,'Foto nicht gefunden.');
-    if(photoStorage.mode==='local') return res.sendFile(path.join(root,req.event.id,p.filename));
-    const stream=await photoStorage.getStream(req.event.id,p.filename);
-    res.type('jpeg');res.set('Cache-Control','private, no-store');stream.on('error',()=>res.destroy());stream.pipe(res);
-  }));
-  app.patch('/api/event/:eventId/photos/:photoId',loginRequired,owner,(req,res)=>{
-    if(typeof req.body.approved!=='boolean') return fail(res,400,'Freigabe muss true oder false sein.');
-    const result=db.prepare('UPDATE photos SET approved=? WHERE id=? AND event_id=?').run(req.body.approved?1:0,req.params.photoId,req.event.id);
-    if(!result.changes) return fail(res,404,'Foto nicht gefunden.');res.json({success:true});
-  });
-  app.delete('/api/event/:eventId/photos/:photoId',loginRequired,owner,wrap(async(req,res)=>{
-    const p=db.prepare('SELECT * FROM photos WHERE id=? AND event_id=?').get(req.params.photoId,req.event.id);
-    if(!p) return fail(res,404,'Foto nicht gefunden.');
-    await photoStorage.deletePhoto(req.event.id,p.filename);await backupService.deletePhoto(req.event.id,p.filename);db.prepare('DELETE FROM photos WHERE id=?').run(p.id);res.json({success:true});
-  }));
-  app.get('/api/event/:eventId/download',access,wrap(async(req,res)=>{
-    const photos=own(req,req.event)
-      ? db.prepare('SELECT * FROM photos WHERE event_id=?').all(req.event.id)
-      : db.prepare('SELECT * FROM photos WHERE event_id=? AND approved=1 AND uploader_token_hash=?').all(req.event.id,req.guestTokenHash);
-    if(!photos.length) return fail(res,404,'Keine Fotos vorhanden.');
-    res.attachment(`event-${req.event.id}-fotos.zip`);
-    const archive=new archiver.ZipArchive({zlib:{level:1}});
-    archive.on('error',()=>res.destroy());res.on('close',()=>archive.abort());archive.pipe(res);
-    for(const p of photos) {
-      if(photoStorage.mode==='local') archive.file(path.join(root,req.event.id,p.filename),{name:p.filename});
-      else archive.append(await photoStorage.getStream(req.event.id,p.filename),{name:p.filename});
-    }
-    archive.finalize();
-  }));
-  async function erase(e) {
-    if(busy.has(e.id)) return false;
-    // Legacy unowned events are never removed automatically: review/import first.
-    await photoStorage.deleteEvent(e.id);
-    await backupService.deleteEvent(e.id);
-    db.transaction(()=>{db.prepare('DELETE FROM photos WHERE event_id=?').run(e.id);db.prepare('DELETE FROM guestbook_entries WHERE event_id=?').run(e.id);db.prepare("UPDATE events SET status='expired', deleted_at=?, guest_token=NULL WHERE id=?").run(Date.now(),e.id);})();
-    return true;
-  }
-  app.delete('/api/event/:eventId',loginRequired,owner,wrap(async(req,res)=>{if(!await erase(req.event)) return fail(res,409,'Upload lÃ¤uft. Bitte erneut versuchen.');res.json({success:true});}));
-  app.delete('/api/auth/account',authLimit,loginRequired,wrap(async(req,res)=>{
-    const password=req.body.password;
-    if(req.body.confirm!=='KONTO LÃ–SCHEN') return fail(res,400,'Bitte die LÃ¶schung mit â€žKONTO LÃ–SCHENâ€œ bestÃ¤tigen.');
-    if(typeof password!=='string'||password.length>128) return fail(res,400,'Bitte dein Passwort eingeben.');
-    const user=db.prepare('SELECT * FROM users WHERE id=?').get(req.user.id);
-    const [salt,stored]=(user?.password_hash||`${'0'.repeat(64)}:${'0'.repeat(128)}`).split(':');
-    const derived=await scrypt(password,salt,64);
-    if(!user||!crypto.timingSafeEqual(Buffer.from(stored,'hex'),derived)) return fail(res,401,'Das Passwort stimmt nicht.');
-    const events=db.prepare('SELECT * FROM events WHERE owner_id=?').all(req.user.id);
-    if(events.some(event=>busy.has(event.id))) return fail(res,409,'FÃ¼r eine Veranstaltung lÃ¤uft gerade ein Foto-Upload. Bitte warte kurz und versuche es erneut.');
-    deletingUsers.add(req.user.id);
-    try {
-      // Prevent a still-open checkout from charging after the owner has deleted the albums.
-      for(const event of events) {
-        const payment=db.prepare('SELECT * FROM payments WHERE event_id=?').get(event.id);
-        if(!payment?.stripe_session_id||['paid','partially_refunded','refunded','disputed','disputed_lost'].includes(payment.status)) continue;
-        if(!stripe) return fail(res,503,'Ein offener Zahlungs-Checkout kann gerade nicht geprÃ¼ft werden. Bitte spÃ¤ter erneut versuchen.');
-        const session=await stripe.checkout.sessions.retrieve(payment.stripe_session_id);
-        if(session.status==='open') await stripe.checkout.sessions.expire(session.id);
-        if(session.payment_status==='paid'&&payment.status!=='paid') db.prepare("UPDATE payments SET status='paid' WHERE id=?").run(payment.id);
-      }
-      for(const event of events) if(!await erase(event)) return fail(res,409,'FÃ¼r eine Veranstaltung lÃ¤uft gerade ein Foto-Upload. Bitte versuche es erneut.');
-      const retainedPayments=events.filter(event=>db.prepare("SELECT 1 FROM payments WHERE event_id=? AND status IN ('paid','partially_refunded','refunded','disputed','disputed_lost')").get(event.id)).length;
-      db.transaction(()=>{
-        const updatePaid=db.prepare("UPDATE events SET owner_id=NULL,email=NULL,title='GelÃ¶schtes Album',event_date=NULL,design_json='{}',guest_token=NULL,stripe_session_id=NULL,status='expired',deleted_at=?,upload_successes=0,upload_failures=0 WHERE id=?");
-        const deletePayments=db.prepare("DELETE FROM payments WHERE event_id=? AND status NOT IN ('paid','partially_refunded','refunded','disputed','disputed_lost')");
-        const deleteUnpaid=db.prepare('DELETE FROM events WHERE id=?');
-        for(const event of events) {
-          deletePayments.run(event.id);
-          if(db.prepare("SELECT 1 FROM payments WHERE event_id=? AND status IN ('paid','partially_refunded','refunded','disputed','disputed_lost')").get(event.id)) updatePaid.run(Date.now(),event.id);
-          else deleteUnpaid.run(event.id);
-        }
-        db.prepare('DELETE FROM sessions WHERE user_id=?').run(req.user.id);
-        db.prepare('DELETE FROM password_resets WHERE user_id=?').run(req.user.id);
-        db.prepare('DELETE FROM email_verifications WHERE user_id=?').run(req.user.id);
-        db.prepare('DELETE FROM users WHERE id=?').run(req.user.id);
-      })();
-      res.clearCookie('event_session',{path:'/'});
-      res.json({success:true,deletedEvents:events.length,retainedPayments});
-    } finally {deletingUsers.delete(req.user.id);}
-  }));
-  function cleanup() {
-    const expired=db.prepare("SELECT * FROM events WHERE owner_id IS NOT NULL AND deleted_at IS NULL AND status IN ('paid','trial','pilot','refunded') ").all().filter(e=>retentionUntil(e)<=Date.now());
-    const pruneRecords=()=>{
-      db.prepare('DELETE FROM sessions WHERE expires_at<=?').run(Date.now());
-      db.prepare('DELETE FROM email_verifications WHERE expires_at<=?').run(Date.now());
-      db.prepare('DELETE FROM password_resets WHERE expires_at<=?').run(Date.now());
-      for(const entry of fs.readdirSync(temp)) {const file=path.join(temp,entry);if(fs.statSync(file).mtimeMs<Date.now()-86400000) fs.rmSync(file,{force:true});}
-    };
-    if(photoStorage.mode==='local') {for(const e of expired) {if(!busy.has(e.id)){fs.rmSync(path.join(root,e.id),{recursive:true,force:true});db.transaction(()=>{db.prepare('DELETE FROM photos WHERE event_id=?').run(e.id);db.prepare('DELETE FROM guestbook_entries WHERE event_id=?').run(e.id);db.prepare("UPDATE events SET status='expired', deleted_at=?, guest_token=NULL WHERE id=?").run(Date.now(),e.id);})();}}pruneRecords();return;}
-    return (async()=>{for(const e of expired) await erase(e);pruneRecords();})();
-  }
-  const pub=path.join(__dirname,'public');
-  app.get('/',(req,res)=>res.sendFile(path.join(pub,'landing.html')));
-  app.get(['/forgot-password','/reset-password'],(req,res)=>res.sendFile(path.join(pub,'password-recovery.html')));
-  app.get('/verify-email',(req,res)=>res.sendFile(path.join(pub,'verify-email.html')));
-  app.get('/impressum',(req,res)=>res.sendFile(path.join(pub,'impressum.html')));
-  app.get('/datenschutz',(req,res)=>res.sendFile(path.join(pub,'datenschutz.html')));
-  app.get('/widerruf',(req,res)=>res.sendFile(path.join(pub,'widerruf.html')));
-  app.get('/bedingungen',(req,res)=>res.sendFile(path.join(pub,'bedingungen.html')));
-  app.get('/register',(req,res)=>req.user?res.redirect(['event','1m','3m','6m'].includes(req.query.plan)?`/dashboard?plan=${encodeURIComponent(req.query.plan)}`:'/dashboard'):res.sendFile(path.join(pub,'login.html')));
-  app.get('/login',(req,res)=>res.sendFile(path.join(pub,'login.html')));
-  app.get('/dashboard',(req,res)=>req.user?res.sendFile(path.join(pub,'dashboard.html')):res.redirect('/login'));
-  app.get('/success',(req,res)=>req.user?res.sendFile(path.join(pub,'success.html')):res.redirect('/login'));
-  app.locals.paymentAlertTimer=setInterval(()=>{flushPaymentAlerts().catch(error=>console.error('Zahlungsalarme konnten nicht verarbeitet werden:',error.message));flushContractConfirmations().catch(error=>console.error('VertragsbestÃ¤tigungen konnten nicht verarbeitet werden:',error.message));},60000);app.locals.paymentAlertTimer.unref();
-  app.get('/event/:eventId/admin',loginRequired,owner,(req,res)=>res.redirect('/dashboard'));
-  app.get('/event/:eventId/design',loginRequired,owner,(req,res)=>{
-    if(!readable(req.event))return res.redirect(`/dashboard?event=${encodeURIComponent(req.event.id)}`);
-    // The editor's print window builds a self-contained page with inline layout styles.
-    // Allow those styles only on this authenticated editor page; other pages keep Helmet's policy.
-    res.set('Content-Security-Policy',[
-      "default-src 'self'",
-      "base-uri 'self'",
-      "font-src 'self' https: data:",
-      "form-action 'self'",
-      "frame-ancestors 'self'",
-      "img-src 'self' data: blob:",
-      "object-src 'none'",
-      "script-src 'self'",
-      "script-src-attr 'none'",
-      "style-src 'self' 'unsafe-inline'",
-      ...(baseUrl.protocol==='https:'?['upgrade-insecure-requests']:[])
-    ].join('; '));
-    res.sendFile(path.join(pub,'design-editor.html'));
-  });
-  for(const [suffix,file] of [['','gallery.html'],['/upload','upload.html'],['/gallery','gallery.html'],['/slideshow','slideshow.html'],['/games','games.html'],['/guestbook','guestbook.html']]) app.get(`/event/:eventId${suffix}`,access,(req,res)=>res.sendFile(path.join(pub,file)));
-  // Only intended public assets; source code and generic HTML routes cannot bypass guards.
-  for(const file of ['style.css','design-editor.css','design-editor.js','upload.js','slideshow.js','guest-access.js','account.js','verify-email.js','password-recovery.js','games.js','guestbook.js','payments-admin.js','landing.js','success.js','gallery-init.js','admin.js','johanna-bastian.png','photographer.webp','event-wedding.jpg','event-birthday.jpg','event-summer.jpg','event-company.jpg']) app.get(`/${file}`,(req,res)=>res.sendFile(path.join(pub,file)));
-  // Liveness stays cheap for the host's restart check. Readiness checks critical dependencies.
-  app.get('/health',(req,res)=>res.json({ok:true}));
-  app.get('/ready',async(req,res)=>{
-    try {
-      db.prepare('SELECT 1').get();
-      const disk=fs.statfsSync(root),freeBytes=Number(disk.bavail)*Number(disk.bsize);
-      if(freeBytes<100*1024**2)throw new Error('Upload volume below the 100 MiB operating reserve.');
-      await photoStorage.check();
-      res.json({ok:true});
-    } catch(error) {
-      console.error('Readiness check failed:',error.message);
-      res.status(503).json({ok:false});
-    }
-  });
-  app.use((req,res)=>fail(res,404,'Nicht gefunden.'));
-  app.use((err,req,res,next)=>{console.error(err.message);if(!res.headersSent) fail(res,500,'Interner Fehler.');});
-  app.locals.db=db;app.locals.cleanup=cleanup;app.locals.fulfill=fulfill;app.locals.flushPaymentAlerts=flushPaymentAlerts;app.locals.flushContractConfirmations=flushContractConfirmations;app.locals.photoStorage=photoStorage;app.locals.backupService=backupService;app.locals.operationsMonitor=operationsMonitor;
-  return app;
-}
-if(require.main===module) {
-  const app=createApp();
-  app.locals.backupService.start();
-  app.locals.operationsMonitor.start();
-  Promise.resolve(app.locals.cleanup()).catch(err=>console.error('LÃ¶schung fehlgeschlagen:',err.message));
-  const disk=fs.statfsSync(path.resolve(process.env.UPLOAD_DIR || path.join(__dirname,'uploads')));
-  console.info(app.locals.photoStorage.mode==='s3'?'TemporÃ¤rer Upload-Speicher verfÃ¼gbar (MiB):':'Fotospeicher verfÃ¼gbar (MiB):',Math.floor(Number(disk.bavail)*Number(disk.bsize)/1024**2));
-  const cleanupTimer=setInterval(()=>{try{Promise.resolve(app.locals.cleanup()).catch(err=>console.error('LÃ¶schung fehlgeschlagen:',err.message));}catch(err){console.error('LÃ¶schung fehlgeschlagen:',err.message);}},3600000);
-  cleanupTimer.unref();
-  const server=app.listen(process.env.PORT||3000,()=>console.log('Event-Foto-Plattform gestartet (Stripe-Testmodus).'));
-  let shuttingDown=false;
-  const shutdown=signal=>{
-    if(shuttingDown)return;
-    shuttingDown=true;
-    console.info(`${signal}: Beende laufende Anfragen.`);
-    clearInterval(cleanupTimer);
-    app.locals.backupService.stop();
-    app.locals.operationsMonitor.stop();
-    const timeout=setTimeout(()=>{
-      console.error('Geordnetes Herunterfahren dauerte zu lange; offene Verbindungen werden geschlossen.');
-      server.closeAllConnections?.();
-      try{app.locals.db.close();}catch{}
-      process.exit(1);
-    },25000);
-    timeout.unref();
-    server.close(()=>{
-      clearTimeout(timeout);
-      app.locals.db.close();
-      console.info('Server sauber beendet.');
-    });
-  };
-  process.once('SIGTERM',()=>shutdown('SIGTERM'));
-  process.once('SIGINT',()=>shutdown('SIGINT'));
-}
-module.exports={createApp,eventDeadline,retentionUntil};
+YªçŠx³¬uç%j·Â+ar‰ì¶ë•ë_¢ºÞjË"‚v›•ëÚ®&›•ëÛÛœÝ^™\ÜÈH™\]Z\™J	Ù^™\ÜÉÊNÂ˜ÛÛœÝ][\ˆH™\]Z\™J	Û][\‰ÊNÂ˜ÛÛœÝ[Y]H™\]Z\™J	Ú[Y]	ÊNÂ˜ÛÛœÝÈ˜]S[Z]HH™\]Z\™J	Ù^™\ÜË\˜]K[[Z]	ÊNÂ˜ÛÛœÝÝš\HH™\]Z\™J	ÜÝš\IÊNÂ˜ÛÛœÝÚ\œH™\]Z\™J	ÜÚ\œ	ÊNÂ˜ÛÛœÝTÛÙHH™\]Z\™J	Ü\˜ÛÙIÊNÂ˜ÛÛœÝ\˜Ú]™\ˆH™\]Z\™J	Ø\˜Ú]™\‰ÊNÂ˜ÛÛœÝÜž\ÈH™\]Z\™J	Û›ÙN˜Üž\ÉÊNÂ˜ÛÛœÝÈ›ÛZ\ÚYžHHH™\]Z\™J	Û›ÙN][	ÊNÂ˜ÛÛœÝœÈH™\]Z\™J	Û›ÙN™œÉÊNÂ˜ÛÛœÝ]H™\]Z\™J	Û›ÙNœ]	ÊNÂ˜ÛÛœÝÈÜ[‘]X˜\ÙHHH™\]Z\™J	Ë‹Ù‰ÊNÂ˜ÛÛœÝÈÜ™X]TÝÔÝÜ˜YÙHHH™\]Z\™J	Ë‹ÜÝË\ÝÜ˜YÙIÊNÂ˜ÛÛœÝÈÜ™X]P˜XÚÝ\Ù\šXÙHHH™\]Z\™J	Ë‹Ø˜XÚÝ\\Ù\šXÙIÊNÂ˜ÛÛœÝÈÜ™X]SÜ\˜][ÛœÓ[Ûš]ÜˆHH™\]Z\™J	Ë‹ÛÜ\˜][ÛœË[[Ûš]Ü‰ÊNÂ˜ÛÛœÝÈÜ™X]U\ØYØ\XÚ]KÚP‹ZP‹RS—ÕTÐQÑ”‘QWÐ–UTË\ØY\ÚÕØ\›š[™Õ™\ÚÛHH™\]Z\™J	Ë‹Ý\ØYXØ\XÚ]IÊNÂ˜ÛÛœÝØÜž\H›ÛZ\ÚYžJÜž\ËœØÜž\
+NÂ˜ÛÛœÝS”ÈHÈ]™[žÛX™[‰Ñš[˜[Û˜\›ÝØ[[IË[ÛÎŒË™][[Û‘^\ÎŽLšXÙPÙ[ÎNLK	Ì[IÎžÛX™[‰ÌH[Û˜]
+[
+IË[ÛÎŒKšXÙPÙ[ÎŒNLYØXÞNY_K	ÌÛIÎžÛX™[‰ÌÈ[Û˜]H
+[
+IË[ÛÎŒËšXÙPÙ[ÎŒŽLYØXÞNY_K	Í›IÎžÛX™[‰Íˆ[Û˜]H
+[
+IË[ÛÎ‹šXÙPÙ[ÎŒÎLYØXÞNY_K	ÌL›IÎžÛX™[‰ÌLˆ[Û˜]H
+[
+IË[ÛÎŒL‹šXÙPÙ[ÎNLYØXÞNY_HNÂ˜ÛÛœÝT“T×Õ‘T”ÒSÓˆH	ÌŒ‹LLKLL‰ÎÂ˜ÛÛœÝ‘US•SÓ—ÓTÈHL
+ŽÂ‹ËÈ]™[XY[™\È\ÙHØ[[™\ˆ^\È[ˆ]\›ÜKÐ™\›[‹[˜ÛY[™ÈÕÚ[™Ù\Ë‚™[˜Ý[Ûˆ]™[XY[™J]JHÂˆÛÛœÝ^O[™]È]J	Ù]_ULŽŒŒ˜
+NÂˆ^KœÙ]UÑ]J^K™Ù]UÑ]J
+JÎL
+NÂˆ™]\›ˆ™\›[“ZYšYÚ
+^KÒTÓÔÝš[™Ê
+KœÛXÙJL
+JNÂŸB™[˜Ý[Ûˆ™][[Û•[[
+JHÂˆYŠYOË™^\™\×Ø]
+\™]\›ˆ[ÂˆËÈ[™]YYØXÞH[[\ÈÙY\Z\ˆ^\Ý[™È^\žKÙÝÛ›ØYÛXÞK‚ˆ™]\›ˆK™]™[Ù]HÈX]›Z[ŠK™^\™\×Ø]]™[XY[™JK™]™[Ù]JJHˆK™^\™\×Ø]
+Ô‘US•SÓ—ÓTÎÂŸB˜ÛÛœÝTÕÔÕ×ÓSRUHNÂ˜ÛÛœÝTÕÔÕÔQÑWÐ–UTÈHL
+ŒL
+ŠŒŽÂ˜ÛÛœÝPVÕTÐQÑ’SWÐ–UTÈHŒ
+ŒL
+ŒLÂ˜ÛÛœÝ\ÚH˜[YHOˆÜž\Ë˜Ü™X]R\Ú
+	ÜÚLM‰ÊK\]J˜[YJK™YÙ\Ý
+	Ú^	ÊNÂ˜ÛÛœÝ˜[™ÛHH
+
+HOˆÜž\Ëœ˜[™ÛPž]\ÊÌŠKÔÝš[™Ê	Ú^	ÊNÂ˜ÛÛœÝ˜Z[H
+™\ËÝ]\Ë\œ›ÜŠHOˆ™\ËœÝ]\ÊÝ]\ÊKšœÛÛŠÙ\œ›ÜŸJNÂ˜ÛÛœÝÜ˜\H›ˆOˆ
+™\K™\Ë™^
+HOˆ›ÛZ\ÙKœ™\ÛÛ™J›Š™\K™\Ë™^
+JK˜Ø]Ú
+™^
+NÂ˜ÛÛœÝ™\›[”\ÈH™]È[‘]U[YQ›Ü›X]
+	Ù[‹QÐ‰ËÝ[YV›Û™N‰Ñ]\›ÜKÐ™\›[‰ËYX\Ž‰Û[Y\šXÉË[Û‰Ì‹YYÚ]	Ë^N‰Ì‹YYÚ]	ËÝ\Ž‰Ì‹YYÚ]	ËZ[]N‰Ì‹YYÚ]	ËÙXÛÛ™‰Ì‹YYÚ]	ËÝ\ÞXÛN‰ÚŒÉßJNÂ™[˜Ý[Ûˆ™\›[“ZYšYÚ
+]JHÂˆÛÛœÝX]ÚK×ŠÍJKJÌŸJKJÌŸJIË™^XÊÝš[™Ê]_	ÉÊJNÂˆYŠ[X]Ú
+\™]\›ˆ˜SŽÂˆÛÛœÝËYX\‹[Û^WO[X]Ú›X\
+[X™\ŠNÂˆÛÛœÝ\™Ù]Q]K•UÊYX\‹[ÛLK^JNÂˆ][œÝ[]\™Ù]Âˆ›ÜŠ]OLÚOÎÚJÊÊHÂˆÛÛœÝ\ÏSØš™XÝ™œ›ÛQ[šY\Ê™\›[”\Ë™›Ü›X]Ô\Ê™]È]J[œÝ[
+JK›X\
+\O–Ü\\K\˜[YWJJNÂˆÛÛœÝØØ[Q]K•UÊ[X™\Š\ËžYX\ŠK[X™\Š\Ë›[Û
+KLK[X™\Š\Ë™^JK[X™\Š\ËšÝ\ŠK[X™\Š\Ë›Z[]JK[X™\Š\ËœÙXÛÛ™
+JNÂˆ[œÝ[
+Ï]\™Ù][ØØ[ÂˆBˆ™]\›ˆ[œÝ[ÂŸB™[˜Ý[ÛˆY[ÛÕÑ]J]K[ÛÊHÂˆÛÛœÝÞYX\‹[Û^WOY]KœÜ]
+	ËIÊK›X\
+[X™\ŠKš\œÝ[™]È]J]K•UÊYX\‹[ÛLKJJNÂˆš\œÝœÙ]UÓ[Û
+š\œÝ™Ù]UÓ[Û
+
+JÛ[ÛÊNÂˆÛÛœÝ\Ý[™]È]J]K•UÊš\œÝ™Ù]UÑ[YX\Š
+Kš\œÝ™Ù]UÓ[Û
+
+JÌK
+JK™Ù]UÑ]J
+NÂˆš\œÝœÙ]UÑ]JX]›Z[Š^K\Ý
+JNÂˆ™]\›ˆš\œÝÒTÓÔÝš[™Ê
+KœÛXÙJL
+NÂŸB™[˜Ý[Ûˆ˜[Y]™[]J˜[YK›ÝÏQ]K››ÝÊ
+JHÂˆYŠK×—ÍKWÌŸKWÌŸIË\Ý
+Ýš[™Ê˜[Y_	ÉÊJHS[X™\‹š\Ñš[š]J™\›[“ZYšYÚ
+˜[YJJJ\™]\›ˆ˜[ÙNÂˆÛÛœÝÞYX\‹[Û^WO]˜[YKœÜ]
+	ËIÊK›X\
+[X™\ŠNÂˆYŠ™]È]J]K•UÊYX\‹[ÛLK^JJKÒTÓÔÝš[™Ê
+KœÛXÙJL
+HOO]˜[YJ\™]\›ˆ˜[ÙNÂˆÛÛœÝ\ÏSØš™XÝ™œ›ÛQ[šY\Ê™\›[”\Ë™›Ü›X]Ô\Ê™]È]J›ÝÊJK›X\
+\O–Ü\\K\˜[YWJJNÂˆÛÛœÝÙ^OX	Ü\ËžYX\ŸKIÜ\Ë›[ÛKIÜ\Ë™^_XÂˆ™]\›ˆ˜[YO]Ù^H	‰ˆ˜[YOXY[ÛÕÑ]JÙ^K
+NÂŸB˜ÛÛœÝÝ\]HHOˆOË™]™[Ù]HÈ™\›[“ZYšYÚ
+K™]™[Ù]JHˆ[X™\ŠOË˜Ü™X]YØ]
+NÂ˜ÛÛœÝ\Ý[ÙHHHOˆHYH	‰ˆ
+KœÝ]\ÏOOIÝšX[	È
+KœÝ]\ÏOOIÜZY	È	‰ˆÝ\]
+JO‘]K››ÝÊ
+JJNÂ˜ÛÛœÝ]™[ÝÜ˜YÙS[Z]H
+KÙ™ÊHOˆ\Ý[ÙJJOÓX]›Z[ŠTÕÔÕÔQÑWÐ–UTË[X™\ŠÙ™Ë“PVÑU‘S•Ð–UTßJŒL
+ŠŒÊJN“[X™\ŠÙ™Ë“PVÑU‘S•Ð–UTßJŒL
+ŠŒÊNÂ˜ÛÛœÝ]™[ÝÓ[Z]H
+KÙ™Ï^ßJHOˆ\Ý[ÙJJOÕTÕÔÕ×ÓSRU™OËœÝ]\ÏOOIÜ[Ý	ÏÓ[X™\ŠÙ™Ë“PVÑU‘S•ÔÕÔßŒ
+N›[Â˜ÛÛœÝXÝ]™HHHOˆH	‰ˆÉÜZY	Ë	ÝšX[	Ë	Ü[Ý	×Kš[˜ÛY\ÊKœÝ]\ÊH	‰ˆX]›Z[ŠK™^\™\×Ø]™][[Û•[[
+JJHˆ]K››ÝÊ
+H	‰ˆYK™[]YØ]Â˜ÛÛœÝ™XYX›HHHOˆH	‰ˆÉÜZY	Ë	ÝšX[	Ë	Ü[Ý	×Kš[˜ÛY\ÊKœÝ]\ÊH	‰ˆ™][[Û•[[
+JHˆ]K››ÝÊ
+H	‰ˆYK™[]YØ]Â™[˜Ý[ÛˆÜ™X]P\
+Ü[ÛœÈHßJHÂˆÛÛœÝÙ™ÈHË‹‹œ›ØÙ\ÜË™[‹‹‹›Ü[ÛœßNÂˆÛÛœÝXZ[\[Ü[ÛœË›XZ[\Ÿ™\]Z\™J	Ë‹ÛXZ[\‰ÊK˜Ü™X]SXZ[\ŠÙ™ÊNÂˆYˆ
+Ù™Ë”Õ’TWÔÑPÔ‘UÒÑVH	‰ˆXÙ™Ë”Õ’TWÔÑPÔ‘UÒÑVKœÝ\ÕÚ]
+	ÜÚ×Ý\ÝÉÊJH›ÝÈ™]È\œ›ÜŠ	Ô\ÙHH\›]X]\ÜØÚYpçÛXÚÝš\KU\ÝØÚ0ïÜÙ[‰ÊNÂˆÛÛœÝÛÛ™šYÝ\™Y˜\ÙHHÝš[™ÊÙ™ËTÑWÕT“Ù™Ë”‘S‘T—ÑVT“SÕT“	ÉÊKš[J
+NÂˆÛÛœÝ]›Ü›QÛXZ[ˆHÝš[™ÊÙ™Ë”ÓTS‘WÑÓPRSˆ	ÉÊKš[J
+Kœ™\XÙJ×šÏÎ—×ËÚK	ÉÊKœ™\XÙJ×ÊÉË	ÉÊNÂˆÛÛœÝ[œ™\ÛÛ™Y˜\ÙHH×	ÏÖÐKV˜K^—×VÐKV˜K^ŒNW×J—OËË\Ý
+ÛÛ™šYÝ\™Y˜\ÙJNÂˆÛÛœÝ˜\ÙHHÛÛ™šYÝ\™Y˜\ÙH	‰ˆ][œ™\ÛÛ™Y˜\ÙBˆÈÛÛ™šYÝ\™Y˜\ÙBˆˆ]›Ü›QÛXZ[ˆÈÎ‹ËÉÜ]›Ü›QÛXZ[ŸXˆ	Ú‹ËÛØØ[ÜÝŒÌ	ÎÂˆÛÛœÝ˜\ÙU\›H™]ÈT“
+˜\ÙJNÂˆYˆ
+˜\ÙU\›œ]˜[YHOOH	ËÉÈ˜\ÙU\›œÙX\˜Ú˜\ÙU\›š\Ú˜\ÙU\›\Ù\›˜[YHVÉÚ‰Ë	ÚÎ‰×Kš[˜ÛY\Ê˜\ÙU\›œ›ÝØÛÛ
+JH›ÝÈ™]È\œ›ÜŠ	ÐTÑWÕT“]\ÜÈZ[™H
+ÊKSÜšYÚ[ˆÙZ[‹‰ÊNÂˆYˆ
+Ù™Ë““ÑWÑS•ˆOOH	Ü›ÙXÝ[Û‰È	‰ˆ
+˜\ÙU\›œ›ÝØÛÛOOH	ÚÎ‰ÈXÙ™Ë‘—ÔUXÙ™Ë•TÐQÑTŠJH›ÝÈ™]È\œ›ÜŠ	ÒË—ÔU[™TÐQÑTˆÚ[™[HÜÝ[™È\™›Ü™\›XÚ‰ÊNÂˆÛÛœÝ›ÛÝH]œ™\ÛÛ™JÙ™Ë•TÐQÑTˆ]š›Ú[Š×Ù\›˜[YK	Ý\ØYÉÊJNÂˆœË›ZÙ\”Þ[˜Ê›ÛÝÜ™XÝ\œÚ]™NY_JNÂˆÛÛœÝÝÔÝÜ˜YÙHHÜ[ÛœËœÝÔÝÜ˜YÙHÜ™X]TÝÔÝÜ˜YÙJÙ™ÊNÂˆÛÛœÝÝÜ˜YÙS[Z]H[X™\ŠÙ™Ë”Ì×ÓPVÔÕÔQÑWÐ–UTÈL
+ˆL
+ŠˆÊNÂˆYˆ
+S[X™\‹š\ÔØY™R[YÙ\ŠÝÜ˜YÙS[Z]
+HÝÜ˜YÙS[Z]HL
+ˆL
+ŠˆŠH›ÝÈ™]È\œ›ÜŠ	ÔÌ×ÓPVÔÕÔQÑWÐ–UTÈ]\ÜÈÜ°í°çÙ\ˆ[ÈLZPˆÙZ[‹‰ÊNÂˆÛÛœÝˆHÜ[‘]X˜\ÙJÙ™Ë‘—ÔU]š›Ú[Š×Ù\›˜[YK	Ù]™[Ë™‰ÊJNÂˆÛÛœÝ˜XÚÝ\Ù\šXÙOXÜ™X]P˜XÚÝ\Ù\šXÙJØÛÛ™šYÎ˜Ù™Ë‹XZ[\ŸJNÂˆÛÛœÝÜ\˜][ÛœÓ[Ûš]ÜXÜ™X]SÜ\˜][ÛœÓ[Ûš]ÜŠØÛÛ™šYÎ˜Ù™Ë‹XZ[\ŸJNÂˆÛÛœÝ\ØYØ\XÚ]OXÜ™X]U\ØYØ\XÚ]JÜ›ÛÝX^ÛÛ˜Ý\œ™[Œ‹Ý]œÎ›Ü[ÛœË\ØYØ\XÚ]TÝ]œßJNÂˆËÈ[œZY˜Y]™[Èœ›ÛHHX\›Y\ˆÛ™K]šX[\\‹XXØÛÝ[›ÝÈØ[ˆ›ÝÂˆËÈ\ÙHHØ[YHœ™YHK\ÝÈ\Ý\È™]ÛHÜ™X]Y]™[Ë‚ˆ‹œ™\\™J•TUH]™[ÈÑUÝ]\ÏIÝšX[	ËšX[Ý\ÙYLHÒT‘HÝ]\ÏIÜ[™[™ÉÈS‘ÝÛ™\—ÚYTÈ“Õ•SS‘[]YØ]TÈ•SS‘“ÕVTÕÈ
+ÑSPÕH”“ÓH^[Y[ÈÒT‘H^[Y[Ë™]™[ÚYY]™[ËšY
+HŠKœ[Š
+NÂˆËÈÜ\˜]Ü‹[Û›H[Ý›Ýš\Ú[Ûš[™Ëˆ›ÈÝY\Ý[™Ú[Ø[ˆ[˜X›HH[Ý‚ˆËÈHÜšYÚ[˜[Ø\Xš[]H[™ÝÛ™\ˆ™[XZ[ˆ[˜Ú[™ÙYÈ[]Y[[\ÈÝ^H[]Y‚ˆYˆ
+Ù™Ë”SÕÑU‘S•ÒQ
+HÂˆÛÛœÝ^\™\ÈH]Kœ\œÙJÙ™Ë”SÕÑS‘×ÐU	ÉÊNÂˆYˆ
+S[X™\‹š\Ñš[š]J^\™\ÊHK×–ØK^ŒNWVØK^ŒNWËW^Ì‹ŒßIË\Ý
+Ù™Ë”SÕÑU‘S•ÒQ
+JH›ÝÈ™]È\œ›ÜŠ	Ô[ÝRÛÛ™šYÝ\˜][Ûˆ[™ðïYË‰ÊNÂˆÛÛœÝ]HHÝš[™ÊÙ™Ë”SÕÕUH	ÉÊKš[J
+NÂˆYˆ
+]K›[™ÝˆLŒ
+H›ÝÈ™]È\œ›ÜŠ	Ô[ÝU][H[™Ë‰ÊNÂˆ‹œ™\\™J•TUH]™[ÈÑUÝ]\ÏIÜ[Ý	Ë^\™\×Ø]OË]OPÐTÑHÒSˆÏIÉÈSˆ]HSÑHÈS‘ÒT‘HYOÈS‘ÝÛ™\—ÚYTÈ“Õ•SS‘[]YØ]TÈ•SS‘Ý]\ÈSˆ
+	Ü[™[™ÉË	ÝšX[	Ë	Ü[Ý	ÊHŠKœ[Š^\™\Ë]K]KÙ™Ë”SÕÑU‘S•ÒQ
+NÂˆBˆÛÛœÝÝš\HHÜ[ÛœËœÝš\H
+Ù™Ë”Õ’TWÔÑPÔ‘UÒÑVHÈ™]ÈÝš\JÙ™Ë”Õ’TWÔÑPÔ‘UÒÑVJHˆ[
+NÂˆÛÛœÝ^[Y[YZ[‘[XZ[Ï[™]ÈÙ]
+Ýš[™ÊÙ™Ë”VSQS•ÐQRS—ÑSPRSß	ÉÊKœÜ]
+	Ë	ÊK›X\
+[XZ[O™[XZ[š[J
+KÓÝÙ\Ø\ÙJ
+JK™š[\Š›ÛÛX[ŠJNÂˆÛÛœÝ\H^™\ÜÊ
+NÂˆYˆ
+Ù™Ë••TÕÔ“ÖHOOH	ÌIÊH\œÙ]
+	Ý\Ý›ÞIËJNÂˆ\\ÙJ[Y]
+ØÛÛ[ÙXÝ\š]TÛXÞNžÙ\™XÝ]™\ÎžÉÜØÜš\\Ü˜ÉÎ–È‰ÜÙ[‰È—K	ÜØÜš\\Ü˜ËX]‰Î–È‰Û›Û™IÈ—K	Ú[YË\Ü˜ÉÎ–È‰ÜÙ[‰È‹	Ù]N‰Ë	Ø›ØŽ‰×K	Ý\Ü˜YKZ[œÙXÝ\™K\™\]Y\ÝÉÎˆ˜\ÙU\›œ›ÝØÛÛOOH	ÚÎ‰ÈÈ×Hˆ[__JJNÂˆ\\ÙJ
+™\K™\Ë™^
+OOžÈ™\ËœÙ]
+	ÐØXÚKPÛÛ›Û	Ë	Û›Ë\ÝÜ™IÊNÈ™^
+
+NÈJNÂˆÛÛœÝÛÚÝ\HYOˆ‹œ™\\™J	ÔÑSPÕ
+ˆ”“ÓH]™[ÈÒT‘HYOÉÊK™Ù]
+Y
+NÂˆÛÛœÝÝÛˆH
+™\KJHOˆHJ™\K\Ù\ˆ	‰ˆH	‰ˆK›ÝÛ™\—ÚYOOH™\K\Ù\‹šY
+NÂˆÛÛœÝ[][™Õ\Ù\œÈH™]ÈÙ]
+
+NÂˆÛÛœÝ™XY\ÚYÛˆHHOˆÂˆžHÈ™]\›ˆ”ÓÓ‹œ\œÙJOË™\ÚYÛ—ÚœÛÛˆ	ÞßIÊNÈBˆØ]ÚÈ™]\›ˆßNÈBˆNÂˆÛÛœÝX›XÑ\ÚYÛˆHHOˆÂˆÛÛœÝ\ÚYÛ\™XY\ÚYÛŠJNÂˆ™]\›ˆÂˆ]N\[Ùˆ\ÚYÛ‹]OOOIÜÝš[™ÉÏÙ\ÚYÛ‹]N™OË]_	Õ™\˜[œÝ[[™ÉËˆØØØ\Ú[ÛŽ–ÉÝÙY[™ÉË	Øš\^IË	ÜÝ[[Y\‰Ë	ØÛÛ\[žIË	ÚXš[YIË	ÙÜ˜YX][Û‰Ë	ÛÝ\‰×Kš[˜ÛY\Ê\ÚYÛ‹›ØØØ\Ú[ÛŠOÙ\ÚYÛ‹›ØØØ\Ú[ÛŽ‰ÛÝ\‰Ëˆ[YN–ÉØY\™ÛÝÉË	ÛZYšYÚ	Ë	ÙØ\™[‰×Kš[˜ÛY\Ê\ÚYÛ‹[YJOÙ\ÚYÛ‹[YN‰ØY\™ÛÝÉËˆXØÙ[‹×ˆÖÌNXKY—^ÍŸIÚK\Ý
+\ÚYÛ‹˜XØÙ[	ÉÊOÙ\ÚYÛ‹˜XØÙ[‰ÈÙNNXMŽIËˆ›Û–ÉØÛ\ÜÚXÉË	Ü[][›ÉË	Û[Ù\›‰Ë	Ý™\™[˜IË	Ü™[^Y	Ë	Ý\]Üš]\‰×Kš[˜ÛY\Ê\ÚYÛ‹™›Û
+OÙ\ÚYÛ‹™›Û‰ØÛ\ÜÚXÉËˆ\ÐÛÝ™\Ž\[Ùˆ\ÚYÛ‹˜ÛÝ™\‘š[[˜[YOOOIÜÝš[™ÉÉ‰‹×–ØK^ŒNKWJ×šœÉË\Ý
+\ÚYÛ‹˜ÛÝ™\‘š[[˜[YJBˆNÂˆNÂˆÛÛœÝ™[]˜[^[Y[]™[Ï[™]ÈÙ]
+ÉÜ™Y[™˜Ü™X]Y	Ë	Ü™Y[™\]Y	Ë	Ü™Y[™™˜Z[Y	Ë	ØÚ\™ÙKœ™Y[™Y	Ë	ØÚ\™ÙK™\Ü]K˜Ü™X]Y	Ë	ØÚ\™ÙK™\Ü]K\]Y	Ë	ØÚ\™ÙK™\Ü]K˜ÛÜÙY	Ë	ØÚ\™ÙK™\Ü]K™[™×Ü™Z[œÝ]Y	Ë	ØÚ\™ÙK™\Ü]K™[™×ÝÚ]˜]Û‰Ë	Ú[›ÚXÙK™š[˜[^™Y	Ë	Ú[›ÚXÙK™š[˜[^˜][Û—Ù˜Z[Y	Ë	Ú[›ÚXÙKœZY	Ë	Ú[›ÚXÙKœ^[Y[Ù˜Z[Y	×JNÂˆÛÛœÝ^[Y[[\]™[Ï[™]ÈÙ]
+ÉÜ™Y[™˜Ü™X]Y	Ë	Ü™Y[™\]Y	Ë	Ü™Y[™™˜Z[Y	Ë	ØÚ\™ÙKœ™Y[™Y	Ë	ØÚ\™ÙK™\Ü]K˜Ü™X]Y	Ë	ØÚ\™ÙK™\Ü]K\]Y	Ë	ØÚ\™ÙK™\Ü]K˜ÛÜÙY	Ë	ØÚ\™ÙK™\Ü]K™[™×Ü™Z[œÝ]Y	Ë	ØÚ\™ÙK™\Ü]K™[™×ÝÚ]˜]Û‰Ë	Ú[›ÚXÙK™š[˜[^˜][Û—Ù˜Z[Y	Ë	Ú[›ÚXÙKœ^[Y[Ù˜Z[Y	Ë	ØÝ\ÝÛY\‹Ú]˜]Ø[œÝX›Z]Y	×JNÂˆ[˜Ý[Ûˆ^[Y[›Ü”Ýš\SØš™XÝ
+Øš™XÝ
+HÂˆÛÛœÝ^[Y[[[]\[ÙˆØš™XÝœ^[Y[Ú[[OOIÜÝš[™ÉÏÛØš™XÝœ^[Y[Ú[[›Øš™XÝœ^[Y[Ú[[ËšYÂˆYŠ^[Y[[[
+^ØÛÛœÝ^[Y[Y‹œ™\\™J	ÔÑSPÕ
+ˆ”“ÓH^[Y[ÈÒT‘HÝš\WÜ^[Y[Ú[[ÚYOÉÊK™Ù]
+^[Y[[[
+NÚYŠ^[Y[
+\™]\›ˆ^[Y[ßBˆÛÛœÝ^[Y[Y[Øš™XÝ›Y]Y]OËœ^[Y[YÂˆYŠ^[Y[Y
+^ØÛÛœÝ^[Y[Y‹œ™\\™J	ÔÑSPÕ
+ˆ”“ÓH^[Y[ÈÒT‘HYOÉÊK™Ù]
+^[Y[Y
+NÚYŠ^[Y[
+\™]\›ˆ^[Y[ßBˆÛÛœÝÚ\™ÙO]\[ÙˆØš™XÝ˜Ú\™ÙOOOIÜÝš[™ÉÏÛØš™XÝ˜Ú\™ÙN›Øš™XÝ˜Ú\™ÙOËšYÂˆYŠÚ\™ÙJ^ØÛÛœÝ™Y[™Y‹œ™\\™J	ÔÑSPÕ^[Y[ÚY”“ÓH™Y[™ÈÒT‘HÝš\WÜ™Y[™ÚYOÉÊK™Ù]
+Ú\™ÙJNÚYŠ™Y[™
+\™]\›ˆ‹œ™\\™J	ÔÑSPÕ
+ˆ”“ÓH^[Y[ÈÒT‘HYOÉÊK™Ù]
+™Y[™œ^[Y[ÚY
+NßBˆ™]\›ˆ[ÂˆBˆ[˜Ý[Ûˆ]Y]^[Y[]™[
+ÜÝš\Q]™[Y[[^[Y[YÛÝ\˜ÙK]™[\KÝ]\Ë[[Ý[Ù[Ï[[XÝÜ‘[XZ[[[›ÝO[[]Z[Ï^ß_JHÂˆÛÛœÝYXÜž\Ëœ˜[™ÛUURQ
+
+K›ÝÏQ]K››ÝÊ
+NÂˆ‹œ™\\™J	ÒS”ÑT•S•È^[Y[Ù]™[È
+YÝš\WÙ]™[ÚY^[Y[ÚYÛÝ\˜ÙK]™[Ý\KÝ]\Ë[[Ý[ØÙ[ËXÝÜ—Ù[XZ[›ÝK]Z[×ÚœÛÛ‹Ü™X]YØ]
+HSQTÈ
+ËËËËËËËËËËÊIÊKœ[ŠYÝš\Q]™[Y^[Y[YÛÝ\˜ÙK]™[\KÝ]\Ë[[Ý[Ù[ËXÝÜ‘[XZ[›ÝK”ÓÓ‹œÝš[™ÚYžJ]Z[ÊK›ÝÊNÂˆYŠ^[Y[[\]™[Ëš\Ê]™[\J_]™[\KœÝ\ÕÚ]
+	ÛX[X[œ™Y[™‰ÊJY‹œ™\\™J	ÒS”ÑT•S•È^[Y[Ø[\È
+]™[ÚYÝ]\Ë][\ËÜ™X]YØ]
+HSQTÈ
+Ë	Ü[™[™×	ËÊIÊKœ[ŠY›ÝÊNÂˆ™]\›ˆYÂˆBˆ\Þ[˜È[˜Ý[Ûˆ›\Ú^[Y[[\Ê
+HÂˆÛÛœÝ[™[™ÏY‹œ™\\™J”ÑSPÕK™]™[ÚYK˜][\ËšY^[Y[ÚY™]™[ÚY[[WÚY˜[[Ý[ØÙ[ËK™]™[Ý\KKœÝ]\ËK˜[[Ý[ØÙ[È]™[Ø[[Ý[K››ÝKK™]Z[×ÚœÛÛˆ”“ÓH^[Y[Ø[\ÈH“ÒSˆ^[Y[Ù]™[ÈHÓˆKšYXK™]™[ÚY“ÒSˆ^[Y[ÈÓˆšYYKœ^[Y[ÚYÔ‘Tˆ–HK˜Ü™X]YØ]SRUŒŠK˜[
+
+NÂˆÛÛœÝ™XÚ\Y[TÝš[™ÊÙ™Ë”VSQS•ÐST•ÑSPRSË‹‹œ^[Y[YZ[‘[XZ[×VÌ_Ù™Ë”‘U“×ÔÑS‘T—ÑSPRS	ÉÊKš[J
+NÂˆ›ÜŠÛÛœÝ[\Ùˆ[™[™Ê^Âˆž^ÂˆYŠ\™XÚ\Y[[XZ[\Š]›ÝÈ™]È\œ›ÜŠ\™XÚ\Y[ÉÔVSQS•ÐST•ÑSPRS™Z‰Î‰Ðœ™]›ËU™\œØ[™\ÝšXÚZ[™Ù\šXÚ]‰ÊNÂˆÛÛœÝ[™›ÏR”ÓÓ‹œ\œÙJ[\™]Z[×ÚœÛÛŸ	ÞßIÊNÂˆ]ØZ]XZ[\ŠÝÎœ™XÚ\Y[ÝXš™XÝ˜š[˜[Û˜\˜Z[™Îˆ	Ø[\™]™[Ý\_X^–Ø˜Z[™ÜÙ\™ZYÛš\Îˆ	Ø[\™]™[Ý\_XÝ]\Îˆ	Ø[\œÝ]\ßX[[KRQˆ	Ø[\˜[[WÚYX˜Z[™ÜËRQˆ	Ø[\œ^[Y[ÚYX™]˜YÎˆ	Ê
+[\™]™[Ø[[Ý[ÏØ[\˜[[Ý[ØÙ[ÏÏØ[\˜[[Ý[ØÙ[ÏÏÌ
+KÌL
+KÑš^Y
+Š_HUT˜[\››ÝOØ›Ý^Žˆ	Ø[\››Ý_X‰ÉË]Z[Îˆ	Ò”ÓÓ‹œÝš[™ÚYžJ[™›Ê_X	Ô°ï™[ŽˆÝš\H\Ú›Ø\™[™[\›™\ˆ˜Z[™ÜØX›]Y‹‰×K™š[\Š›ÛÛX[ŠKš›Ú[Š	×‰Ê_JNÂˆ‹œ™\\™J•TUH^[Y[Ø[\ÈÑUÝ]\ÏIÜÙ[	Ë][\ÏX][\ÊÌK\ÝÙ\œ›ÜS•SÙ[Ø]OÈÒT‘H]™[ÚYOÈŠKœ[Š]K››ÝÊ
+K[\™]™[ÚY
+NÂˆXØ]Ú
+\œ›ÜŠ^Âˆ‹œ™\\™J	ÕTUH^[Y[Ø[\ÈÑU][\ÏX][\ÊÌK\ÝÙ\œ›ÜOÈÒT‘H]™[ÚYOÉÊKœ[ŠÝš[™Ê\œ›Ü‹›Y\ÜØYÙ_\œ›ÜŠKœÛXÙJÌ
+K[\™]™[ÚY
+NÂˆÛÛœÛÛK™\œ›ÜŠ	Ö˜Z[™ÜØ[\›HÛÛ›HšXÚ™\œÙ[™]Ù\™[Ž‰ËÝš[™Ê\œ›Ü‹›Y\ÜØYÙ_\œ›ÜŠJNÂˆBˆBˆBˆ\Þ[˜È[˜Ý[Ûˆ›\ÚÛÛ˜XÝÛÛ™š\›X][ÛœÊ
+HÂˆÛÛœÝ[™[™ÏY‹œ™\\™J”ÑSPÕËŠ‹˜[[Ý[ØÙ[Ë˜Ý\ÝÛY\—Ý\K™X\›WÜÝ\Ü™\]Y\ÝYØ]™X\›WÜÝ\ØXÚÛ›ÝÛYÙYØ]\›\×Ý™\œÚ[Û‹KšY[[WÚYK]KK™]™[Ù]KK™[XZ[”“ÓHÛÛ˜XÝØÛÛ™š\›X][ÛœÈÈ“ÒSˆ^[Y[ÈÓˆšYXËœ^[Y[ÚY“ÒSˆ]™[ÈHÓˆKšY\™]™[ÚYÒT‘HËœÝ]\ÏIÜ[™[™ÉÈÔ‘Tˆ–HË˜Ü™X]YØ]SRUŒŠK˜[
+
+NÂˆ›ÜŠÛÛœÝÛÛ™š\›X][ÛˆÙˆ[™[™Ê^Âˆž^ÂˆYŠ[XZ[\Š]›ÝÈ™]È\œ›ÜŠ	Ðœ™]›ËU™\œØ[™\ÝšXÚZ[™Ù\šXÚ]‰ÊNÂˆÛÛœÝ›ÙOVÂˆ	Õ™\˜YÜØ™\Ý0éYÝ[™È8 $Èš[˜[Û˜\›ÝØ[[IËˆ	ÉËˆ	ÑZ[ˆ™\˜YÈ\Ý˜XÚ™\Ý0éYÝ[H˜Z[™ÜÙZ[™Ø[™È\Ý[™HÙZÛÛ[Y[‹‰Ëˆ[˜šY]\ŽˆX]X\ÈÙ[™[™8 $ÈX]X\ÈÙ[™[™›ÝÙÜ˜YšYKÝ\™\ÙYÈLÌÌÌÍðï\œÛÚ]]ØÚ[™È[™›Ðš[˜[Û˜\™K˜ˆ›ÙZÝˆš[˜[Û˜\›ÝØ[[H°ïˆ8 '‰ØÛÛ™š\›X][Û‹]_x '
+	ØÛÛ™š\›X][Û‹˜[[WÚYJK˜ˆ™Z\ÎˆZ[›X[YÈ	ÊÛÛ™š\›X][Û‹˜[[Ý[ØÙ[ËÌL
+KÑš^Y
+ŠKœ™\XÙJ	Ë‰Ë	Ë	Ê_HUTˆZ[œØÚYpçÛXÚNH	H]]ØÚ\ˆ[\Ø]œÝ]Y\‹˜ˆÝ[™[\™ZH™\Ý[[™Îˆ	ØÛÛ™š\›X][Û‹˜Ý\ÝÛY\—Ý\OOOIØ\Ú[™\ÜÉÏÉÑÙ\ØÚ0éÚÝ[™IÎ‰Õ™\˜œ˜]XÚ\‰ßK˜ˆZ\Ý[™ÜØ™YÚ[›Žˆ	ØÛÛ™š\›X][Û‹™]™[Ù]_	ÛZ]œ™Z\ØÚ[[™ÉßKˆZ\Ý[™ÜÞ™Z]˜][Nˆš\ÈHLYÙHXˆ™\˜[œÝ[[™ÜÙ][K°ïˆ\ØY[œÚXÚ[™ÝÛ›ØY˜ˆ	ÓZ\Ý[™ÜÝ[Y˜[™Îˆš\ÈHHÐˆ™\˜\˜™Z]]H›ÝÜÈ™H™\˜[œÝ[[™ÎÈ\ØYÈÙ\™[ˆ]Yˆ0í˜ÚÝ[œÈ‹MŒ^[0é™ÜÝHØ[H™\šÛZ[™\[™[È”QÈÛÛ\š[ZY\ÈÜšYÚ[˜[]ZY[ˆ[™šY[ÜÈÚ[™šXÚ[[[‹ˆ˜XÚ[™H\È[[^™Z]˜][\È[™]\ˆYØ[™È[™›ÝÜÈÛÝÚYHðéÝXXÚZ[°éÙHÙ\™[ˆ˜XÚ[H™\ØÚšYX™[™[ˆ0íœØÚX›]Yˆ[™\›‰Ëˆ	ÉËˆ	Õ‘T•QÔÐ‘QS‘ÕS‘ÑSˆ8 $È˜\ÜÝ[™È	ÊÊÛÛ™š\›X][Û‹\›\×Ý™\œÚ[ÛŸT“T×Õ‘T”ÒSÓŠKˆ	Ð[˜šY]\ŽˆX]X\ÈÙ[™[™8 $ÈX]X\ÈÙ[™[™›ÝÙÜ˜YšYKÝ\™\ÙYÈLÌÌÌÍðï\œÛÚ]]ØÚ[™È[™›Ðš[˜[Û˜\™K‰Ëˆ	ÌKˆÙ[[™ÎˆY\ÙH™Y[™Ý[™Ù[ˆÙ[[ˆ°ïˆ\ÈÛÜÝ[œ›XÚYÙHš[˜[Û˜\Q›ÝØ[[Kˆ™\˜œ˜]XÚ\ˆ[™[\›™ZY[ˆðí››™[ˆXÚ[‹ˆ[\›™ZY[ˆ[™[ˆ™ZHZ[™\ˆÙ\ØÚ0éÚÝ[™[˜XÚ[™È[H˜ZY[ˆZ™\ˆÙ]Ù\˜›XÚ[ˆÙ\ˆÙ[œÝÝ0é™YÙ[ˆ0éYÚÙZ]ˆÚ[™Ù[™H™\˜œ˜]XÚ\œ™XÚH›ZX™[ˆ[˜™\°ï‰Ëˆ	Ì‹ˆ™\˜YÈ[™™Z\ÎˆZ[ˆ›ÝØ[[H™H™\˜[œÝ[[™ÈÛÜÝ]Z[›X[YÈKL]\›ÈZ[œØÚYpçÛXÚ\ˆÙ\Ù]›XÚ[ˆ[\Ø]œÝ]Y\‹ˆ\ÈÚXÙZ[™H]Y™[™HX›Û›™[Y[ÙX°ï‹ˆ\ˆ™\˜YÈÛÛ[]Z]™\Ý0éYÝ\ˆ˜Z[™È[™œ™Z\ØÚ[[™È\Ý[™K‰Ëˆ	ÌËˆZ\Ý[™Îˆ\È[[H™YÚ[›[H[™ÙYÙX™[™[ˆ™\˜[œÝ[[™ÜÙ][H[™\ÝXˆY\Ù[H][HLYÙH°ïˆ\ØY[œÚXÚ[™ÝÛ›ØY™\™°ïØ˜\‹ˆ[˜XÚ[™]\ˆYØ[™ÎÈ[[Y›ÝÜÈ[™ðéÝXXÚZ[°éÙHÙ\™[ˆ˜XÚ[H›Ü™Ù\ÙZ[™[ˆ0íœØÚX›]Yˆ[™\›ˆZ[™H\ðé›XÚHÝÛ›ØY\ÙH\ÝšXÚ[[[‹ˆš\ÈHH›Ü˜XˆØÚÙ[Y[™H\Ý›ÝÜÈ›ZX™[ˆ™ZHXÚ[™È\š[[ˆ[™°é[ˆ[HÜZXÚ\œ]‹ˆ™H™\˜[œÝ[[™ÈÝZ[ˆš\ÈHHÐˆ°ïˆ™\˜\˜™Z]]H›ÝÜÈ\ˆ™\™°ïÝ[™Ëˆ\ØYÈÙ\™[ˆ]Yˆ0í˜ÚÝ[œÈ‹MŒ^[0é™ÜÝHØ[H™\šÛZ[™\[™[È”QÈÛÛ\š[ZY\ÈÜšYÚ[˜[]ZY[ˆ[™šY[ÜÈÚ[™šXÚ[[[‹‰Ëˆ	Íˆ][™Îˆ\ˆ™\˜[œÝ[\ˆ™\Ø[]\È[[H[™Z[ðéÝ[ˆ[šÈÙ\ˆT‹PÛÙKˆ\ˆ\ÝY°ïˆ™\˜[ÛÜXÚYðé™ÙH\ˆ™\™XÚYÝ[ˆðéÝ[ˆHÙX™[‹ðéÝHÙYZYÛ™]H[™›Ü›ZY\™[ˆ[™\ˆ[š[HZ][ˆ\™›Ü™\›XÚ[ˆ™XÚ[ˆHZ[[‹ˆ[ž[0éÜÚYÙH[š[Hðí››™[ˆÙ[Y[][™[™\›Ù\™[‹‰Ëˆ	ÍKˆ™\™°ïØ˜\šÙZ][™Ý\Üˆ°ïˆYH][™ÈÚ[™[\›™]™\˜š[™[™ËÙYZYÛ™]\ÈÙ\°é[™ZÝY[\ˆœ›ÝÜÙ\ˆ\™›Ü™\›XÚˆÚ\ˆ™[pï[ˆ[œÈ[H]™\›0éÜÚYÙ[ˆ™]šYX‹ØÚ[[ˆX™\ˆÙZ[™H[[\˜œ›ØÚ[™HÙ\ˆ™Y\ž™Z]™Z\™œ™ZYH™\™°ïØ˜\šÙZ]ˆØ\[™È[™Ý0íœ[™Ù[ˆðí››™[ˆ[ˆY[œÝ™YZ[°éÚYÙ[‹ˆÝ\Üˆ[™›Ðš[˜[Û˜\™KˆÙ\Ù]›XÚH™XÚH›ZX™[ˆ™\ÝZ[‹‰Ëˆ	Í‹ˆ˜Z[™È[™\œÝ][™ÎˆYHZ[›X[YÙH˜Z[™È\™›ÛÝ0ï™\ˆÝš\Kˆ˜XÚ\™›ÛÜ™ZXÚ\ˆ˜Z[™ÈÚ\™\ˆ[[YY[œÝœ™ZYÙ\ØÚ[]ˆZ[ˆ˜Z[™ÜØ™[YÈÙ\ˆZ[™H™XÚ[™ÈÚ\™™\™Z]Ù\Ý[ÛØ˜[YH\™›Ü™\›XÚ[ˆ™XÚ[™ÜØ[™ØX™[ˆ\šØ™[ˆÝ\™[‹ˆÙ\Ù]›XÚH\œÝ][™ÜØ[œÜ°ïÚH›ZX™[ˆ[˜™\°ïˆZ[™Hœ™Z]Ú[YÙH›ÛÝ0é™YÙH\œÝ][™È™Y[™]˜XÚZ™\ˆ™\Ý0éYÝ[™È[ˆ[[^YØ[™ÎÈÚ[™Ù[™H™XÚHX™[ˆ›Üœ˜[™Ë‰Ëˆ	ÍËˆ][œØÚ]ˆ[™0íœØÚ[™ÎˆZ[ž™[Z][ˆ\ˆ™\˜\˜™Z][™È[™HY[œÝZ\Ý\›ˆÝZ[ˆ[\ˆ	ÊØ˜\ÙU\››ÜšYÚ[ŠÉËÙ][œØÚ]‹ˆYH[[[]Yž™Z]ÝZ[ˆXœØÚš]ËˆÙ\Ù]›XÚH]Y˜™]ØZ[™ÜÜ›XÚ[ˆ°ïˆ˜Z[™ÜËH[™XÚ[™ÜÝ[\›YÙ[ˆ›ZX™[ˆ[˜™\°ï‰Ëˆ	Îˆ™XÚˆ\ÈÚ[]]ØÚ\È™XÚˆ™ZH™\˜œ˜]XÚ\›ˆÚ[Y\ÙH™XÚÝØZ\‹ÛÝÙZ]Y\˜ÚšXÚ\ˆØÚ]ˆÚ[™Ù[™\ˆ™\Ý[[][™Ù[ˆZ™\ÈÙ]ðíš›XÚ[ˆ]Y™[[ÜÝX]\È[›ÙÙ[ˆÚ\™‰Ëˆ	ÉËˆ	ÕÒQT”•Q”Ð‘SR•S‘È°çˆ‘T”UPÒT‰Ëˆ	ÔÚYHðí››™[ˆš[›™[ˆšY\ž™ZˆYÙ[ˆXˆ™\˜YÜÜØÚ\ÜÈÚ™H[™ØX™H›ÛˆÜ°ï™[ˆÚY\œY™[‹ˆ\ˆ]\ðï[™Èðí››™[ˆÚYHYHÝ0é™YÈ™\™°ïØ˜\™HÚY\œYœÙ[šÝ[Ûˆ[ˆZ™[HÝ[™[šÛÛÈ[\ˆ	ÊØ˜\ÙU\››ÜšYÚ[ŠÉËÙ\Ú›Ø\™™\Ù[™[ˆÙ\ˆX]X\ÈÙ[™[™8 $ÈX]X\ÈÙ[™[™›ÝÙÜ˜YšYKÝ\™\ÙYÈLÌÌÌÍðï\œÛÚ]]ØÚ[™[™›Ðš[˜[Û˜\™KZ][ÈZ[™\ˆZ[™]]YÙ[ˆ\šÛ0é[™È
+[H™Z\ÜY[œšYYˆÙ\ˆKSXZ[
+H[™›Ü›ZY\™[‹ˆ\ˆœš\ÝØZ[™ÈÙ[°ïÝYH™XÚ™Z]YÙHXœÙ[™[™Ë‰Ëˆ	Ò[H˜[\ÈÚY\œYœÈ\œÝ][ˆÚ\ˆ[H\š[[™[ˆ˜Z[™Ù[ˆ[™\ž°ïÛXÚ[™Ü0é\Ý[œÈš[›™[ˆšY\ž™ZˆYÙ[ˆXˆZ[™Ø[™ÈZ™\ˆZ]Z[[™ÈZ][\Ù[™[ˆ˜Z[™ÜÛZ][ÛÙ™\›ˆšXÚÈ[™\™\È™\™Z[˜˜\Ý\™Kˆ°ïˆYH°ïÚÞ˜Z[™È™\™XÚ™[ˆÚ\ˆÙZ[ˆ[Ù[‰Ëˆ	ÕÙ[›ˆÚYH]\Ù°ïÚÛXÚ™\›[™Ù[‹\ÜÈ\ˆ[Ù[XÚHY[œÝðé™[™\ˆÚY\œYœÙœš\Ý™YÚ[›Ø[›ˆ™ZHZ[™[HÜ0é\™[ˆÚY\œYˆ[™Ù[Y\ÜÙ[™\ˆÙ\\œØ]ˆ°ïˆš\ÈZ[ˆ\˜œ˜XÚHZ\Ý[™Ù[ˆ[™˜[[‹ÛÙ™\›ˆYHÙ\Ù]›XÚ[ˆ›Ü˜]\ÜÙ][™Ù[ˆ\™°ïÚ[™ˆ\ÈÚY\œYœÜ™XÚ™ZHZ[™\ˆY[œÝZ\Ý[™È\›\ØÚ\œÝZ]›ÛÝ0é™YÙ\ˆ™\˜YÜÙ\™°ï[™È[™\‹Ù[›ˆÚYH[H›Üž™Z]YÙ[ˆ™YÚ[›ˆ]\Ù°ïÚÛXÚYÙ\Ý[[][™Z™HÙ[›š\È›ÛH\›0íœØÚ[ˆ™ZH›ÛÝ0é™YÙ\ˆ\™°ï[™È™\Ý0éYÝX™[‹ˆ\È›Üž™Z]YÙH™\›[™Ù[ˆ[™YH™\Ý0éYÝ[™ÈÙ\™[ˆ\ˆZ[™ÙZÛÙ[›ˆ\ˆ[[YY[œÝ[ˆ\ˆÚY\œYœÙœš\Ý™YÚ[›™[ˆÛÛ‰Ëˆ	Ó]\Ý\‹UÚY\œYœÙ›Ü›][\Žˆ[ˆX]X\ÈÙ[™[™8 $ÈX]X\ÈÙ[™[™›ÝÙÜ˜YšYKÝ\™\ÙYÈLÌÌÌÍðï\œÛÚ]]ØÚ[™[™›Ðš[˜[Û˜\™NˆY\›Z]ÚY\œY™HXÚ[ˆ™\˜YÈ0ï™\ˆ\Èš[˜[Û˜\Q›ÝØ[[H°ïˆYH™\˜[œÝ[[™È×××××××××Ëˆ™\Ý[[H×××××××××Ëˆ˜[YH×××××××××Ëˆ[œØÚšY×××××××××Ëˆ][H×××××××××Ëˆ[\œØÚšY
+\ˆ™ZH\Y\›Z]Z[[™ÊH×××××××××Ë‰Ëˆ	ÑYHÚY\œYœÚ[™›Ü›X][Ûˆ[™\È]\Ý\™›Ü›][\ˆÝZ[ˆ\ðé›XÚ[\ˆ	ÊØ˜\ÙU\››ÜšYÚ[ŠÉËÝÚY\œY‹ˆYH[ZÝ›Ûš\ØÚHÚY\œYœÙ[šÝ[Ûˆ\Ý[H[™Ù[Y[][ˆÝ[™[šÛÛÈ[\ˆ8 '•™\˜YÈÚY\œY™[¸ '™\™°ïØ˜\‹‰ËˆÛÛ™š\›X][Û‹™X\›WÜÝ\Ü™\]Y\ÝYØ]	‰˜ÛÛ™š\›X][Û‹™X\›WÜÝ\ØXÚÛ›ÝÛYÙYØ]ÉÐ™ZHZ[™\ˆ™\Ý[[™ÈÝ\™[ˆZ[ˆ]\Ù°ïÚÛXÚ\È™\›[™Ù[ˆ˜XÚ›Üž™Z]YÙ[HZ\Ý[™ÜØ™YÚ[›ˆ[™YH™\Ý0éYÝ[™È\ˆÚY\œYœÙ›ÛÙ[ˆZ]™Z]Ý[\[Ù\ÜZXÚ\‰Î‰Ñ°ïˆY\ÙH™\Ý[[™ÈÝ\™HÙZ[ˆ›Üž™Z]YÙ\ˆZ\Ý[™ÜØ™YÚ[›ˆ[›™\š[ˆ\ˆÚY\œYœÙœš\Ý[™ÙY›Ü™\‰Ëˆ	ÉËˆ	Ó]\Ý\‹UÚY\œYœÙ›Ü›][\ˆ
+°ïˆ™\˜œ˜]XÚ\ŠNˆ[ˆX]X\ÈÙ[™[™8 $ÈX]X\ÈÙ[™[™›ÝÙÜ˜YšYKÝ\™\ÙYÈLÌÌÌÍðï\œÛÚ[™›Ðš[˜[Û˜\™KˆY\›Z]ÚY\œY™HXÚ[ˆ™\˜YÈ0ï™\ˆ\Èš[˜[Û˜\›ÝØ[[H°ïˆYH™\˜[œÝ[[™È×××××××××Ëˆ™\Ý[[H×××××××××Ëˆ˜[YH×××××××××Ëˆ[œØÚšY×××××××××Ëˆ][H×××××××××Ë‰Ëˆ	ÉËˆ	Ðš]H™]ØZ™HY\ÙHKSXZ[[È™\˜YÜØ™\Ý0éYÝ[™È]Y‹ˆœ˜YÙ[Žˆ[™›Ðš[˜[Û˜\™K‰ÂˆKš›Ú[Š	×‰ÊNÂˆ]ØZ]XZ[\ŠÝÎ˜ÛÛ™š\›X][Û‹œ™XÚ\Y[ÝXš™XÝ‰ÑZ[™H™\˜YÜØ™\Ý0éYÝ[™È[™ÚY\œYœÚ[™›Ü›X][Ûˆ0­Èš[˜[Û˜\	Ë^˜›Ù_JNÂˆ‹œ™\\™J•TUHÛÛ˜XÝØÛÛ™š\›X][ÛœÈÑUÝ]\ÏIÜÙ[	Ë™XÚ\Y[IÉË][\ÏX][\ÊÌK\ÝÙ\œ›ÜS•SÙ[Ø]OÈÒT‘H^[Y[ÚYOÈŠKœ[Š]K››ÝÊ
+KÛÛ™š\›X][Û‹œ^[Y[ÚY
+NÂˆXØ]Ú
+\œ›ÜŠ^Âˆ‹œ™\\™J•TUHÛÛ˜XÝØÛÛ™š\›X][ÛœÈÑU][\ÏX][\ÊÌK\ÝÙ\œ›ÜOÈÒT‘H^[Y[ÚYOÈŠKœ[ŠÝš[™Ê\œ›Ü‹›Y\ÜØYÙ_\œ›ÜŠKœÛXÙJÌ
+KÛÛ™š\›X][Û‹œ^[Y[ÚY
+NÂˆÛÛœÛÛK™\œ›ÜŠ	Õ™\˜YÜØ™\Ý0éYÝ[™ÈÛÛ›HšXÚ™\œÙ[™]Ù\™[Ž‰ËÝš[™Ê\œ›Ü‹›Y\ÜØYÙ_\œ›ÜŠJNÂˆBˆBˆBˆ\Þ[˜È[˜Ý[Ûˆ›\ÚÚ]˜]Ø[ÛÛ™š\›X][ÛœÊ
+HÂˆÛÛœÝÙ[™[™ÏX\›ØØ[ËÚ]˜]Ø[[XZ[Ò[‘›YÚ
+\›ØØ[ËÚ]˜]Ø[[XZ[Ò[‘›YÚ[™]ÈÙ]
+
+JNÂˆÛÛœÝ[™[™ÏY‹œ™\\™J”ÑSPÕËŠ‹KšY[[WÚYK]H”“ÓHÚ]˜]Ø[ØÛÛ™š\›X][ÛœÈÈ“ÒSˆ^[Y[ÈÓˆšY]Ëœ^[Y[ÚY“ÒSˆ]™[ÈHÓˆKšY\™]™[ÚYÒT‘HËœÝ]\ÏIÜ[™[™ÉÈÔ‘Tˆ–HËœÝX›Z]YØ]SRUŒŠK˜[
+
+NÂˆ›ÜŠÛÛœÝ›ÝXÙHÙˆ[™[™Ê^ÂˆYŠÙ[™[™Ëš\Ê›ÝXÙKœ^[Y[ÚY
+JXÛÛ[YNÂˆÙ[™[™Ë˜Y
+›ÝXÙKœ^[Y[ÚY
+NÂˆž^ÂˆYŠ[XZ[\Š]›ÝÈ™]È\œ›ÜŠ	Ðœ™]›ËU™\œØ[™\ÝšXÚZ[™Ù\šXÚ]‰ÊNÂˆ]ØZ]XZ[\ŠÝÎ››ÝXÙKœ™XÚ\Y[ÝXš™XÝ‰ÑZ[™Ø[™ÜØ™\Ý0éYÝ[™ÈZ[™\ÈÚY\œYœÈ0­Èš[˜[Û˜\	Ë^–Âˆ	ÑZ[™Ø[™ÜØ™\Ý0éYÝ[™È8 $ÈÚY\œYˆ™ZHš[˜[Û˜\	Ë	ÉËˆ™\˜YÎˆš[˜[Û˜\›ÝØ[[H8 '‰Û›ÝXÙK]_x '
+[[KRQ	Û›ÝXÙK˜[[WÚYJK˜ˆ˜[YNˆ	Û›ÝXÙK˜Ý\ÝÛY\—Û˜[Y_XˆKSXZ[°ïˆYHZ[™Ø[™ÜØ™\Ý0éYÝ[™Îˆ	Û›ÝXÙKœ™XÚ\Y[XˆZ[™Ø[™Îˆ	Û™]È]J›ÝXÙKœÝX›Z]YØ]
+KÓØØ[TÝš[™Ê	ÙKQIËÙ]TÝ[N‰ÛÛ™ÉË[YTÝ[N‰ÛYY][IË[YV›Û™N‰Ñ]\›ÜKÐ™\›[‰ßJ_HZˆ
+]\›ÜKÐ™\›[ŠK˜ˆ	ÉËZ[™H\šÛ0é[™Îˆ	Û›ÝXÙKœÝ][Y[X	ÉËˆ	ÕÚ\ˆ™\Ý0éYÙ[ˆ[ˆZ[™Ø[™ÈZ[™\ÈÚY\œYœËˆYH\œÝ][™È[™YHÙZ]\™H™\˜YÜØXÚXÚÛ[™ÈÙ\™[ˆÙ\\˜]Ù\°ïÈY\ÙHZ[™Ø[™ÜØ™\Ý0éYÝ[™È\Ý›ØÚÙZ[™H™\Ý0éYÝ[™ÈZ[™\ˆ™\™Z]È]\ÙÙY°ï[ˆ\œÝ][™Ë‰ÂˆKš›Ú[Š	×‰Ê_JNÂˆ‹œ™\\™J•TUHÚ]˜]Ø[ØÛÛ™š\›X][ÛœÈÑUÝ]\ÏIÜÙ[	Ë][\ÏX][\ÊÌK\ÝÙ\œ›ÜS•SÙ[Ø]OÈÒT‘H^[Y[ÚYOÈŠKœ[Š]K››ÝÊ
+K›ÝXÙKœ^[Y[ÚY
+NÂˆXØ]Ú
+\œ›ÜŠ^Âˆ‹œ™\\™J	ÕTUHÚ]˜]Ø[ØÛÛ™š\›X][ÛœÈÑU][\ÏX][\ÊÌK\ÝÙ\œ›ÜOÈÒT‘H^[Y[ÚYOÉÊKœ[ŠÝš[™Ê\œ›Ü‹›Y\ÜØYÙ_\œ›ÜŠKœÛXÙJÌ
+K›ÝXÙKœ^[Y[ÚY
+NÂˆÛÛœÛÛK™\œ›ÜŠ	ÕÚY\œYœØ™\Ý0éYÝ[™ÈÛÛ›HšXÚ™\œÙ[™]Ù\™[Ž‰ËÝš[™Ê\œ›Ü‹›Y\ÜØYÙ_\œ›ÜŠJNÂˆYš[˜[^ÜÙ[™[™Ë™[]J›ÝXÙKœ^[Y[ÚY
+NßBˆBˆBˆ[˜Ý[Ûˆ™Yœ™\Ú™Y[™Ý]J^[Y[Y
+HÂˆÛÛœÝ^[Y[Y‹œ™\\™J	ÔÑSPÕ
+ˆ”“ÓH^[Y[ÈÒT‘HYOÉÊK™Ù]
+^[Y[Y
+NÂˆÛÛœÝ™Y[™YS[X™\Š‹œ™\\™J”ÑSPÕÓÐSTÐÑJÕSJ[[Ý[ØÙ[ÊK
+H[[Ý[”“ÓH™Y[™ÈÒT‘H^[Y[ÚYOÈS‘Ý]\ÏIÜÝXØÙYYY	ÈŠK™Ù]
+^[Y[Y
+K˜[[Ý[
+NÂˆYŠ™Y[™Y\^[Y[˜[[Ý[ØÙ[Ê^Âˆ‹œ™\\™J•TUH^[Y[ÈÑUÝ]\ÏIÜ™Y[™Y	Ë™Y[™YØ]PÓÐSTÐÑJ™Y[™YØ]ÊHÒT‘HYOÈŠKœ[Š]K››ÝÊ
+K^[Y[Y
+NÂˆ‹œ™\\™J•TUH]™[ÈÑUÝ]\ÏIÜ™Y[™Y	ÈÒT‘HYOÈS‘Ý]\ÏIÜZY	ÈŠKœ[Š^[Y[™]™[ÚY
+NÂˆY[ÙHYŠ™Y[™YŒ
+^Âˆ‹œ™\\™J•TUH^[Y[ÈÑUÝ]\ÏIÜ\X[WÜ™Y[™Y	ÈÒT‘HYOÈS‘Ý]\ÈOIÙ\Ü]Y	ÈŠKœ[Š^[Y[Y
+NÂˆY[Ù^Âˆ‹œ™\\™J•TUH^[Y[ÈÑUÝ]\ÏIÜZY	Ë™Y[™YØ]S•SÒT‘HYOÈS‘Ý]\ÈSˆ
+	Ü™Y[™Y	Ë	Ü\X[WÜ™Y[™Y	Ë	Ù\Ü]YÛÜÝ	ÊHŠKœ[Š^[Y[Y
+NÂˆ‹œ™\\™J•TUH]™[ÈÑUÝ]\ÏIÜZY	ÈÒT‘HYOÈS‘Ý]\ÏIÜ™Y[™Y	ÈŠKœ[Š^[Y[™]™[ÚY
+NÂˆBˆ™]\›ˆ™Y[™YÂˆBˆ[˜Ý[Ûˆ[š[
+›ÝYšXØ][ÛŠHÂˆÛÛœÝØš™XÝ[›ÝYšXØ][Û‹™]K›Øš™XÝ\O[›ÝYšXØ][Û‹\NÂˆYŠ›ÝYšXØ][Û‹›]™[[ÙHOOY˜[Ù_Øš™XÝ›]™[[ÙOOO]YJ]›ÝÈ™]È\œ›ÜŠ	Ó]™KUÙXšÛÚÈÙ\Ü\œ	ÊNÂˆYŠ‹œ™\\™J	ÔÑSPÕH”“ÓHÙXšÛÚ×Ü™XÙZ\ÈÒT‘HYOÉÊK™Ù]
+›ÝYšXØ][Û‹šY
+J\™]\›ˆ˜[ÙNÂˆÛÛœÝÚXÚÛÝ]\\Ï[™]ÈÙ]
+ÉØÚXÚÛÝ]œÙ\ÜÚ[Û‹˜ÛÛ\]Y	Ë	ØÚXÚÛÝ]œÙ\ÜÚ[Û‹˜\Þ[˜×Ü^[Y[ÜÝXØÙYYY	Ë	ØÚXÚÛÝ]œÙ\ÜÚ[Û‹˜\Þ[˜×Ü^[Y[Ù˜Z[Y	Ë	ØÚXÚÛÝ]œÙ\ÜÚ[Û‹™^\™Y	×JNÂˆYŠXÚXÚÛÝ]\\Ëš\Ê\JI‰ˆ\™[]˜[^[Y[]™[Ëš\Ê\JJ^Ù‹œ™\\™J	ÒS”ÑT•S•ÈÙXšÛÚ×Ü™XÙZ\ÈSQTÈ
+ËÊIÊKœ[Š›ÝYšXØ][Û‹šY]K››ÝÊ
+JNÜ™]\›ˆ˜[ÙNßBˆ]^[Y[ÂˆYŠÚXÚÛÝ]\\Ëš\Ê\JJ\^[Y[Y‹œ™\\™J	ÔÑSPÕŠˆ”“ÓH^[Y[ÈQ•“ÒSˆ^[Y[Ø][\ÈHÓˆKœ^[Y[ÚY\šYÒT‘HœÝš\WÜÙ\ÜÚ[Û—ÚYOÈÔˆKœÝš\WÜÙ\ÜÚ[Û—ÚYOÈSRUIÊK™Ù]
+Øš™XÝšYØš™XÝšY
+NÂˆ[ÙH^[Y[\^[Y[›Ü”Ýš\SØš™XÝ
+Øš™XÝ
+NÂˆYŠ\^[Y[
+]›ÝÈ™]È\œ›ÜŠ[˜™ZØ[›\È˜Z[™ÜÙ\™ZYÛš\È	Ý\_NÈÙXšÛÚÈ\›™]]\Ý[[˜
+NÂˆ][\\^[Y[[\]™[Ëš\Ê\JNÂˆ‹˜[œØXÝ[ÛŠ
+
+OOžÂˆÛÛœÝ›ÝÏQ]K››ÝÊ
+NÂˆ‹œ™\\™J	ÒS”ÑT•S•ÈÙXšÛÚ×Ü™XÙZ\ÈSQTÈ
+ËÊIÊKœ[Š›ÝYšXØ][Û‹šY›ÝÊNÂˆÛÛœÝ][\Y‹œ™\\™J	ÔÑSPÕ
+ˆ”“ÓH^[Y[Ø][\ÈÒT‘HÝš\WÜÙ\ÜÚ[Û—ÚYOÉÊK™Ù]
+Øš™XÝšY
+NÂˆYŠÚXÚÛÝ]\\Ëš\Ê\JJ^ÂˆÛÛœÝY]Y]O[Øš™XÝ›Y]Y]_ßNÂˆÛÛœÝÛÛœÙ[X]Ú\ÏJY]Y]K˜Ý\ÝÛY\•\_	ØÛÛœÝ[Y\‰ÊOOO\^[Y[˜Ý\ÝÛY\—Ý\I‰ŠY]Y]K™X\›TÝ\™\]Y\Ý	Ù˜[ÙIÊOOOTÝš[™ÊH\^[Y[™X\›WÜÝ\Ü™\]Y\ÝYØ]
+I‰ŠY]Y]K™X\›TÝ\XÚÛ›ÝÛYÙY	Ù˜[ÙIÊOOOTÝš[™ÊH\^[Y[™X\›WÜÝ\ØXÚÛ›ÝÛYÙYØ]
+I‰ŠY]Y]K\›\ÐXØÙ\Y	Ù˜[ÙIÊOOOTÝš[™ÊH\^[Y[\›\×ØXØÙ\YØ]
+I‰ŠY]Y]K\›\Õ™\œÚ[ÛŸ	ÉÊOOOJ^[Y[\›\×Ý™\œÚ[ÛŸ	ÉÊNÂˆYŠØš™XÝ˜Ý\œ™[˜ÞHOOIÙ]\‰ßØš™XÝ˜[[Ý[ÝÝ[OO\^[Y[˜[[Ý[ØÙ[ßØš™XÝ›[ÙHOOIÜ^[Y[	ßY]Y]Kœ^[Y[YOO\^[Y[šYY]Y]K™]™[YOO\^[Y[™]™[ÚYXÛÛœÙ[X]Ú\Ê]›ÝÈ™]È\œ›ÜŠ	Ö˜Z[™ÜÙ][ˆÝ[[Y[ˆšXÚ0ï™\™Z[‰ÊNÂˆYŠ][\
+Y‹œ™\\™J	ÕTUH^[Y[Ø][\ÈÑUÝ]\ÏOË\]YØ]OÈÒT‘HYOÉÊKœ[Š\OOOIØÚXÚÛÝ]œÙ\ÜÚ[Û‹™^\™Y	ÏÉÙ^\™Y	Î\OOOIØÚXÚÛÝ]œÙ\ÜÚ[Û‹˜\Þ[˜×Ü^[Y[Ù˜Z[Y	ÏÉÙ˜Z[Y	Î›Øš™XÝœ^[Y[ÜÝ]\ÏOOIÜZY	ÏÉÜZY	Î‰ØÛÛ\]IË›ÝË][\šY
+NÂˆYŠØš™XÝœ^[Y[Ú[[
+^ØÛÛœÝO]\[ÙˆØš™XÝœ^[Y[Ú[[OOIÜÝš[™ÉÏÛØš™XÝœ^[Y[Ú[[›Øš™XÝœ^[Y[Ú[[šYÙ‹œ™\\™J	ÕTUH^[Y[ÈÑUÝš\WÜ^[Y[Ú[[ÚYOÈÒT‘HYOÉÊKœ[ŠK^[Y[šY
+NßBˆYŠØš™XÝš[›ÚXÙ_Øš™XÝ˜Ý\ÝÛY\Š^ØÛÛœÝ[›ÚXÙO]\[ÙˆØš™XÝš[›ÚXÙOOOIÜÝš[™ÉÏÛØš™XÝš[›ÚXÙN›Øš™XÝš[›ÚXÙOËšYØÛÛœÝÝ\ÝÛY\]\[ÙˆØš™XÝ˜Ý\ÝÛY\OOIÜÝš[™ÉÏÛØš™XÝ˜Ý\ÝÛY\Ž›Øš™XÝ˜Ý\ÝÛY\ËšYÙ‹œ™\\™J	ÕTUH^[Y[ÈÑUÝš\WÚ[›ÚXÙWÚYPÓÐSTÐÑJËÝš\WÚ[›ÚXÙWÚY
+KÝš\WØÝ\ÝÛY\—ÚYPÓÐSTÐÑJËÝš\WØÝ\ÝÛY\—ÚY
+HÒT‘HYOÉÊKœ[Š[›ÚXÙKÝ\ÝÛY\‹^[Y[šY
+NßBˆYŠÉØÚXÚÛÝ]œÙ\ÜÚ[Û‹˜ÛÛ\]Y	Ë	ØÚXÚÛÝ]œÙ\ÜÚ[Û‹˜\Þ[˜×Ü^[Y[ÜÝXØÙYYY	×Kš[˜ÛY\Ê\JI‰›Øš™XÝœ^[Y[ÜÝ]\ÏOOIÜZY	É‰œ^[Y[œÝ]\ÏOOIÜ[™[™ÉÊ^ÂˆÛÛœÝO[ÛÚÝ\
+^[Y[™]™[ÚY
+NÂˆYŠÉÜ[™[™ÉË	ÝšX[	×Kš[˜ÛY\ÊKœÝ]\ÊI‰ˆYK™[]YØ]
+^ØÛÛœÝ]™[[™YK™]™[Ù]OÙ]™[XY[™JK™]™[Ù]JN™K™^\™\×Ø]›ÝÊÜ^[Y[›[ÛÊŒÌ
+ŽÙ‹œ™\\™J•TUH]™[ÈÑUÝ]\ÏIÜZY	Ë^\™\×Ø]OÈÒT‘HYOÈŠKœ[Š]™[[™KšY
+NÙ‹œ™\\™J•TUH^[Y[ÈÑUÝ]\ÏIÜZY	ËZYØ]PÓÐSTÐÑJZYØ]ÊHÒT‘HYOÈŠKœ[Š›ÝË^[Y[šY
+NÙ‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•ÈÛÛ˜XÝØÛÛ™š\›X][ÛœÈ
+^[Y[ÚY™XÚ\Y[Ý]\Ë][\ËÜ™X]YØ]
+HSQTÈ
+ËË	Ü[™[™ÉËÊHŠKœ[Š^[Y[šYK™[XZ[›ÝÊNßBˆBˆY[ÙHYŠ\KœÝ\ÕÚ]
+	Ü™Y[™‰Ê_\OOOIØÚ\™ÙKœ™Y[™Y	Ê^ÂˆÛÛœÝ™Y[™]\OOOIØÚ\™ÙKœ™Y[™Y	ÏÛ[›Øš™XÝÂˆÛÛœÝ[[Ý[S[X™\Š™Y[™Ë˜[[Ý[ÏÛØš™XÝ˜[[Ý[Ü™Y[™YÏÌ
+K™Y[™Ý]\Ï]\OOOIÜ™Y[™™˜Z[Y	ÏÉÙ˜Z[Y	Îœ™Y[™ËœÝ]\ÏOOIÜÝXØÙYYY	ß\OOOIØÚ\™ÙKœ™Y[™Y	ÏÉÜÝXØÙYYY	Î‰Ü[™[™ÉÎÂˆYŠ™Y[™
+^ÂˆÛÛœÝÛ›ÝÛY‹œ™\\™J	ÔÑSPÕ
+ˆ”“ÓH™Y[™ÈÒT‘HÝš\WÜ™Y[™ÚYOÉÊK™Ù]
+™Y[™šY
+_‹œ™\\™J	ÔÑSPÕ
+ˆ”“ÓH™Y[™ÈÒT‘HYOÉÊK™Ù]
+™Y[™›Y]Y]OË™XÚ\Ú[Û’Y	ÉÊNÂˆYŠÛ›ÝÛŠY‹œ™\\™J	ÕTUH™Y[™ÈÑUÝš\WÜ™Y[™ÚYPÓÐSTÐÑJÝš\WÜ™Y[™ÚYÊKÝ]\ÏOË\]YØ]OÈÒT‘HYOÉÊKœ[Š™Y[™šY™Y[™Ý]\Ë›ÝËÛ›ÝÛ‹šY
+NÂˆ[ÙH‹œ™\\™J’S”ÑT•S•È™Y[™È
+Y^[Y[ÚYÝš\WÜ™Y[™ÚY[[Ý[ØÙ[Ë™X\ÛÛ‹XÚ\Ú[Û—Û›ÝKXÝÜ—Ù[XZ[Ý]\ËÜ™X]YØ]\]YØ]
+HSQTÈ
+ËËËË	ÜÝš\IË	Õ›ÛˆÝš\HÙ[Y[]	Ë	ÔÝš\IËËËÊHŠKœ[ŠÜž\Ëœ˜[™ÛUURQ
+
+K^[Y[šY™Y[™šY[[Ý[™Y[™Ý]\Ë›ÝË›ÝÊNÂˆY[ÙHYŠØš™XÝœ™Y[™Y
+^Ù‹œ™\\™J•TUH™Y[™ÈÑUÝ]\ÏIÜÝXØÙYYY	Ë\]YØ]OÈÒT‘H^[Y[ÚYOÈS‘Ý]\ÈSˆ
+	ÜÝX›Z]Y	Ë	Ü[™[™ÉÊHŠKœ[Š›ÝË^[Y[šY
+NßBˆ™Yœ™\Ú™Y[™Ý]J^[Y[šY
+NÂˆ[\]YNÂˆY[ÙHYŠ\KœÝ\ÕÚ]
+	ØÚ\™ÙK™\Ü]K‰ÊJ^ÂˆYŠ\OOOIØÚ\™ÙK™\Ü]K˜Ü™X]Y	ß\OOOIØÚ\™ÙK™\Ü]K\]Y	ß\OOOIØÚ\™ÙK™\Ü]K™[™×ÝÚ]˜]Û‰ÊY‹œ™\\™J•TUH^[Y[ÈÑUÝ]\ÏIÙ\Ü]Y	ÈÒT‘HYOÈS‘Ý]\È“ÕSˆ
+	Ü™Y[™Y	Ë	Ù\Ü]YÛÜÝ	ÊHŠKœ[Š^[Y[šY
+NÂˆYŠ\OOOIØÚ\™ÙK™\Ü]K˜ÛÜÙY	Ê^ÂˆYŠÉÝÛÛ‰Ë	ÝØ\›š[™×ØÛÜÙY	×Kš[˜ÛY\ÊØš™XÝœÝ]\ÊJ^Ù‹œ™\\™J•TUH^[Y[ÈÑUÝ]\ÏIÜZY	ÈÒT‘HYOÈS‘Ý]\ÈSˆ
+	Ù\Ü]Y	Ë	Ù\Ü]YÛÜÝ	ÊHŠKœ[Š^[Y[šY
+NÙ‹œ™\\™J•TUH]™[ÈÑUÝ]\ÏIÜZY	ÈÒT‘HYOÈS‘Ý]\ÏIÜ™Y[™Y	ÈŠKœ[Š^[Y[™]™[ÚY
+NÜ™Yœ™\Ú™Y[™Ý]J^[Y[šY
+NßBˆ[ÙHYŠØš™XÝœÝ]\ÏOOIÛÜÝ	Ê^Ù‹œ™\\™J•TUH^[Y[ÈÑUÝ]\ÏIÙ\Ü]YÛÜÝ	Ë™Y[™YØ]OÈÒT‘HYOÈŠKœ[Š›ÝË^[Y[šY
+NÙ‹œ™\\™J•TUH]™[ÈÑUÝ]\ÏIÜ™Y[™Y	ÈÒT‘HYOÈS‘Ý]\ÏIÜZY	ÈŠKœ[Š^[Y[™]™[ÚY
+NßBˆBˆYŠ\OOOIØÚ\™ÙK™\Ü]K™[™×Ü™Z[œÝ]Y	Ê^Ù‹œ™\\™J•TUH^[Y[ÈÑUÝ]\ÏIÜZY	Ë™Y[™YØ]S•SÒT‘HYOÈS‘Ý]\ÏIÙ\Ü]YÛÜÝ	ÈŠKœ[Š^[Y[šY
+NÙ‹œ™\\™J•TUH]™[ÈÑUÝ]\ÏIÜZY	ÈÒT‘HYOÈS‘Ý]\ÏIÜ™Y[™Y	ÈŠKœ[Š^[Y[™]™[ÚY
+NÜ™Yœ™\Ú™Y[™Ý]J^[Y[šY
+NßBˆ[\]YNÂˆBˆÛÛœÝØY™Q]Z[Ï^ÛØš™XÝY›Øš™XÝšYÝ]\Î›Øš™XÝœÝ]\ßØš™XÝœ^[Y[ÜÝ]\ß[™X\ÛÛŽ›Øš™XÝœ™X\ÛÛŸ[[[Ý[›Øš™XÝ˜[[Ý[ÏÛØš™XÝ˜[[Ý[Ü™Y[™YÏÛØš™XÝ˜[[Ý[ÝÝ[ÏÛ[Ý\œ™[˜ÞN›Øš™XÝ˜Ý\œ™[˜Þ_[^[Y[[[\[ÙˆØš™XÝœ^[Y[Ú[[OOIÜÝš[™ÉÏÛØš™XÝœ^[Y[Ú[[›Øš™XÝœ^[Y[Ú[[ËšY[Ú\™ÙN\[ÙˆØš™XÝ˜Ú\™ÙOOOIÜÝš[™ÉÏÛØš™XÝ˜Ú\™ÙN›Øš™XÝ˜Ú\™ÙOËšY[NÂˆÛÛœÝ]™[YX]Y]^[Y[]™[
+ÜÝš\Q]™[Y››ÝYšXØ][Û‹šY^[Y[Yœ^[Y[šYÛÝ\˜ÙN‰ÜÝš\IË]™[\N\KÝ]\Î›Øš™XÝœÝ]\ßØš™XÝœ^[Y[ÜÝ]\ß	Ü™XÙZ]™Y	Ë[[Ý[Ù[ÎœØY™Q]Z[Ë˜[[Ý[]Z[ÎœØY™Q]Z[ßJNÂˆYŠ[\	‰ˆY‹œ™\\™J	ÔÑSPÕH”“ÓH^[Y[Ø[\ÈÒT‘H]™[ÚYOÉÊK™Ù]
+]™[Y
+JY‹œ™\\™J’S”ÑT•S•È^[Y[Ø[\È
+]™[ÚYÝ]\Ë][\ËÜ™X]YØ]
+HSQTÈ
+Ë	Ü[™[™ÉËÊHŠKœ[Š]™[Y›ÝÊNÂˆJJ
+NÂˆ™]\›ˆYNÂˆBˆ\œÜÝ
+	ËØ\KÜÝš\KÝÙXšÛÚÉË^™\ÜËœ˜]ÊÝ\N‰Ø\XØ][Û‹ÚœÛÛ‰Ë[Z]‰Ì[X‰ßJK\Þ[˜Ê™\K™\ÊOOžÂˆYˆ
+\Ýš\HXÙ™Ë”Õ’TWÕÑP’ÓÒ×ÔÑPÔ‘U
+H™]\›ˆ˜Z[
+™\ËLË	ÔÝš\H›ØÚšXÚZ[™Ù\šXÚ]‰ÊNÂˆ]]™[ÂˆžHÈ]™[HÝš\KÙXšÛÚÜË˜ÛÛœÝXÝ]™[
+™\K˜›ÙK™\KšXY\œÖÉÜÝš\K\ÚYÛ˜]\™I×KÙ™Ë”Õ’TWÕÑP’ÓÒ×ÔÑPÔ‘U
+NÈBˆØ]ÚÈ™]\›ˆ˜Z[
+™\Ë	Õ[™ðïYÙHÙXšÛÚËTÚYÛ˜]\‹‰ÊNÈBˆžHÈ[š[
+]™[
+NÈ]ØZ]›\ÚÛÛ˜XÝÛÛ™š\›X][ÛœÊ
+NÈ]ØZ]›\ÚÚ]˜]Ø[ÛÛ™š\›X][ÛœÊ
+NÈ]ØZ]›\Ú^[Y[[\Ê
+NÈ™\ËšœÛÛŠÜ™XÙZ]™YY_JNÈBˆØ]Ú
+\œŠHÈÛÛœÛÛK™\œ›ÜŠ	ÕÙXšÛÚÎ‰Ë\œ‹›Y\ÜØYÙJNÈ˜Z[
+™\ËL	Ö˜Z[™ÜØ™\Ý0éYÝ[™ÈÛÛ›HšXÚ™\˜\˜™Z]]Ù\™[‹‰ÊNÈBˆJNÂˆ\\ÙJ^™\ÜËšœÛÛŠÛ[Z]‰ÌÌšØ‰ßJJNÂˆ\\ÙJ
+™\K™\Ë™^
+OOžÂˆÛÛœÝX]ÚHÊÎ—Ÿ×ÊŠY]™[ÜÙ\ÜÚ[ÛJØKYŒNW^ÍJJÎŽß	
+KË™^XÊ™\KšXY\œË˜ÛÛÚÚYH	ÉÊNÂˆYŠX]Ú
+HÂˆÛÛœÝÙ\ÜÚ[ÛˆH‹œ™\\™J	ÔÑSPÕËŠ‹K™[XZ[K™[XZ[Ý™\šYšYYØ]”“ÓHÙ\ÜÚ[ÛœÈÈ“ÒSˆ\Ù\œÈHÓˆKšY\Ë\Ù\—ÚYÒT‘HÚÙ[—Ú\ÚOÈS‘^\™\×Ø]ÉÊK™Ù]
+\Ú
+X]ÚÌWJK]K››ÝÊ
+JNÂˆYŠÙ\ÜÚ[ÛŠHÜ™\K\Ù\^ÚYœÙ\ÜÚ[Û‹\Ù\—ÚY[XZ[œÙ\ÜÚ[Û‹™[XZ[NÈ™\KœÙ\ÜÚ[Û\Ù\ÜÚ[ÛŽßBˆBˆ™^
+
+NÂˆJNÂˆËÈÝY\Ý\ØYÈ\™H[˜]][XØ]Y]]\ÝÜšYÚ[˜]Hœ›ÛHH\XØ][Û‹‚ˆ\\ÙJ
+™\K™\Ë™^
+OOžÂˆYˆ
+VÉÔÔÕ	Ë	ÔUÒ	Ë	ÑSUIË	ÔU	×Kš[˜ÛY\Ê™\K›Y]Ù
+JH™]\›ˆ™^
+
+NÂˆYŠ™\KšXY\œË›ÜšYÚ[ˆOOH˜\ÙU\››ÜšYÚ[ŠH™]\›ˆ˜Z[
+™\ËË	Õ[™ðïYÙH\šÝ[™\ˆ[™œ˜YÙK‰ÊNÂˆYŠ™\K\Ù\ˆ	‰ˆ™\KšXY\œÖÉÞXÜÜ™‹]ÚÙ[‰×HOOH™\KœÙ\ÜÚ[Û‹˜ÜÜ™ŠH™]\›ˆ˜Z[
+™\ËË	ÔÚXÚ\šZ]ËUÚÙ[ˆ™Z‰ÊNÂˆ™^
+
+NÂˆJNÂˆÛÛœÝ]][Z]\˜]S[Z]
+ÝÚ[™ÝÓ\ÎŒMJŒ
+ŒL[Z]ŒŒÝ[™\™XY\œÎ‰Ù˜YN	ËYØXÞRXY\œÎ™˜[Ù_JNÂˆÛÛœÝ\ØY[Z]\˜]S[Z]
+ÝÚ[™ÝÓ\ÎŒ
+ŒL[Z]ŒŒÝ[™\™XY\œÎ‰Ù˜YN	ËYØXÞRXY\œÎ™˜[Ù_JNÂˆÛÛœÝÝY\Ý›ÛÚÓ[Z]\˜]S[Z]
+ÝÚ[™ÝÓ\ÎŒMJŒ
+ŒL[Z]KÝ[™\™XY\œÎ‰Ù˜YN	ËYØXÞRXY\œÎ™˜[Ù_JNÂˆ[˜Ý[ÛˆÙÚ[”™\]Z\™Y
+™\K™\Ë™^
+HÈYŠ\™\K\Ù\ŠH™]\›ˆ˜Z[
+™\ËK	Ðš]H[›Y[[‹‰ÊNÈYŠ[][™Õ\Ù\œËš\Ê™\K\Ù\‹šY
+JH™]\›ˆ˜Z[
+™\ËK	ÒÛÛÛ0íœØÚ[™È0éYˆš]HÝ\žˆØ\[‹‰ÊNÈ™^
+
+NÈBˆ\Þ[˜È[˜Ý[Ûˆ\ÜÝÛÜ™\Ú
+\ÜÝÛÜ™Ø[\˜[™ÛJ
+JHÜ™]\›ˆ	ÜØ[N‰Ê]ØZ]ØÜž\
+\ÜÝÛÜ™Ø[
+JKÔÝš[™Ê	Ú^	Ê_XßBˆ[˜Ý[ÛˆÝ\Ù\ÜÚ[ÛŠ™\K™\Ë\Ù\ŠHÂˆÛÛœÝÚÙ[\˜[™ÛJ
+KÜÜ™\˜[™ÛJ
+NÂˆ‹œ™\\™J	ÒS”ÑT•S•ÈÙ\ÜÚ[ÛœÈSQTÈ
+ËËËÊIÊKœ[Š\Ú
+ÚÙ[ŠK\Ù\‹šYÜÜ™‹]K››ÝÊ
+JÍÊŽ
+NÂˆ™\Ë˜ÛÛÚÚYJ	Ù]™[ÜÙ\ÜÚ[Û‰ËÚÙ[‹ÚÛ›NYKÙXÝ\™N˜˜\ÙU\›œ›ÝØÛÛOOIÚÎ‰ËØ[YTÚ]N‰Û^	ËX^YÙNÊŽ]‰ËÉßJNÂˆ™\ËšœÛÛŠÝ\Ù\ŽžÚY\Ù\‹šY[XZ[\Ù\‹™[XZ[KÜÜ™ŸJNÂˆBˆ\œÜÝ
+	ËØ\KØ]]Ü™YÚ\Ý\‰Ë]][Z]Ü˜\
+\Þ[˜Ê™\K™\ÊOOžÂˆÛÛœÝ[XZ[TÝš[™Ê™\K˜›ÙK™[XZ[	ÉÊKš[J
+KÓÝÙ\Ø\ÙJ
+K\ÜÝÛÜ™\™\K˜›ÙKœ\ÜÝÛÜ™ÂˆYŠK×–×—ÐJÐ×—ÐJ×–×—ÐJÉË\Ý
+[XZ[
+H[XZ[›[™ÝŒM\[Ùˆ\ÜÝÛÜ™OOIÜÝš[™ÉÈ\ÜÝÛÜ™›[™ÝLˆ\ÜÝÛÜ™›[™ÝŒLŽ
+H™]\›ˆ˜Z[
+™\Ë	ÑðïYÙHKSXZ[[™\ÜÝÛÜZ]L¸ $ÌLŽ™ZXÚ[ˆ\™›Ü™\›XÚ‰ÊNÂˆÛÛœÝ[˜ÛÙYX]ØZ]\ÜÝÛÜ™\Ú
+\ÜÝÛÜ™
+NÂˆÛÛœÝ\Ù\^ÚY˜Üž\Ëœ˜[™ÛUURQ
+
+K[XZ[NÂˆžHÙ‹œ™\\™J	ÒS”ÑT•S•È\Ù\œÈ
+Y[XZ[\ÜÝÛÜ™Ú\ÚÜ™X]YØ]
+HSQTÈ
+ËËËÊIÊKœ[Š\Ù\‹šY[XZ[[˜ÛÙY]K››ÝÊ
+JNßBˆØ]Ú
+\œŠHÚYŠ\œ‹˜ÛÙOOOIÔÔSUWÐÓÓ”ÕRS•ÕS’TUQIÊH™]\›ˆ˜Z[
+™\ËK	Ô™YÚ\ÝšY\[™ÈšXÚpí™ÛXÚˆš]H[›Y[[‹‰ÊNÈ›ÝÈ\œŽßBˆYŠXZ[\Š^ØÛÛœÝÚÙ[\˜[™ÛJ
+NÙ‹œ™\\™J	ÒS”ÑT•S•È[XZ[Ý™\šYšXØ][ÛœÈSQTÈ
+ËËÊIÊKœ[Š\Ú
+ÚÙ[ŠK\Ù\‹šY]K››ÝÊ
+JÎ
+NÂˆž^Ø]ØZ]XZ[\ŠÝÎ™[XZ[ÝXš™XÝ‰ÕÚ[ÛÛ[Y[ˆ™ZHš[˜[Û˜\8 $È™\Ý0éYÙHZ[™HKSXZ[	Ë^˜Z[ˆÛÛÈ\Ý\œÝ[—™\Ý0éYÙHZ[™HKSXZ[PY™\ÜÙNˆ	Ø˜\ÙU\››ÜšYÚ[ŸKÝ™\šYžKY[XZ[ÉÝÚÙ[ŸW‘\ˆ[šÈÚ[Ý[™[‹—‘Z[ˆ™\˜[œÝ[\šÛÛÎˆ	Ø˜\ÙU\››ÜšYÚ[ŸKÙ\Ú›Ø\™‘˜[ÈHÙZ[ˆÛÛÈ\œÝ[\ÝYÛ›ÜšY\™HY\ÙH˜XÚšXÚ˜JNßBˆØ]ÚÙ‹œ™\\™J	ÑSUH”“ÓH[XZ[Ý™\šYšXØ][ÛœÈÒT‘HÚÙ[—Ú\ÚOÉÊKœ[Š\Ú
+ÚÙ[ŠJNØÛÛœÛÛK™\œ›ÜŠ	Ô™YÚ\ÝšY\[™ÜËQKSXZ[ÛÛ›HšXÚYÙ\Ý[Ù\™[‹‰ÊNß_BˆÝ\Ù\ÜÚ[ÛŠ™\K™\Ë\Ù\ŠNÂˆJJNÂˆ\œÜÝ
+	ËØ\KØ]]ÛÙÚ[‰Ë]][Z]Ü˜\
+\Þ[˜Ê™\K™\ÊOOžÂˆÛÛœÝ\Ù\Y‹œ™\\™J	ÔÑSPÕ
+ˆ”“ÓH\Ù\œÈÒT‘H[XZ[OÉÊK™Ù]
+Ýš[™Ê™\K˜›ÙK™[XZ[	ÉÊKš[J
+KÓÝÙ\Ø\ÙJ
+JNÂˆÛÛœÝ\ÜÝÛÜ™\™\K˜›ÙKœ\ÜÝÛÜ™ÂˆYŠ\[Ùˆ\ÜÝÛÜ™OOIÜÝš[™ÉÈ\ÜÝÛÜ™›[™ÝŒLŽ
+H™]\›ˆ˜Z[
+™\ËK	Ð[›Y[Y][ˆÝ[[Y[ˆšXÚ‰ÊNÂˆÛÛœÝÜØ[ÝÜ™YOJ\Ù\Ëœ\ÜÝÛÜ™Ú\Ú	ÉÌ	Ëœ™\X]
+
+_N‰ÉÌ	Ëœ™\X]
+LŽ
+_X
+KœÜ]
+	Î‰ÊNÂˆÛÛœÝ\š]™YX]ØZ]ØÜž\
+\ÜÝÛÜ™Ø[
+NÂˆYŠXÜž\Ë[Z[™ÔØY™Q\]X[
+Y™™\‹™œ›ÛJÝÜ™Y	Ú^	ÊK\š]™Y
+H]\Ù\ŠH™]\›ˆ˜Z[
+™\ËK	Ð[›Y[Y][ˆÝ[[Y[ˆšXÚ‰ÊNÂˆÝ\Ù\ÜÚ[ÛŠ™\K™\Ë\Ù\ŠNÂˆJJNÂˆ\™Ù]
+	ËØ\KØ]]ÛYIËÙÚ[”™\]Z\™Y
+™\K™\ÊOOœ™\ËšœÛÛŠÝ\Ù\Žœ™\K\Ù\‹ÜÜ™Žœ™\KœÙ\ÜÚ[Û‹˜ÜÜ™‹[XZ[™\šYšYYˆHY‹œ™\\™J	ÔÑSPÕ[XZ[Ý™\šYšYYØ]”“ÓH\Ù\œÈÒT‘HYOÉÊK™Ù]
+™\K\Ù\‹šY
+K™[XZ[Ý™\šYšYYØ][XZ[[]™\žP]˜Z[X›NˆH[XZ[\ŸJJNÂˆ\œÜÝ
+	ËØ\KØ]]Ù›Ü™ÛÝ\\ÜÝÛÜ™	Ë]][Z]Ü˜\
+\Þ[˜Ê™\K™\ÊOOžÂˆYŠ[XZ[\Š\™]\›ˆ˜Z[
+™\ËLË	Ô\ÜÝÛÜ\°ïÚÜÙ]™[ˆ\Ý›ØÚšXÚ™\™°ïØ˜\Žˆ\ˆKSXZ[U™\œØ[™Ú\™Ù\˜YHZ[™Ù\šXÚ]‰ÊNÂˆÛÛœÝ\Ù\Y‹œ™\\™J	ÔÑSPÕ
+ˆ”“ÓH\Ù\œÈÒT‘H[XZ[OÉÊK™Ù]
+Ýš[™Ê™\K˜›ÙK™[XZ[	ÉÊKš[J
+KÓÝÙ\Ø\ÙJ
+JNÂˆYŠ\Ù\Š^ØÛÛœÝÚÙ[\˜[™ÛJ
+NÙ‹œ™\\™J	ÒS”ÑT•S•È\ÜÝÛÜ™Ü™\Ù]ÈSQTÈ
+ËËÊIÊKœ[Š\Ú
+ÚÙ[ŠK\Ù\‹šY]K››ÝÊ
+JÌÍŒ
+NÂˆž^Ø]ØZ]XZ[\ŠÝÎ\Ù\‹™[XZ[ÝXš™XÝ‰Ô\ÜÝÛÜ\°ïÚÜÙ]™[ˆ0­Èš[˜[Û˜\	Ë^˜™]Y\È\ÜÝÛÜ™\ÝYÙ[Žˆ	Ø˜\ÙU\››ÜšYÚ[ŸKÜ™\Ù]\\ÜÝÛÜ™ÉÝÚÙ[ŸW‘Y\Ù\ˆ[šÈ\ÝZ[™HÝ[™HðïYËˆ˜[ÈHZˆšXÚ[™ÙY›Ü™\\ÝYÛ›ÜšY\™HY\ÙH˜XÚšXÚ˜JNßXØ]ÚÙ‹œ™\\™J	ÑSUH”“ÓH\ÜÝÛÜ™Ü™\Ù]ÈÒT‘HÚÙ[—Ú\ÚOÉÊKœ[Š\Ú
+ÚÙ[ŠJNß_Bˆ™\ËšœÛÛŠÜÝXØÙ\ÜÎYKY\ÜØYÙN‰Ñ˜[ÈZ[ˆÛÛÈ^\ÝY\\š0éÝHZ[™[ˆ[šÈ[H\°ïÚÜÙ]™[‹‰ßJNÂˆJJNÂˆ\œÜÝ
+	ËØ\KØ]]Ü™\Ù]\\ÜÝÛÜ™	Ë]][Z]Ü˜\
+\Þ[˜Ê™\K™\ÊOOžÂˆÛÛœÝÚÙ[TÝš[™Ê™\K˜›ÙKÚÙ[Ÿ	ÉÊK\ÜÝÛÜ™\™\K˜›ÙKœ\ÜÝÛÜ™ÂˆYŠK×–ØKYŒNW^ÍIË\Ý
+ÚÙ[Š_\[Ùˆ\ÜÝÛÜ™OOIÜÝš[™Éß\ÜÝÛÜ™›[™ÝLŸ\ÜÝÛÜ™›[™ÝŒLŽ
+\™]\›ˆ˜Z[
+™\Ë	ÑðïYÙ[ˆ[šÈ[™\ÜÝÛÜZ]L¸ $ÌLŽ™ZXÚ[ˆ™\Ù[™[‹‰ÊNÂˆÛÛœÝ[˜ÛÙYX]ØZ]\ÜÝÛÜ™\Ú
+\ÜÝÛÜ™
+NÂˆÛÛœÝÚ[™ÙYY‹˜[œØXÝ[ÛŠ
+
+OOžØÛÛœÝ™XÛÜ™Y‹œ™\\™J	ÔÑSPÕ
+ˆ”“ÓH\ÜÝÛÜ™Ü™\Ù]ÈÒT‘HÚÙ[—Ú\ÚOÈS‘^\™\×Ø]ÉÊK™Ù]
+\Ú
+ÚÙ[ŠK]K››ÝÊ
+JNÚYŠ\™XÛÜ™
+\™]\›ˆ˜[ÙNÂˆ‹œ™\\™J	ÕTUH\Ù\œÈÑU\ÜÝÛÜ™Ú\ÚOÈÒT‘HYOÉÊKœ[Š[˜ÛÙY™XÛÜ™\Ù\—ÚY
+NÙ‹œ™\\™J	ÑSUH”“ÓH\ÜÝÛÜ™Ü™\Ù]ÈÒT‘H\Ù\—ÚYOÉÊKœ[Š™XÛÜ™\Ù\—ÚY
+NÙ‹œ™\\™J	ÑSUH”“ÓHÙ\ÜÚ[ÛœÈÒT‘H\Ù\—ÚYOÉÊKœ[Š™XÛÜ™\Ù\—ÚY
+NÜ™]\›ˆYNßJJ
+NÂˆYŠXÚ[™ÙY
+\™]\›ˆ˜Z[
+™\Ë	Ó[šÈ[™ðïYÈÙ\ˆX™Ù[]Y™[‹ˆš]HZ[™[ˆ™]Y[ˆ[™›Ü™\›‹‰ÊNÜ™\Ë˜ÛX\ÛÛÚÚYJ	Ù]™[ÜÙ\ÜÚ[Û‰ËÜ]‰ËÉßJNÜ™\ËšœÛÛŠÜÝXØÙ\ÜÎY_JNÂˆJJNÂˆ\œÜÝ
+	ËØ\KØ]]Ü™\]Y\Ý]™\šYšXØ][Û‰Ë]][Z]ÙÚ[”™\]Z\™YÜ˜\
+\Þ[˜Ê™\K™\ÊOOžÂˆYŠ[XZ[\Š\™]\›ˆ˜Z[
+™\ËLË	ÑKSXZ[U™\œØ[™\Ý›ØÚšXÚZ[™Ù\šXÚ]‰ÊNÂˆÛÛœÝÚÙ[\˜[™ÛJ
+NØÛÛœÝ^\™\ÏQ]K››ÝÊ
+JÎÂˆ‹œ™\\™J	ÒS”ÑT•S•È[XZ[Ý™\šYšXØ][ÛœÈSQTÈ
+ËËÊIÊKœ[Š\Ú
+ÚÙ[ŠK™\K\Ù\‹šY^\™\ÊNÂˆž^Ø]ØZ]XZ[\ŠÝÎœ™\K\Ù\‹™[XZ[ÝXš™XÝ‰Ð™\Ý0éYÙHZ[™HKSXZ[PY™\ÜÙH0­Èš[˜[Û˜\	Ë^˜™\Ý0éYÙHZ[™HKSXZ[PY™\ÜÙNˆ	Ø˜\ÙU\››ÜšYÚ[ŸKÝ™\šYžKY[XZ[ÉÝÚÙ[ŸW‘Y\Ù\ˆ[šÈ\ÝÝ[™[ˆðïYËˆ˜[ÈHZˆšXÚ[™ÙY›Ü™\\ÝYÛ›ÜšY\™HY\ÙH˜XÚšXÚ˜JNßBˆØ]Ú
+\œ›ÜŠ^Ù‹œ™\\™J	ÑSUH”“ÓH[XZ[Ý™\šYšXØ][ÛœÈÒT‘HÚÙ[—Ú\ÚOÉÊKœ[Š\Ú
+ÚÙ[ŠJNØÛÛœÛÛK™\œ›ÜŠ	Ð™\Ý0éYÝ[™ÜÛXZ[ˆ™\œØ[™Ý]\ÉË[X™\Š\œ›Ü‹™[]™\žTÝ]\Ê_	Ó™]Ù\šÙ™Z\‰ÊNÜ™]\›ˆ˜Z[
+™\ËLË\œ›Ü‹™[]™\žR[	ÑKSXZ[U™\œØ[™šXÚ\œ™ZXÚ˜\‹ˆš]HÜ0é\ˆ\›™]]™\œÝXÚ[‹‰ÊNßBˆ™\ËšœÛÛŠÜÝXØÙ\ÜÎY_JNÂˆJJNÂˆ\œÜÝ
+	ËØ\KØ]]Ý™\šYžKY[XZ[	Ë]][Z]
+™\K™\ÊOOžÂˆÛÛœÝÚÙ[TÝš[™Ê™\K˜›ÙKÚÙ[Ÿ	ÉÊNÚYŠK×–ØKYŒNW^ÍIË\Ý
+ÚÙ[ŠJ\™]\›ˆ˜Z[
+™\Ë	Ð™\Ý0éYÝ[™ÜÛ[šÈ[™ðïYÈÙ\ˆX™Ù[]Y™[‹‰ÊNÂˆÛÛœÝ™\šYšXØ][ÛY‹œ™\\™J	ÔÑSPÕ
+ˆ”“ÓH[XZ[Ý™\šYšXØ][ÛœÈÒT‘HÚÙ[—Ú\ÚOÈS‘^\™\×Ø]ÉÊK™Ù]
+\Ú
+ÚÙ[ŠK]K››ÝÊ
+JNÂˆYŠ]™\šYšXØ][ÛŠ\™]\›ˆ˜Z[
+™\Ë	Ð™\Ý0éYÝ[™ÜÛ[šÈ[™ðïYÈÙ\ˆX™Ù[]Y™[‹‰ÊNÂˆ‹˜[œØXÝ[ÛŠ
+
+OOžÙ‹œ™\\™J	ÕTUH\Ù\œÈÑU[XZ[Ý™\šYšYYØ]OÈÒT‘HYOÉÊKœ[Š]K››ÝÊ
+K™\šYšXØ][Û‹\Ù\—ÚY
+NÙ‹œ™\\™J	ÑSUH”“ÓH[XZ[Ý™\šYšXØ][ÛœÈÒT‘H\Ù\—ÚYOÉÊKœ[Š™\šYšXØ][Û‹\Ù\—ÚY
+NßJJ
+NÜ™\ËšœÛÛŠÜÝXØÙ\ÜÎY_JNÂˆJNÂˆ\œÜÝ
+	ËØ\KØ]]ÛÙÛÝ]	ËÙÚ[”™\]Z\™Y
+™\K™\ÊOOžÙ‹œ™\\™J	ÑSUH”“ÓHÙ\ÜÚ[ÛœÈÒT‘HÚÙ[—Ú\ÚOÉÊKœ[Š™\KœÙ\ÜÚ[Û‹ÚÙ[—Ú\Ú
+NÜ™\Ë˜ÛX\ÛÛÚÚYJ	Ù]™[ÜÙ\ÜÚ[Û‰ËÜ]‰ËÉßJNÜ™\ËšœÛÛŠÜÝXØÙ\ÜÎY_JNßJNÂˆ\™Ù]
+	ËØ\KÜÝÜ˜YÙIËÙÚ[”™\]Z\™Y
+™\K™\ÊOOžÂˆÛÛœÝ\ÚÏYœËœÝ]œÔÞ[˜Ê›ÛÝ
+NÂˆÛÛœÝ\ÚÑœ™YPž]\ÏS[X™\Š\ÚË˜˜]˜Z[
+J“[X™\Š\ÚË˜œÚ^™JNÂˆÛÛœÝ\ÚÕÝ[ž]\ÏS[X™\Š\ÚË˜›ØÚÜÊJ“[X™\Š\ÚË˜œÚ^™JNÂˆÛÛœÝ\ØY\ÚÏ^Ùœ™YPž]\Î™\ÚÑœ™YPž]\ËÝ[ž]\Î™\ÚÕÝ[ž]\ËØ\›š[™Î™\ÚÑœ™YPž]\Ï\ØY\ÚÕØ\›š[™Õ™\ÚÛ
+\ÚÕÝ[ž]\ÊK\ØYÔ]\ÙY™\ÚÑœ™YPž]\ÏRS—ÕTÐQÑ”‘QWÐ–UTËZ[š[][Qœ™YPž]\Î“RS—ÕTÐQÑ”‘QWÐ–UTßNÂˆYˆ
+ÝÔÝÜ˜YÙK›[ÙHOOH	ÜÌÉÊHÂˆÛÛœÝ\ÙYž]\ÈH[X™\Š‹œ™\\™J	ÔÑSPÕÓÐSTÐÑJÕSJž]\ÊK
+Hž]\È”“ÓHÝÜÉÊK™Ù]
+
+K˜ž]\ÊNÂˆÛÛœÝœ™YPž]\ÈHX]›X^
+ÝÜ˜YÙS[Z]H\ÙYž]\ÊNÂˆÛÛœÝØ\›š[™ÏYœ™YPž]\ÏŒ
+“ZPŸ\ØY\ÚËØ\›š[™ÎÂˆ™]\›ˆ™\ËšœÛÛŠÙœ™YPž]\ËÝ[ž]\ÎœÝÜ˜YÙS[Z]\ÙYž]\ËØ\›š[™Ë\ØYÔ]\ÙY™œ™YPž]\ÏL
+“ZPŸ\ØY\ÚË\ØYÔ]\ÙYØØ][ÛŽ‰ÛØš™XÝ\ÝÜ˜YÙIË\ØY\ÚßJNÂˆBˆ™\ËšœÛÛŠÙœ™YPž]\Î™\ÚÑœ™YPž]\ËÝ[ž]\Î™\ÚÕÝ[ž]\Ë\ÙYž]\Î™\ÚÕÝ[ž]\ËY\ÚÑœ™YPž]\ËØ\›š[™Î\ØY\ÚËØ\›š[™Ë\ØYÔ]\ÙY\ØY\ÚË\ØYÔ]\ÙYØØ][ÛŽ‰ÜÙ\™\‹Y\ÚÉË\ØY\ÚßJNÂˆJNÂˆ\™Ù]
+	ËØ\KÜ[œÉË
+™\K™\ÊOOœ™\ËšœÛÛŠØš™XÝ™œ›ÛQ[šY\ÊØš™XÝ™[šY\ÊS”ÊK›X\
+
+ÚÙ^K[—JOO–ÚÙ^KË‹‹œ[‹ÝÓ[Z]šÙ^OOOIÙ]™[	ÏÛ[“[X™\ŠÙ™Ë“PVÑU‘S•ÔÕÔßŒ
+KÝÜ˜YÙS[Z]PŽ“X]™›ÛÜŠ[X™\ŠÙ™Ë“PVÑU‘S•Ð–UTßJŒL
+ŠŒÊKÌL
+ŠŒŠKÝÜ˜YÙS[Z]ÐŽ“[X™\Š
+[X™\ŠÙ™Ë“PVÑU‘S•Ð–UTßJŒL
+ŠŒÊKÌL
+ŠŒÊKÑš^Y
+JJ_WJJJJNÂˆ\™Ù]
+	ËØ\KÙ]™[ÉËÙÚ[”™\]Z\™Y
+™\K™\ÊOOžÂˆÛÛœÝ]™[ÏY‹œ™\\™JÑSPÕKŠ‹ÓÕS•
+šY
+HÝÐÛÝ[ÓÐSTÐÑJÕSJ˜ž]\ÊK
+HÝÜ˜YÙPž]\Âˆ”“ÓH]™[ÈHQ•“ÒSˆÝÜÈÓˆ™]™[ÚYYKšYˆÒT‘HK›ÝÛ™\—ÚYOÈS‘K™[]YØ]TÈ•SÔ“ÕT–HKšYÔ‘Tˆ–HK˜Ü™X]YØ]TÐØ
+K˜[
+™\K\Ù\‹šY
+NÂˆ™\ËšœÛÛŠÙ]™[Î™]™[Ë›X\
+OOžØÛÛœÝ^[Y[Y‹œ™\\™J	ÔÑSPÕYÝ]\ËÝ\ÝÛY\—Ý\KZYØ]X\›WÜÝ\Ü™\]Y\ÝYØ]X\›WÜÝ\ØXÚÛ›ÝÛYÙYØ]\›\×ØXØÙ\YØ]\›\×Ý™\œÚ[Û‹Ýš\WÚ[›ÚXÙWÚY”“ÓH^[Y[ÈÒT‘H]™[ÚYOÉÊK™Ù]
+KšY
+NØÛÛœÝÚ]˜]Ø[\^[Y[Ù‹œ™\\™J	ÔÑSPÕÝX›Z]YØ]Ý]\È”“ÓHÚ]˜]Ø[ØÛÛ™š\›X][ÛœÈÒT‘H^[Y[ÚYOÉÊK™Ù]
+^[Y[šY
+N›[Ü™]\›ˆË‹‹™K^\™\×Ø]™K™]™[Ù]OÜ™][[Û•[[
+JN™K™^\™\×Ø]ÝÜ˜YÙS[Z]ž]\Î™]™[ÝÜ˜YÙS[Z]
+KÙ™ÊKÝÓ[Z]™]™[ÝÓ[Z]
+KÙ™ÊKÚXÚÛÝ]Ý\YˆH\^[Y[Ý\ÝÛY\•\Nœ^[Y[Ë˜Ý\ÝÛY\—Ý\_[^[Y[Ý]\Îœ^[Y[ËœÝ]\ß[^[Y[ÛÛ˜ÛYY]œ^[Y[ËœZYØ][Ú]˜]Ø[ÝX›Z]Y]Ú]˜]Ø[ËœÝX›Z]YØ][Ú]˜]Ø[ÛÛ™š\›X][Û”Ý]\ÎÚ]˜]Ø[ËœÝ]\ß[X\›TÝ\™\]Y\ÝYˆH\^[Y[Ë™X\›WÜÝ\Ü™\]Y\ÝYØ]X\›TÝ\XÚÛ›ÝÛYÙYˆH\^[Y[Ë™X\›WÜÝ\ØXÚÛ›ÝÛYÙYØ]\›\ÐXØÙ\YˆH\^[Y[Ë\›\×ØXØÙ\YØ]\›\Õ™\œÚ[ÛŽœ^[Y[Ë\›\×Ý™\œÚ[ÛŸ[\Ò[›ÚXÙNˆH\^[Y[ËœÝš\WÚ[›ÚXÙWÚY™XYÛ›NˆXXÝ]™JJI‰œ™XYX›JJK™][[Û•[[œ™][[Û•[[
+JKÝ\Ð]œÝ\]
+JKÝY\Ý\›œ™XYX›JJOØ	Ø˜\ÙU\››ÜšYÚ[ŸKÙ]™[ÉÙKšYOÝÚÙ[IÙK™ÝY\ÝÝÚÙ[ŸX›[NßJ_JNÂˆJNÂˆ\œÜÝ
+	ËØ\KÙ]™[ËÎ™]™[YÝÚ]˜]Ø[	ËÙÚ[”™\]Z\™YÝÛ™\‹Ü˜\
+\Þ[˜Ê™\K™\ÊOOžÂˆÛÛœÝÝ\ÝÛY\“˜[YOTÝš[™Ê™\K˜›ÙK˜Ý\ÝÛY\“˜[Y_	ÉÊKš[J
+Kœ™\XÙJ×ÊËÙË	È	ÊNÂˆYŠXÝ\ÝÛY\“˜[Y_Ý\ÝÛY\“˜[YK›[™ÝŒMŒ
+\™]\›ˆ˜Z[
+™\Ë	Ðš]HZ[™[ˆ›ÛÝ0é™YÙ[ˆ˜[Y[ˆ[™ÙX™[ˆ
+0í˜ÚÝ[œÈMŒ™ZXÚ[ŠK‰ÊNÂˆYŠ™\K˜›ÙK™[XZ[ÛÛ™š\›YYOO]YJ\™]\›ˆ˜Z[
+™\Ë	Ðš]H™\Ý0éYÙHYHKSXZ[PY™\ÜÙH°ïˆYHZ[™Ø[™ÜØ™\Ý0éYÝ[™Ë‰ÊNÂˆÛÛœÝ^[Y[Y‹œ™\\™J	ÔÑSPÕYÝ]\ËÝ\ÝÛY\—Ý\KZYØ]”“ÓH^[Y[ÈÒT‘H]™[ÚYOÉÊK™Ù]
+™\K™]™[šY
+NÂˆYŠ\^[Y[^[Y[˜Ý\ÝÛY\—Ý\HOOIØÛÛœÝ[Y\‰ß\^[Y[œZYØ]
+\™]\›ˆ˜Z[
+™\ËK	Ñ°ïˆY\Ù\È[[H\ÝÙZ[ˆ™^˜Z\ˆ™\˜œ˜]XÚ\™\˜YÈ›Üš[™[‹‰ÊNÂˆÛÛœÝÝ][Y[XY\›Z]ÚY\œY™HXÚ	ØÝ\ÝÛY\“˜[Y_K[ˆ™\˜YÈ0ï™\ˆ\Èš[˜[Û˜\Q›ÝØ[[H8 '‰Ü™\K™]™[]_x '
+[[KRQ	Ü™\K™]™[šYJK˜ÂˆÛÛœÝ›ÝÏQ]K››ÝÊ
+NÂˆÛÛœÝ[œÙ\YY‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•ÈÚ]˜]Ø[ØÛÛ™š\›X][ÛœÈ
+^[Y[ÚYÝ\ÝÛY\—Û˜[YK™XÚ\Y[Ý][Y[ÝX›Z]YØ]Ý]\Ë][\ÊHSQTÈ
+ËËËËË	Ü[™[™ÉË
+HŠKœ[Š^[Y[šYÝ\ÝÛY\“˜[YK™\K\Ù\‹™[XZ[Ý][Y[›ÝÊNÂˆYŠ[œÙ\Y˜Ú[™Ù\Ê^Ø]Y]^[Y[]™[
+Ü^[Y[Yœ^[Y[šYÛÝ\˜ÙN‰ØÝ\ÝÛY\‰Ë]™[\N‰ØÝ\ÝÛY\‹Ú]˜]Ø[œÝX›Z]Y	ËÝ]\Î‰Ü™XÙZ]™Y	ËXÝÜ‘[XZ[œ™\K\Ù\‹™[XZ[›ÝN‰Ñ[ZÝ›Ûš\ØÚ\ˆÚY\œYˆZ[™ÙYØ[™Ù[‰Ë]Z[ÎžØÝ\ÝÛY\“˜[YK™XÚ\Y[œ™\K\Ù\‹™[XZ[Ý][Y[ÝX›Z]Y]››Ýß_JNßBˆÛÛœÝÛÛ™š\›X][ÛY‹œ™\\™J	ÔÑSPÕÝX›Z]YØ]”“ÓHÚ]˜]Ø[ØÛÛ™š\›X][ÛœÈÒT‘H^[Y[ÚYOÉÊK™Ù]
+^[Y[šY
+NÂˆ]ØZ]›\ÚÚ]˜]Ø[ÛÛ™š\›X][ÛœÊ
+NÂˆ]ØZ]›\Ú^[Y[[\Ê
+NÂˆÛÛœÝ™\Ý[Y‹œ™\\™J	ÔÑSPÕÝ]\Ë][\ËÝX›Z]YØ]”“ÓHÚ]˜]Ø[ØÛÛ™š\›X][ÛœÈÒT‘H^[Y[ÚYOÉÊK™Ù]
+^[Y[šY
+NÂˆ™\ËœÝ]\ÊŒŠKšœÛÛŠÜ™XÙZ]™YYKÝX›Z]Y]˜ÛÛ™š\›X][Û‹œÝX›Z]YØ]ÛÛ™š\›X][Û”Ý]\Îœ™\Ý[œÝ]\Ë[XZ[œ™\K\Ù\‹™[XZ[][\Îœ™\Ý[˜][\ËY\ÜØYÙNœ™\Ý[œÝ]\ÏOOIÜÙ[	ÏÉÕÚY\œYˆZ[™ÙYØ[™Ù[‹ˆYHZ[™Ø[™ÜØ™\Ý0éYÝ[™ÈÝ\™H\ˆKSXZ[™\œØ[™‰Î‰ÕÚY\œYˆZ[™ÙYØ[™Ù[ˆ[™Ù\ÜZXÚ\ˆYHKSXZ[QZ[™Ø[™ÜØ™\Ý0éYÝ[™ÈÚ\™\›™]]™\œÝXÚ‰ßJNÂˆJJNÂˆ\™Ù]
+	ËØ\KÙ]™[Î™]™[YÚ[›ÚXÙIËÙÚ[”™\]Z\™YÝÛ™\‹Ü˜\
+\Þ[˜Ê™\K™\ÊOOžÂˆÛÛœÝ^[Y[Y‹œ™\\™J	ÔÑSPÕÝš\WÚ[›ÚXÙWÚY”“ÓH^[Y[ÈÒT‘H]™[ÚYOÉÊK™Ù]
+™\K™]™[šY
+NÂˆYŠ\^[Y[ËœÝš\WÚ[›ÚXÙWÚY\Ýš\OËš[›ÚXÙ\ÏËœ™]šY]™J\™]\›ˆ˜Z[
+™\Ë	Ñ°ïˆY\Ù\È[[H\Ý›ØÚÙZ[ˆÝš\KP™[YÈ™\™°ïØ˜\‹‰ÊNÂˆ][›ÚXÙNÂˆž^Ú[›ÚXÙOX]ØZ]Ýš\Kš[›ÚXÙ\Ëœ™]šY]™J^[Y[œÝš\WÚ[›ÚXÙWÚY
+NßXØ]Ú
+\œ›ÜŠ^ØÛÛœÛÛK™\œ›ÜŠ	ÔÝš\KP™[YÈÛÛ›HšXÚÙ[Y[ˆÙ\™[Ž‰ËÝš[™Ê\œ›Ü‹›Y\ÜØYÙ_\œ›ÜŠJNÜ™]\›ˆ˜Z[
+™\ËL‹	Ñ\ˆ™[YÈ\ÝÙ\˜YHšXÚ\œ™ZXÚ˜\‹ˆš]HÜ0é\ˆ\›™]]™\œÝXÚ[‹‰ÊNßBˆÛÛœÝ\›Z[›ÚXÙKš[›ÚXÙWÜŸ[›ÚXÙKšÜÝYÚ[›ÚXÙWÝ\›ÂˆYŠ]\›
+\™]\›ˆ˜Z[
+™\ËK	ÔÝš\H\œÝ[[ˆ™[YÈ›ØÚˆš]HÜ0é\ˆ\›™]]™\œÝXÚ[‹‰ÊNÂˆ]\œÙYÝž^Ü\œÙY[™]ÈT“
+\›
+NßXØ]ÚÜ™]\›ˆ˜Z[
+™\ËL‹	ÔÝš\H]ÙZ[™[ˆðïYÙ[ˆ™[YËS[šÈÙ[YY™\‰ÊNßBˆYŠ\œÙYœ›ÝØÛÛOOIÚÎ‰Ê\™]\›ˆ˜Z[
+™\ËL‹	ÔÝš\H]ÙZ[™[ˆÚXÚ\™[ˆ™[YËS[šÈÙ[YY™\‰ÊNÂˆ™\Ëœ™Y\™XÝ
+Ì‹\œÙYš™YŠNÂˆJJNÂˆ\œÜÝ
+	ËØ\KÙ]™[ÉËÙÚ[”™\]Z\™Y
+™\K™\ÊOOžÂˆÛÛœÝYTÝš[™Ê™\K˜›ÙK™]™[Y	ÉÊNÈÛÛœÝ[TS”Ë™]™[ÈÛÛœÝ]OTÝš[™Ê™\K˜›ÙK]_	ÉÊKš[J
+K]™[]OTÝš[™Ê™\K˜›ÙK™]™[]_	ÉÊNÂˆYŠK×–ØK^ŒNWVØK^ŒNWËW^Ì‹ŒßIË\Ý
+Y
+H]]H]K›[™ÝŒLŒ]˜[Y]™[]J]™[]JJH™]\›ˆ˜Z[
+™\Ë	Ðš]H]™[RQ][[™Z[ˆ™\˜[œÝ[[™ÜÙ][H[›™\š[ˆ\ˆ°éÚÝ[ˆ[Û˜]H[™ÙX™[‹‰ÊNÂˆYŠÛÚÝ\
+Y
+HœË™^\ÝÔÞ[˜Ê]š›Ú[Š›ÛÝY
+JJH™]\›ˆ˜Z[
+™\ËK	Ñ]™[RQ™\™Z]È™\™ÙX™[‹]XÚ°ïˆ™\Ý[™Ù][‹‰ÊNÂˆËÈ\š[™ÈH\Ý[Û›H\ÙHXXÚ™]ÛHÜ™X]Y]™[Ø[ˆ\ÙHHK\ÝÂˆËÈšX[ˆÚXÚÛÝ]™[XZ[œÈHÝš\H\ÝÚXÚÛÝ][™Ø[ˆ™]™\ˆÚ\™ÙH]™K‚ˆÛÛœÝšX[\™\K˜›ÙKšX[OOY˜[ÙNÂˆÛÛœÝ^\™\Ð]Y]™[XY[™J]™[]JNÂˆ‹œ™\\™J	ÒS”ÑT•S•È]™[È
+Y[XZ[[‹[[Ý[ØÙ[ËÝ]\ËÜ™X]YØ]ÝÛ™\—ÚY]K]™[Ù]KÝY\ÝÝÚÙ[‹[Ù\˜][Û‹ÝY\Ý›ÛÚ×Û[Ù\˜][Û‹^\™\×Ø]
+HSQTÈ
+ËËËËËËËËËËËËÊIÊKœ[ŠY™\K\Ù\‹™[XZ[	Ù]™[	Ë[‹œšXÙPÙ[Ë	Ü[™[™ÉË]K››ÝÊ
+K™\K\Ù\‹šY]K]™[]K˜[™ÛJ
+K™\K˜›ÙK›[Ù\˜][ÛOO]YOÌNŒ™\K˜›ÙK™ÝY\Ý›ÛÚÓ[Ù\˜][ÛOOY˜[ÙOÌŒK^\™\Ð]
+NÂˆYŠšX[
+Y‹œ™\\™J•TUH]™[ÈÑUÝ]\ÏIÝšX[	ËšX[Ý\ÙYLHÒT‘HYOÈŠKœ[ŠY
+NÂˆ™\ËœÝ]\ÊŒJKšœÛÛŠÙ]™[YšYšX[ˆH]šX[]™[]_JNÂˆJNÂˆ\™Ù]
+	ËØ\KÙ]™[Î™]™[YØ]˜Z[Xš[]IË
+™\K™\ÊOOœ™\ËšœÛÛŠØ]˜Z[X›N‹×–ØK^ŒNWVØK^ŒNWËW^Ì‹ŒßIË\Ý
+™\Kœ\˜[\Ë™]™[Y
+I‰ˆ[ÛÚÝ\
+™\Kœ\˜[\Ë™]™[Y
+I‰ˆYœË™^\ÝÔÞ[˜Ê]š›Ú[Š›ÛÝ™\Kœ\˜[\Ë™]™[Y
+J_JJNÂˆ[˜Ý[ÛˆÝÛ™\Š™\K™\Ë™^
+HÈÛÛœÝO[ÛÚÝ\
+™\Kœ\˜[\Ë™]™[Y
+NÈYŠ[ÝÛŠ™\KJJH™]\›ˆ˜Z[
+™\Ë	Ñ]™[šXÚÙY[™[‹‰ÊNÈ™\K™]™[YNÈ™^
+
+NÈBˆ[˜Ý[Ûˆ^[Y[YZ[”™\]Z\™Y
+™\K™\Ë™^
+HÂˆYŠ\™\K\Ù\Š\™]\›ˆ˜Z[
+™\ËK	Ðš]H[›Y[[‹‰ÊNÂˆÛÛœÝ\Ù\Y‹œ™\\™J	ÔÑSPÕ[XZ[Ý™\šYšYYØ]”“ÓH\Ù\œÈÒT‘HYOÉÊK™Ù]
+™\K\Ù\‹šY
+NÂˆYŠ]\Ù\Ë™[XZ[Ý™\šYšYYØ]\^[Y[YZ[‘[XZ[Ëš\ÊÝš[™Ê™\K\Ù\‹™[XZ[	ÉÊKÓÝÙ\Ø\ÙJ
+JJ\™]\›ˆ˜Z[
+™\ËË	ÒÙZ[ˆYÜšY™ˆ]YˆYH˜Z[™ÜÝ™\Ø[[™Ë‰ÊNÂˆ™^
+
+NÂˆBˆ\™Ù]
+	ËÛÜËÜ^[Y[ÉË^[Y[YZ[”™\]Z\™Y
+™\K™\ÊOOœ™\ËœÙ[™š[J]š›Ú[Š×Ù\›˜[YK	ÜX›XÉË	Ü^[Y[ËXYZ[‹š[	ÊJJNÂˆ\™Ù]
+	ËØ\KØYZ[‹Ü^[Y[ÉË^[Y[YZ[”™\]Z\™Y
+™\K™\ÊOOžÂˆÛÛœÝ^[Y[ÏY‹œ™\\™J	ÔÑSPÕŠ‹K]KK™[XZ[KœÝ]\È[[WÜÝ]\ËK™]™[Ù]H”“ÓH^[Y[È“ÒSˆ]™[ÈHÓˆKšY\™]™[ÚYÔ‘Tˆ–Hœ›ÝÚYTÐÈSRUL	ÊK˜[
+
+NÂˆ™\ËšœÛÛŠÜ^[Y[Îœ^[Y[Ë›X\
+^[Y[OŠË‹‹œ^[Y[ˆ™Y[™YØÙ[Î“[X™\Š‹œ™\\™J”ÑSPÕÓÐSTÐÑJÕSJ[[Ý[ØÙ[ÊK
+H[[Ý[”“ÓH™Y[™ÈÒT‘H^[Y[ÚYOÈS‘Ý]\ÏIÜÝXØÙYYY	ÈŠK™Ù]
+^[Y[šY
+K˜[[Ý[
+Kˆ][\Î™‹œ™\\™J	ÔÑSPÕY][\Û›ËÝ]\ËÜ™X]YØ]\]YØ]”“ÓH^[Y[Ø][\ÈÒT‘H^[Y[ÚYOÈÔ‘Tˆ–H][\Û›ÈTÐÉÊK˜[
+^[Y[šY
+Kˆ™Y[™Î™‹œ™\\™J	ÔÑSPÕYÝš\WÜ™Y[™ÚY[[Ý[ØÙ[Ë™X\ÛÛ‹XÚ\Ú[Û—Û›ÝKXÝÜ—Ù[XZ[Ý]\ËÜ™X]YØ]\]YØ]”“ÓH™Y[™ÈÒT‘H^[Y[ÚYOÈÔ‘Tˆ–HÜ™X]YØ]TÐÉÊK˜[
+^[Y[šY
+Kˆ]™[Î™‹œ™\\™J	ÔÑSPÕK™]™[Ý\KKœÝ]\ËK˜[[Ý[ØÙ[ËK˜XÝÜ—Ù[XZ[K››ÝKK™]Z[×ÚœÛÛ‹K˜Ü™X]YØ]KœÝ]\È[\ÜÝ]\ËK˜][\È[\Ø][\ËK›\ÝÙ\œ›Üˆ[\Ù\œ›Üˆ”“ÓH^[Y[Ù]™[ÈHQ•“ÒSˆ^[Y[Ø[\ÈHÓˆK™]™[ÚYYKšYÒT‘HKœ^[Y[ÚYOÈÔ‘Tˆ–HK˜Ü™X]YØ]TÐÈSRUÌ	ÊK˜[
+^[Y[šY
+K›X\
+]™[OŠË‹‹™]™[]Z[Î’”ÓÓ‹œ\œÙJ]™[™]Z[×ÚœÛÛŸ	ÞßIÊ_JJBˆJJ_JNÂˆJNÂˆ\œÜÝ
+	ËØ\KØYZ[‹Ü^[Y[ËÎœ^[Y[YÜ™Y[™ÉË^[Y[YZ[”™\]Z\™YÜ˜\
+\Þ[˜Ê™\K™\ÊOOžÂˆÛÛœÝ^[Y[Y‹œ™\\™J	ÔÑSPÕ
+ˆ”“ÓH^[Y[ÈÒT‘HYOÉÊK™Ù]
+™\Kœ\˜[\Ëœ^[Y[Y
+NÂˆYŠ\^[Y[
+\™]\›ˆ˜Z[
+™\Ë	Ö˜Z[™ÈšXÚÙY[™[‹‰ÊNÂˆYŠ\Ýš\_\^[Y[œÝš\WÜ^[Y[Ú[[ÚY
+\™]\›ˆ˜Z[
+™\ËK	Ñ°ïˆY\ÙH˜Z[™È\ÝÙZ[™H\œÝ][™ÜÙ°éYÙHÝš\KV˜Z[™ÜÜ™Y™\™[žˆ›Üš[™[‹‰ÊNÂˆYŠVÉÜZY	Ë	Ü\X[WÜ™Y[™Y	×Kš[˜ÛY\Ê^[Y[œÝ]\ÊJ\™]\›ˆ˜Z[
+™\ËK	ÑY\ÙH˜Z[™ÈØ[›ˆZÝY[šXÚX[Y[\œÝ]]Ù\™[‹‰ÊNÂˆÛÛœÝ™X\ÛÛTÝš[™Ê™\K˜›ÙOËœ™X\ÛÛŸ	Ü™\]Y\ÝYØžWØÝ\ÝÛY\‰ÊNÂˆYŠVÉÙ\XØ]IË	Ùœ˜]Y[[	Ë	Ü™\]Y\ÝYØžWØÝ\ÝÛY\‰×Kš[˜ÛY\Ê™X\ÛÛŠJ\™]\›ˆ˜Z[
+™\Ë	Ðš]HZ[™[ˆðïYÙ[ˆ\œÝ][™ÜÙÜ[™ðé[‹‰ÊNÂˆÛÛœÝ›ÝOTÝš[™Ê™\K˜›ÙOË››Ý_	ÉÊKš[J
+NÂˆYŠ›ÝK›[™ÝŒ›ÝK›[™ÝŒŒ
+\™]\›ˆ˜Z[
+™\Ë	Ðš]HYH[ØÚZY[™ÈZ]Z[™\Ý[œÈŒ™ZXÚ[ˆÚÝ[Y[Y\™[‹‰ÊNÂˆÛÛœÝ[™XYOS[X™\Š‹œ™\\™J”ÑSPÕÓÐSTÐÑJÕSJ[[Ý[ØÙ[ÊK
+H[[Ý[”“ÓH™Y[™ÈÒT‘H^[Y[ÚYOÈS‘Ý]\ÈSˆ
+	Ü™\]Y\ÝY	Ë	ÜÝX›Z]Y	Ë	Ü[™[™ÉË	ÜÝXØÙYYY	ÊHŠK™Ù]
+^[Y[šY
+K˜[[Ý[
+NÂˆÛÛœÝ™[XZ[š[™ÏSX]›X^
+^[Y[˜[[Ý[ØÙ[ËX[™XYJNÂˆÛÛœÝ[[Ý[\™\K˜›ÙOË˜[[Ý[Ù[ÏOO][™Yš[™YÜ™[XZ[š[™Î“[X™\Š™\K˜›ÙK˜[[Ý[Ù[ÊNÂˆYŠS[X™\‹š\ÔØY™R[YÙ\Š[[Ý[
+_[[Ý[L[[Ý[œ™[XZ[š[™Ê\™]\›ˆ˜Z[
+™\Ë	Ñ\ˆ\œÝ][™ÜØ™]˜YÈ0ï™\œØÚ™Z]][ˆ›ØÚÙ™™[™[ˆ™]˜YË‰ÊNÂˆÛÛœÝ™Y[™YXÜž\Ëœ˜[™ÛUURQ
+
+K›ÝÏQ]K››ÝÊ
+NÂˆ‹œ™\\™J’S”ÑT•S•È™Y[™È
+Y^[Y[ÚY[[Ý[ØÙ[Ë™X\ÛÛ‹XÚ\Ú[Û—Û›ÝKXÝÜ—Ù[XZ[Ý]\ËÜ™X]YØ]\]YØ]
+HSQTÈ
+ËËËËËË	Ü™\]Y\ÝY	ËËÊHŠKœ[Š™Y[™Y^[Y[šY[[Ý[™X\ÛÛ‹›ÝK™\K\Ù\‹™[XZ[›ÝË›ÝÊNÂˆ]Y]^[Y[]™[
+Ü^[Y[Yœ^[Y[šYÛÝ\˜ÙN‰ÛX[X[	Ë]™[\N‰ÛX[X[œ™Y[™œ™\]Y\ÝY	ËÝ]\Î‰Ü™\]Y\ÝY	Ë[[Ý[Ù[Î˜[[Ý[XÝÜ‘[XZ[œ™\K\Ù\‹™[XZ[›ÝK]Z[ÎžÜ™Y[™Y™X\ÛÛŸ_JNÂˆž^ÂˆÛÛœÝ™Y[™X]ØZ]Ýš\Kœ™Y[™Ë˜Ü™X]JÜ^[Y[Ú[[œ^[Y[œÝš\WÜ^[Y[Ú[[ÚY[[Ý[™X\ÛÛ‹Y]Y]NžÜ^[Y[Yœ^[Y[šYXÚ\Ú[Û’Yœ™Y[™Y_KÚY[\Ý[˜ÞRÙ^N˜š[˜[Û˜\\™Y[™IÜ™Y[™YXJNÂˆYŠ™Y[™›]™[[ÙHOOY˜[ÙJ]›ÝÈ™]È\œ›ÜŠ	Ó]™KQ\œÝ][™ÈÙ\Ü\œ	ÊNÂˆÛÛœÝÝ]\Ï\™Y[™œÝ]\ÏOOIÜÝXØÙYYY	ÏÉÜÝXØÙYYY	Îœ™Y[™œÝ]\ÏOOIÙ˜Z[Y	ÏÉÙ˜Z[Y	Î‰Ü[™[™ÉÎÂˆ‹œ™\\™J	ÕTUH™Y[™ÈÑUÝš\WÜ™Y[™ÚYOËÝ]\ÏOË\]YØ]OÈÒT‘HYOÉÊKœ[Š™Y[™šYÝ]\Ë]K››ÝÊ
+K™Y[™Y
+NÂˆ]Y]^[Y[]™[
+Ü^[Y[Yœ^[Y[šYÛÝ\˜ÙN‰ÛX[X[	Ë]™[\N˜X[X[œ™Y[™‰ÜÝ]\ßXÝ]\Ë[[Ý[Ù[Î˜[[Ý[XÝÜ‘[XZ[œ™\K\Ù\‹™[XZ[›ÝK]Z[ÎžÜ™Y[™YÝš\T™Y[™Yœ™Y[™šY™X\ÛÛŸ_JNÂˆ™Yœ™\Ú™Y[™Ý]J^[Y[šY
+NÂˆ]ØZ]›\Ú^[Y[[\Ê
+NÂˆ™]\›ˆ™\ËœÝ]\ÊŒŠKšœÛÛŠÚYœ™Y[™Y™Y[™YÝ]\Ë[[Ý[Ù[Î˜[[Ý[JNÂˆXØ]Ú
+\œ›ÜŠ^ÂˆÛÛœÝY\ÜØYÙOTÝš[™Ê\œ›Ü‹›Y\ÜØYÙ_\œ›ÜŠKœÛXÙJÌ
+NÂˆÛÛœÝYš[š]]™Q˜Z[\™OVÉÔÝš\R[˜[Y™\]Y\Ý\œ›Ü‰Ë	ÔÝš\P]][XØ][Û‘\œ›Ü‰Ë	ÔÝš\T\›Z\ÜÚ[Û‘\œ›Ü‰Ë	ÔÝš\PØ\™\œ›Ü‰×Kš[˜ÛY\Ê\œ›Ü‹\J_\œ›Ü‹˜ÛÙOOOIÜ™\ÛÝ\˜ÙWÛZ\ÜÚ[™ÉÎÂˆÛÛœÝ™Y[™Ý]\ÏYYš[š]]™Q˜Z[\™OÉÙ˜Z[Y	Î‰ÜÝX›Z]Y	ÎÂˆ‹œ™\\™J	ÕTUH™Y[™ÈÑUÝ]\ÏOË\]YØ]OÈÒT‘HYOÉÊKœ[Š™Y[™Ý]\Ë]K››ÝÊ
+K™Y[™Y
+NÂˆ]Y]^[Y[]™[
+Ü^[Y[Yœ^[Y[šYÛÝ\˜ÙN‰ÛX[X[	Ë]™[\N™Yš[š]]™Q˜Z[\™OÉÛX[X[œ™Y[™™˜Z[Y	Î‰ÛX[X[œ™Y[™[˜Ù\Z[‰ËÝ]\Îœ™Y[™Ý]\Ë[[Ý[Ù[Î˜[[Ý[XÝÜ‘[XZ[œ™\K\Ù\‹™[XZ[›ÝK]Z[ÎžÜ™Y[™Y\œ›ÜŽ›Y\ÜØYÙ__JNÂˆ]ØZ]›\Ú^[Y[[\Ê
+NÂˆÛÛœÛÛK™\œ›ÜŠ	Ñ\œÝ][™È™ZÙ\ØÚYÙ[Ž‰ËY\ÜØYÙJNÂˆYŠYYš[š]]™Q˜Z[\™J\™]\›ˆ™\ËœÝ]\ÊŒŠKšœÛÛŠÚYœ™Y[™Y™Y[™YÝ]\Îœ™Y[™Ý]\Ë[[Ý[Ù[Î˜[[Ý[Y\ÜØYÙN‰ÔÝš\H][ˆÝ]\ÈšXÚZ[™]]YÈ™\Ý0éYÝˆ\ˆ›Ü™Ø[™È\ÝÙYÙ[ˆZ[™HÜ[H\œÝ][™ÈÙ\Ü\œÈš]H[ˆÝš\KU\Ý[Ù\È°ï™[‹‰ßJNÂˆ™]\›ˆ˜Z[
+™\ËL‹	ÔÝš\HÛÛ›HYH\œÝ][™ÈšXÚ™\Ý0éYÙ[‹ˆš]H˜Z[™ÜÜÝ]\È[ˆÝš\H°ï™[‹™]›ÜˆH\È\›™]]™\œÝXÚÝ‰ÊNÂˆBˆJJNÂˆ\œÜÝ
+	ËØ\KØÚXÚÛÝ]	ËÙÚ[”™\]Z\™YÜ˜\
+\Þ[˜Ê™\K™\ÊOOžÂˆÛÛœÝO[ÛÚÝ\
+Ýš[™Ê™\K˜›ÙK™]™[Y	ÉÊJNÂˆYŠ[ÝÛŠ™\KJJ\™]\›ˆ˜Z[
+™\Ë	Ñ]™[šXÚÙY[™[‹‰ÊNÂˆYŠVÉÜ[™[™ÉË	ÝšX[	×Kš[˜ÛY\ÊKœÝ]\Ê_K™[]YØ]
+KœÝ]\ÏOOIÝšX[	É‰ˆXXÝ]™JJJJ\™]\›ˆ˜Z[
+™\ËK	ÑY\Ù\È]™[Ø[›ˆšXÚ™^˜ZÙ\™[‹‰ÊNÂˆYŠ\Ýš\_XÙ™Ë”Õ’TWÕÑP’ÓÒ×ÔÑPÔ‘U
+\™]\›ˆ˜Z[
+™\ËLË	ÔÝš\KU\Ý[Ù\È›ØÚšXÚZ[™Ù\šXÚ]‰ÊNÂˆYŠ™\K˜›ÙK\›\ÐXØÙ\YOO]YJ\™]\›ˆ˜Z[
+™\Ë	Ðš]H™\Ý0éYÙH›Üˆ[HÚXÚÛÝ]YHZ\Ý[™ÜØ™Y[™Ý[™Ù[‹‰ÊNÂˆÛÛœÝÝ\ÝÛY\•\OVÉØÛÛœÝ[Y\‰Ë	Ø\Ú[™\ÜÉ×Kš[˜ÛY\Ê™\K˜›ÙK˜Ý\ÝÛY\•\JOÜ™\K˜›ÙK˜Ý\ÝÛY\•\N‰ØÛÛœÝ[Y\‰ÎÂˆÛÛœÝX\›TÝ\™YYYXÝ\ÝÛY\•\OOOIØÛÛœÝ[Y\‰É‰ˆHYK™]™[Ù]I‰œÝ\]
+JO]K››ÝÊ
+JÌM
+ŽÂˆYŠX\›TÝ\™YYY	‰Š™\K˜›ÙK™X\›TÝ\™\]Y\ÝOO]Y_™\K˜›ÙK™X\›TÝ\XÚÛ›ÝÛYÙYOO]YJJ\™]\›ˆ˜Z[
+™\Ë	Ðš]H™\Ý0éYÙH[ˆpí™ÛXÚ[ˆ›Üž™Z]YÙ[ˆZ\Ý[™ÜØ™YÚ[›ˆ[™YH[ÙZ\ÙH[HÚY\œY‹‰ÊNÂˆÛÛœÝX\›TÝ\™\]Y\ÝY]YX\›TÝ\™YYYÑ]K››ÝÊ
+N›[ÂˆÛÛœÝX\›TÝ\XÚÛ›ÝÛYÙY]YX\›TÝ\™YYYÙX\›TÝ\™\]Y\ÝY]›[ÂˆYŠ™\K˜›ÙKœ[ˆOO][™Yš[™Y
+^ØÛÛœÝ[TS”ÖÜ™\K˜›ÙKœ[—NÚYŠ\[Š\™]\›ˆ˜Z[
+™\Ë	Ðš]HZ[ˆðïYÙ\ÈZÙ]ðé[‹‰ÊNÚYŠ™\K˜›ÙKœ[ˆOOYKœ[Š\™]\›ˆ˜Z[
+™\ËK	Ñ\ÈZÙ][™\ˆ™Z\È°ïˆY\Ù\È[[HÚ[™™\™Z]È™\ÝÙ[YÝ‰ÊNßBˆ]^[Y[Y‹œ™\\™J	ÔÑSPÕ
+ˆ”“ÓH^[Y[ÈÒT‘H]™[ÚYOÉÊK™Ù]
+KšY
+NÂˆYŠ\^[Y[
+^ØÛÛœÝ[TS”ÖÙKœ[—NÙ‹œ™\\™J	ÒS”ÑT•S•È^[Y[È
+Y]™[ÚY[[Ý[ØÙ[Ë[ÛÊHSQTÈ
+ËËËÊIÊKœ[ŠÜž\Ëœ˜[™ÛUURQ
+
+KKšYK˜[[Ý[ØÙ[Ë[‹›[ÛÊNÜ^[Y[Y‹œ™\\™J	ÔÑSPÕ
+ˆ”“ÓH^[Y[ÈÒT‘H]™[ÚYOÉÊK™Ù]
+KšY
+NßBˆYŠÉÜ™Y[™Y	Ë	Ù\Ü]Y	Ë	Ù\Ü]YÛÜÝ	×Kš[˜ÛY\Ê^[Y[œÝ]\ÊJ\™]\›ˆ˜Z[
+™\ËK	Ñ°ïˆY\ÙH˜Z[™È\ÝZÝY[ÙZ[ˆ™]Y\ˆÚXÚÛÝ]pí™ÛXÚˆš]HÛÛZÝY\™H[ˆÝ\Ü‰ÊNÂˆ]][\Y‹œ™\\™J	ÔÑSPÕ
+ˆ”“ÓH^[Y[Ø][\ÈÒT‘H^[Y[ÚYOÈÔ‘Tˆ–H][\Û›ÈTÐÈSRUIÊK™Ù]
+^[Y[šY
+NÂˆ]Ù\ÜÚ[Û[[ÂˆYŠ][\	‰˜][\œÝ]\ÏOOIÛÜ[‰É‰ˆX][\œÝš\WÜÙ\ÜÚ[Û—ÚYœÝ\ÕÚ]
+	ØÜ™X][™×ÉÊJ^Âˆž^ÜÙ\ÜÚ[ÛX]ØZ]Ýš\K˜ÚXÚÛÝ]œÙ\ÜÚ[ÛœËœ™]šY]™J][\œÝš\WÜÙ\ÜÚ[Û—ÚY
+NßXØ]Ú
+\œ›ÜŠ^ÚYŠ\œ›Ü‹˜ÛÙHOOIÜ™\ÛÝ\˜ÙWÛZ\ÜÚ[™ÉÊ]›ÝÈ\œ›ÜŽÙ‹œ™\\™J•TUH^[Y[Ø][\ÈÑUÝ]\ÏIÙ^\™Y	Ë\]YØ]OÈÒT‘HYOÈŠKœ[Š]K››ÝÊ
+K][\šY
+NØ][\[[ßBˆYŠÙ\ÜÚ[Û‰‰œÙ\ÜÚ[Û‹›]™[[ÙHOOY˜[ÙJ]›ÝÈ™]È\œ›ÜŠ	Ó]™KPÚXÚÛÝ]Ù\Ü\œ	ÊNÂˆYŠÙ\ÜÚ[ÛËœÝ]\ÏOOIÛÜ[‰É‰œÙ\ÜÚ[Û‹›Y]Y]OË˜Ý\ÝÛY\•\OOOXÝ\ÝÛY\•\I‰œÙ\ÜÚ[Û‹›Y]Y]OË™X\›TÝ\™\]Y\ÝOOTÝš[™ÊX\›TÝ\™YYY
+J\™]\›ˆ™\ËšœÛÛŠÝ\›œÙ\ÜÚ[Û‹\›	Ø˜\ÙU\››ÜšYÚ[ŸKÜÝXØÙ\ÜÏÜÙ\ÜÚ[Û—ÚYIÜÙ\ÜÚ[Û‹šYX][\˜][\˜][\Û›ßJNÂˆYŠÙ\ÜÚ[ÛËœÝ]\ÏOOIÛÜ[‰Ê^Âˆ]ØZ]Ýš\K˜ÚXÚÛÝ]œÙ\ÜÚ[ÛœË™^\™JÙ\ÜÚ[Û‹šY
+NÂˆ‹œ™\\™J•TUH^[Y[Ø][\ÈÑUÝ]\ÏIÙ^\™Y	Ë\]YØ]OÈÒT‘HYOÈŠKœ[Š]K››ÝÊ
+K][\šY
+NÂˆ][\[[ÂˆBˆYŠÙ\ÜÚ[ÛËœÝ]\ÏOOIÙ^\™Y	ÊY‹œ™\\™J•TUH^[Y[Ø][\ÈÑUÝ]\ÏIÙ^\™Y	Ë\]YØ]OÈÒT‘HYOÈŠKœ[Š]K››ÝÊ
+K][\šY
+NÂˆ[ÙHYŠÙ\ÜÚ[ÛËœÝ]\ÏOOIØÛÛ\]IÉ‰œÙ\ÜÚ[Û‹œ^[Y[ÜÝ]\ÈOOIÜZY	Ê\™]\›ˆ˜Z[
+™\ËK	ÑYH˜Z[™ÈÚ\™›ØÚ™\˜\˜™Z]]ˆš]HZÝX[\ÚY\™HYHÙZ]H[ˆðïž™K‰ÊNÂˆ[ÙHYŠÙ\ÜÚ[ÛËœ^[Y[ÜÝ]\ÏOOIÜZY	Ê\™]\›ˆ˜Z[
+™\ËK	ÑYH˜Z[™È\Ý™\™Z]ÈZ[™ÙYØ[™Ù[‹ˆš]HYHZ[ˆ[[H™]K‰ÊNÂˆYŠÙ\ÜÚ[ÛËœÝ]\ÏOOIØÛÛ\]IÊY‹œ™\\™J•TUH^[Y[Ø][\ÈÑUÝ]\ÏIÙ˜Z[Y	Ë\]YØ]OÈÒT‘HYOÈŠKœ[Š]K››ÝÊ
+K][\šY
+NÂˆYŠÙ\ÜÚ[ÛËœÝ]\ÏOOIÙ^\™Y	ßÙ\ÜÚ[ÛËœÝ]\ÏOOIØÛÛ\]IÊX][\[[ÂˆBˆYŠX][\VÉÛÜ[‰Ë	ØÜ™X][™É×Kš[˜ÛY\Ê][\œÝ]\ÊJ^ÂˆÛÛœÝ][\›ÏS[X™\Š‹œ™\\™J	ÔÑSPÕÓÐSTÐÑJPV
+][\Û›ÊK
+JÌHˆ”“ÓH^[Y[Ø][\ÈÒT‘H^[Y[ÚYOÉÊK™Ù]
+^[Y[šY
+K›ŠNÂˆÛÛœÝYXÜž\Ëœ˜[™ÛUURQ
+
+KXÙZÛ\XÜ™X][™×ÉÚYXÂˆ‹œ™\\™J’S”ÑT•S•È^[Y[Ø][\È
+Y^[Y[ÚYÝš\WÜÙ\ÜÚ[Û—ÚY][\Û›ËÝ]\ËÜ™X]YØ]\]YØ]
+HSQTÈ
+ËËËË	ØÜ™X][™ÉËËÊHŠKœ[ŠY^[Y[šYXÙZÛ\‹][\›Ë]K››ÝÊ
+K]K››ÝÊ
+JNÂˆ][\Y‹œ™\\™J	ÔÑSPÕ
+ˆ”“ÓH^[Y[Ø][\ÈÒT‘HYOÉÊK™Ù]
+Y
+NÂˆBˆÛÛœÝ^[˜X›YTÝš[™ÊÙ™Ë”Õ’TWÕVÑSP“Q	Ì	ÊOOOIÌIÎÂˆÛÛœÝšXÙQ]O^ØÝ\œ™[˜ÞN‰Ù]\‰Ë[š]Ø[[Ý[œ^[Y[˜[[Ý[ØÙ[Ë^Ø™Z]š[ÜŽ‰Ú[˜Û\Ú]™IË›ÙXÝÙ]NžÛ˜[YN”S”ÖÙKœ[—K›X™[_NÂˆYŠ^[˜X›Y	‰˜Ù™Ë”Õ’TWÔ“ÑPÕÕVÐÓÑJ\šXÙQ]Kœ›ÙXÝÙ]K^ØÛÙOXÙ™Ë”Õ’TWÔ“ÑPÕÕVÐÓÑNÂˆÛÛœÝ\˜[\Ï^Âˆ[ÙN‰Ü^[Y[	ËˆØØ[N‰ÙIËˆÝX›Z]Ý\N‰Ü^IËˆ^[Y[ÛY]ÙÝ\\Î–ÉØØ\™	×KˆÝ\ÝÛY\—Ù[XZ[™K™[XZ[ˆÝ\ÝÛY\—ØÜ™X][ÛŽ‰Ø[Ø^\ÉËˆ[™WÚ][\Î–ÞÜšXÙWÙ]NœšXÙQ]K]X[]NŒ_WKˆÝ\ÝÛWÝ^žÜÝX›Z]žÛY\ÜØYÙN‰ÑZ[›X[YÈKL8 «[šÛˆNH	HTÝˆ›È™\˜[œÝ[[™Ëˆš\ÈHHÐˆ›ÝÜÎÈ\ØY[œÚXÚ[™ÝÛ›ØY°ïˆLYÙHXˆ™\˜[œÝ[[™ÜÙ][Kˆ[˜šY]\ŽˆX]X\ÈÙ[™[™›ÝÙÜ˜YšYH
+Z[ž™[[\›™ZY[ŠKðï\œÛÚ‰ß_KˆY]Y]NžÙ]™[Y™KšY^[Y[Yœ^[Y[šY][\Y˜][\šYÝ\ÝÛY\•\KX\›TÝ\™\]Y\Ý”Ýš[™ÊX\›TÝ\™YYY
+KX\›TÝ\XÚÛ›ÝÛYÙY”Ýš[™ÊX\›TÝ\™YYY
+K\›\ÐXØÙ\Y‰ÝYIË\›\Õ™\œÚ[ÛŽ•T“T×Õ‘T”ÒSÓŸKˆÝXØÙ\Ü×Ý\›˜	Ø˜\ÙU\››ÜšYÚ[ŸKÜÝXØÙ\ÜÏÜÙ\ÜÚ[Û—ÚY^ÐÒPÒÓÕUÔÑTÔÒSÓ—ÒQXˆØ[˜Ù[Ý\›˜	Ø˜\ÙU\››ÜšYÚ[ŸKÙ\Ú›Ø\™ˆNÂˆYŠ^[˜X›Y
+^Âˆ\˜[\Ë˜]]ÛX]X×Ý^^Ù[˜X›YY_NÂˆ\˜[\Ë˜š[[™×ØY™\Ü×ØÛÛXÝ[ÛIÜ™\]Z\™Y	ÎÂˆ\˜[\Ë^ÚYØÛÛXÝ[Û^Ù[˜X›YY_NÂˆ\˜[\Ë›˜[YWØÛÛXÝ[Û^Ú[™]šYX[žÙ[˜X›YY_K\Ú[™\ÜÎžÙ[˜X›YYKÜ[Û˜[Y__NÂˆ\˜[\Ëš[›ÚXÙWØÜ™X][Û^Ù[˜X›YY_NÂˆBˆž^ÜÙ\ÜÚ[ÛX]ØZ]Ýš\K˜ÚXÚÛÝ]œÙ\ÜÚ[ÛœË˜Ü™X]J\˜[\ËÚY[\Ý[˜ÞRÙ^N˜š[˜[Û˜\XÚXÚÛÝ]IØ][\šYXJNßBˆØ]Ú
+\œ›ÜŠ^ØÛÛœÛÛK™\œ›ÜŠ	ÔÝš\KU\ÝÚXÚÛÝ]™ZÙ\ØÚYÙ[Ž‰Ë\œ›Ü‹\_\œ›Ü‹˜ÛÙ_	ÔÝš\KQ™Z\‰ÊNÜ™]\›ˆ˜Z[
+™\ËL‹	Ñ\ˆ\ÝPÚXÚÛÝ]ÛÛ›HÙ\˜YHšXÚÙpí™™›™]Ù\™[‹ˆ\ÈÝ\™HÙZ[™H˜Z[™È™\Ý0éYÝˆš]H™\œÝXÚH\È\›™]]‰ÊNßBˆYŠÙ\ÜÚ[Û‹›]™[[ÙHOOY˜[ÙJ^ØÛÛœÛÛK™\œ›ÜŠ	ÐÚXÚÛÝ]Z]]™KS[Ù\ÈX™Ù]ÚY\Ù[‹‰ÊNÜ™]\›ˆ˜Z[
+™\ËLË	Ñ\ˆÚXÚÛÝ]Ý\™H]\ÈÚXÚ\šZ]ÙÜ°ï™[ˆ›ØÚÚY\ˆš[˜[Û˜\ZÞ™\Y\\ž™Z]\ˆÝš\KU\Ý˜Z[™Ù[‹‰ÊNßBˆÛÛœÝ›ÝÏQ]K››ÝÊ
+NÂˆ‹˜[œØXÝ[ÛŠ
+
+OOžÂˆ‹œ™\\™J	ÕTUH^[Y[ÈÑUÝ\ÝÛY\—Ý\OOËX\›WÜÝ\Ü™\]Y\ÝYØ]OËX\›WÜÝ\ØXÚÛ›ÝÛYÙYØ]OË\›\×ØXØÙ\YØ]OË\›\×Ý™\œÚ[ÛOÈÒT‘HYOÉÊKœ[ŠÝ\ÝÛY\•\KX\›TÝ\™\]Y\ÝY]X\›TÝ\XÚÛ›ÝÛYÙY]›ÝËT“T×Õ‘T”ÒSÓ‹^[Y[šY
+NÂˆ‹œ™\\™J•TUH^[Y[Ø][\ÈÑUÝš\WÜÙ\ÜÚ[Û—ÚYOËÝ]\ÏIÛÜ[‰Ë\]YØ]OÈÒT‘HYOÈŠKœ[ŠÙ\ÜÚ[Û‹šY›ÝË][\šY
+NÂˆ‹œ™\\™J	ÕTUH^[Y[ÈÑUÝš\WÜÙ\ÜÚ[Û—ÚYOÈÒT‘HYOÉÊKœ[ŠÙ\ÜÚ[Û‹šY^[Y[šY
+NÂˆ‹œ™\\™J	ÕTUH]™[ÈÑUÝš\WÜÙ\ÜÚ[Û—ÚYOÈÒT‘HYOÉÊKœ[ŠÙ\ÜÚ[Û‹šYKšY
+NÂˆJJ
+NÂˆ™\ËšœÛÛŠÝ\›œÙ\ÜÚ[Û‹\›	Ø˜\ÙU\››ÜšYÚ[ŸKÜÝXØÙ\ÜÏÜÙ\ÜÚ[Û—ÚYIÜÙ\ÜÚ[Û‹šYX][\˜][\˜][\Û›ßJNÂˆJJNÂˆ\™Ù]
+	ËØ\KØÚXÚÛÝ]ÎœÙ\ÜÚ[Û’Y	ËÙÚ[”™\]Z\™Y
+™\K™\ÊOOžÂˆÛÛœÝOY‹œ™\\™J	ÔÑSPÕKŠˆ”“ÓH]™[ÈH“ÒSˆ^[Y[ÈÓˆ™]™[ÚYYKšYQ•“ÒSˆ^[Y[Ø][\ÈHÓˆKœ^[Y[ÚY\šYÒT‘HKœÝš\WÜÙ\ÜÚ[Û—ÚYOÈÔˆœÝš\WÜÙ\ÜÚ[Û—ÚYOÈÔˆKœÝš\WÜÙ\ÜÚ[Û—ÚYOÈSRUIÊK™Ù]
+™\Kœ\˜[\ËœÙ\ÜÚ[Û’Y™\Kœ\˜[\ËœÙ\ÜÚ[Û’Y™\Kœ\˜[\ËœÙ\ÜÚ[Û’Y
+NÂˆYŠ[ÝÛŠ™\KJJ\™]\›ˆ˜Z[
+™\Ë	Ð™\Ý[[™ÈšXÚÙY[™[‹‰ÊNÂˆÛÛœÝ^[Y[Y‹œ™\\™J	ÔÑSPÕ
+ˆ”“ÓH^[Y[ÈÒT‘H]™[ÚYOÉÊK™Ù]
+KšY
+NÂˆÛÛœÝ][\Y‹œ™\\™J	ÔÑSPÕÝ]\È”“ÓH^[Y[Ø][\ÈÒT‘HÝš\WÜÙ\ÜÚ[Û—ÚYOÉÊK™Ù]
+™\Kœ\˜[\ËœÙ\ÜÚ[Û’Y
+NÂˆÛÛœÝÝ]\ÏVÉÜ™Y[™Y	Ë	Ù\Ü]YÛÜÝ	×Kš[˜ÛY\Ê^[Y[ËœÝ]\ÊOÉÜ™Y[™Y	Îœ^[Y[ËœÝ]\ÏOOIÙ\Ü]Y	ÏÉÙ\Ü]Y	Î–ÉÙ^\™Y	Ë	Ù˜Z[Y	×Kš[˜ÛY\Ê][\ËœÝ]\ÊOÉÜ™]žWØ]˜Z[X›IÎœ^[Y[ËœÝ]\ÏOOIÜZY	ÏÉÜZY	Î™KœÝ]\ÎÂˆ™\ËšœÛÛŠÙ]™[Y™KšYÝ]\Ë™]žP]˜Z[X›NœÝ]\ÏOOIÜ™]žWØ]˜Z[X›IË^\™\Ð]™K™]™[Ù]OÜ™][[Û•[[
+JN™K™^\™\×Ø]JNÂˆJNÂˆ[˜Ý[ÛˆXØÙ\ÜÊ™\K™\Ë™^
+HÂˆÛÛœÝO[ÛÚÝ\
+™\Kœ\˜[\Ë™]™[Y
+NÂˆYŠ\™XYX›JJJH™]\›ˆ˜Z[
+™\Ë‹	Ð[[H[™ÝÛ›ØY™Z]˜][HÚ[™X™Ù[]Y™[‹‰ÊNÂˆYŠ[ÝÛŠ™\KJJHÂˆÛÛœÝÚÙ[\™\Kœ]Y\žKÚÙ[ˆ™\KšXY\œÖÉÞY]™[]ÚÙ[‰×NÂˆYŠ\[ÙˆÚÙ[ˆOOIÜÝš[™ÉÈYK™ÝY\ÝÝÚÙ[ˆY™™\‹˜ž]S[™Ý
+ÚÙ[ŠHOOPY™™\‹˜ž]S[™Ý
+K™ÝY\ÝÝÚÙ[ŠHXÜž\Ë[Z[™ÔØY™Q\]X[
+Y™™\‹™œ›ÛJÚÙ[ŠKY™™\‹™œ›ÛJK™ÝY\ÝÝÚÙ[ŠJJH™]\›ˆ˜Z[
+™\ËË	ÑðïYÙ\ˆ™\˜[œÝ[[™ÜÛ[šÈ\™›Ü™\›XÚ‰ÊNÂˆÛÛœÝÛÛÚÚYS˜[YOXš[˜[Û˜\ÙÝY\ÝÉÙKšYXÂˆÛÛœÝ\ØØ\Y˜[YOXÛÛÚÚYS˜[YKœ™\XÙJÖËŠŠÏ×‰ßJ
+_×WKÙË	×		‰ÊNÂˆÛÛœÝX]Ú[™]È™YÑ^
+
+Î—Ÿ×ÊŠIÙ\ØØ\Y˜[Y_OJØKYŒNW^ÍJJÎŽß	
+X
+K™^XÊ™\KšXY\œË˜ÛÛÚÚY_	ÉÊNÂˆ]ÝY\ÝÚÙ[[X]ÚË–ÌWNÂˆYŠYÝY\ÝÚÙ[ŠHÂˆÝY\ÝÚÙ[\˜[™ÛJ
+NÂˆ™\Ë˜ÛÛÚÚYJÛÛÚÚYS˜[YKÝY\ÝÚÙ[‹ÚÛ›NYKÙXÝ\™N˜˜\ÙU\›œ›ÝØÛÛOOIÚÎ‰ËØ[YTÚ]N‰Û^	ËX^YÙN“X]›X^
+X]›Z[ŠL
+Ž™][[Û•[[
+JKQ]K››ÝÊ
+JJK]‰ËÉßJNÂˆBˆ™\K™ÝY\ÝÚÙ[’\ÚZ\Ú
+ÝY\ÝÚÙ[ŠNÂˆBˆ™\K™]™[YNÈ™^
+
+NÂˆBˆ\™Ù]
+	ËØ\KÙ]™[Î™]™[YÙ\ÚYÛ‰ËÙÚ[”™\]Z\™YÝÛ™\‹
+™\K™\ÊOOžÂˆYŠ\™XYX›J™\K™]™[
+J\™]\›ˆ˜Z[
+™\Ë‹	Ñ°ïˆY\Ù\È]™[\Ý›ØÚÙZ[ˆðéÝ^YØ[™È™\™°ïØ˜\‹‰ÊNÂˆ™\ËšœÛÛŠÙ]™[žÚYœ™\K™]™[šY]Nœ™\K™]™[]K]™[]Nœ™\K™]™[™]™[Ù]_K\ÚYÛŽœX›XÑ\ÚYÛŠ™\K™]™[
+_JNÂˆJNÂˆ\œ]Ú
+	ËØ\KÙ]™[Î™]™[YÙ\ÚYÛ‰ËÙÚ[”™\]Z\™YÝÛ™\‹
+™\K™\ÊOOžÂˆYŠ\™XYX›J™\K™]™[
+J\™]\›ˆ˜Z[
+™\Ë‹	Ñ°ïˆY\Ù\È]™[\Ý›ØÚÙZ[ˆðéÝ^YØ[™È™\™°ïØ˜\‹‰ÊNÂˆÛÛœÝ˜[YO\™\K˜›ÙOË™\ÚYÛŽÂˆYŠ]˜[Y_\[Ùˆ˜[YHOOIÛØš™XÝ	ß\œ˜^Kš\Ð\œ˜^J˜[YJJ\™]\›ˆ˜Z[
+™\Ë	Ðš]HZ[ˆðïYÙ\È\ÚYÛˆÙ[™[‹‰ÊNÂˆÛÛœÝ]OTÝš[™Ê˜[YK]_	ÉÊKš[J
+NÂˆÛÛœÝØØØ\Ú[ÛTÝš[™Ê˜[YK›ØØØ\Ú[ÛŸ	ÉÊNÂˆÛÛœÝ[YOTÝš[™Ê˜[YK[Y_	ÉÊNÂˆÛÛœÝXØÙ[TÝš[™Ê˜[YK˜XØÙ[	ÉÊNÂˆÛÛœÝ›ÛTÝš[™Ê˜[YK™›Û	ÉÊNÂˆYŠ]]_]K›[™ÝŽVÉÝÙY[™ÉË	Øš\^IË	ÜÝ[[Y\‰Ë	ØÛÛ\[žIË	ÚXš[YIË	ÙÜ˜YX][Û‰Ë	ÛÝ\‰×Kš[˜ÛY\ÊØØØ\Ú[ÛŠ_VÉØY\™ÛÝÉË	ÛZYšYÚ	Ë	ÙØ\™[‰×Kš[˜ÛY\Ê[YJ_K×ˆÖÌNXKY—^ÍŸIÚK\Ý
+XØÙ[
+_VÉØÛ\ÜÚXÉË	Ü[][›ÉË	Û[Ù\›‰Ë	Ý™\™[˜IË	Ü™[^Y	Ë	Ý\]Üš]\‰×Kš[˜ÛY\Ê›Û
+J\™]\›ˆ˜Z[
+™\Ë	Ðš]H°ï™H][[›\ÜË›Ü›YÙK˜\˜™H[™ØÚšY‰ÊNÂˆÛÛœÝ\ÚYÛ^Ë‹‹œ™XY\ÚYÛŠ™\K™]™[
+K]KØØØ\Ú[Û‹[YKXØÙ[›ÛNÂˆ‹œ™\\™J	ÕTUH]™[ÈÑU\ÚYÛ—ÚœÛÛOÈÒT‘HYOÉÊKœ[Š”ÓÓ‹œÝš[™ÚYžJ\ÚYÛŠK™\K™]™[šY
+NÂˆ™\ËšœÛÛŠÜÝXØÙ\ÜÎYK\ÚYÛŽœX›XÑ\ÚYÛŠÛÚÝ\
+™\K™]™[šY
+J_JNÂˆJNÂˆ\œ]Ú
+	ËØ\KÙ]™[Î™]™[Y	ËÙÚ[”™\]Z\™YÝÛ™\‹
+™\K™\ÊOOžÂˆÛÛœÝ\]\ÏV×NÂˆYŠ™\K˜›ÙK™]™[]HOO][™Yš[™Y
+HÂˆYŠÝ\]
+™\K™]™[
+OQ]K››ÝÊ
+J\™]\›ˆ˜Z[
+™\ËK	Ñ\È™\˜[œÝ[[™ÜÙ][HØ[›ˆ˜XÚ™YÚ[›ˆ\ˆØ[[[[™ÈšXÚYZˆÙpé™\Ù\™[‹‰ÊNÂˆYŠ]˜[Y]™[]J™\K˜›ÙK™]™[]JJ\™]\›ˆ˜Z[
+™\Ë	Ðš]HZ[ˆðïYÙ\È™\˜[œÝ[[™ÜÙ][H[›™\š[ˆ\ˆ°éÚÝ[ˆ[Û˜]H[™ÙX™[‹‰ÊNÂˆ\]\Ëœ\Ú
+ÉÙ]™[Ù]IË™\K˜›ÙK™]™[]WJNÝ\]\Ëœ\Ú
+ÉÙ^\™\×Ø]	Ë]™[XY[™J™\K˜›ÙK™]™[]JWJNÂˆBˆYŠ\[Ùˆ™\K˜›ÙK›[Ù\˜][ÛOOIØ›ÛÛX[‰Ê]\]\Ëœ\Ú
+ÉÛ[Ù\˜][Û‰Ë™\K˜›ÙK›[Ù\˜][ÛÌNŒJNÂˆYŠ\[Ùˆ™\K˜›ÙK™ÝY\Ý›ÛÚÓ[Ù\˜][ÛOOIØ›ÛÛX[‰Ê]\]\Ëœ\Ú
+ÉÙÝY\Ý›ÛÚ×Û[Ù\˜][Û‰Ë™\K˜›ÙK™ÝY\Ý›ÛÚÓ[Ù\˜][ÛÌNŒJNÂˆYŠ]\]\Ë›[™Ý
+\™]\›ˆ˜Z[
+™\Ë	ÓZ[™\Ý[œÈZ[™HðïYÙHœ™ZYØX™YZ[œÝ[[™È\Ý\™›Ü™\›XÚ‰ÊNÂˆ›ÜŠÛÛœÝØÛÛ[[‹˜[YWHÙˆ\]\ÊY‹œ™\\™JTUH]™[ÈÑU	ØÛÛ[[ŸOOÈÒT‘HYOØ
+Kœ[Š˜[YK™\K™]™[šY
+NÂˆ™\ËšœÛÛŠÜÝXØÙ\ÜÎY_JNÂˆJNÂˆ\œÜÝ
+	ËØ\KÙ]™[Î™]™[YÜ›Ý]K]ÚÙ[‰ËÙÚ[”™\]Z\™YÝÛ™\‹
+™\K™\ÊOOžÙ‹œ™\\™J	ÕTUH]™[ÈÑUÝY\ÝÝÚÙ[OÈÒT‘HYOÉÊKœ[Š˜[™ÛJ
+K™\K™]™[šY
+NÜ™\ËšœÛÛŠÜÝXØÙ\ÜÎY_JNßJNÂˆ\™Ù]
+	ËØ\KÙ]™[Î™]™[YÜ\‰ËÙÚ[”™\]Z\™YÝÛ™\‹Ü˜\
+\Þ[˜Ê™\K™\ÊOOžÂˆYŠ\™XYX›J™\K™]™[
+JH™]\›ˆ˜Z[
+™\Ë‹	Ð[[H[™ÝÛ›ØY™Z]˜][HÚ[™X™Ù[]Y™[‹‰ÊNÂˆÛÛœÝ\›X	Ø˜\ÙU\››ÜšYÚ[ŸKÙ]™[ÉÜ™\K™]™[šYOÝÚÙ[IÜ™\K™]™[™ÝY\ÝÝÚÙ[ŸXÂˆ™\Ë\J	Ü™ÉÊK˜]XÚY[
+	Ü™\K™]™[šYK\\‹œ™Ø
+KœÙ[™
+]ØZ]TÛÙKÐY™™\Š\›ÝÚYŒLŒX\™Ú[Ž\œ›ÜÛÜœ™XÝ[Û“]™[‰ÓIßJJNÂˆJJNÂˆËÈ\ÚÈÝYÚ[™È›Ý[™ÈSH\ØYÙKˆ™KY[˜ÛÙ[™È˜[Y]\ÈÛÛ[[™Ýš\ÈVQ‹ÑÔË‚ˆÛÛœÝ[\\]š›Ú[Š›ÛÝ	Ë\	ÊNÙœË›ZÙ\”Þ[˜Ê[\Ü™XÝ\œÚ]™NY_JNÂˆÛÛœÝ\ØY[][\ŠÙ\Ý[\[Z]ÎžÙš[TÚ^™N“PVÕTÐQÑ’SWÐ–UTËš[\ÎŒLšY[ÎŒ\ÎŒL_JK˜\œ˜^J	ÜÝÜÉËL
+NÂˆÛÛœÝ\ÚYÛÛÝ™\•\ØY[][\ŠÙ\Ý[\[Z]ÎžÙš[TÚ^™NŽ
+ŒL
+ŒLš[\ÎŒKšY[ÎŒ\ÎŒ__JKœÚ[™ÛJ	ØÛÝ™\‰ÊNÂˆ\™Ù]
+	ËØ\KÙ]™[Î™]™[YÙ\ÚYÛ‹XÛÝ™\‰ËXØÙ\ÜËÜ˜\
+\Þ[˜Ê™\K™\ÊOOžÂˆÛÛœÝš[[˜[YO\™XY\ÚYÛŠ™\K™]™[
+K˜ÛÝ™\‘š[[˜[YNÂˆYŠ\[Ùˆš[[˜[YHOOIÜÝš[™ÉßK×™\ÚYÛ‹VØK^ŒNKWJ×šœÉË\Ý
+š[[˜[YJJ\™]\›ˆ˜Z[
+™\Ë	ÒÙZ[ˆ][[Ý]ˆ›Üš[™[‹‰ÊNÂˆ™\Ë\J	ÚœYÉÊKœÙ]
+	ÐØXÚKPÛÛ›Û	Ë	Üš]˜]K›Ë\ÝÜ™IÊNÂˆYŠÝÔÝÜ˜YÙK›[ÙOOOIÛØØ[	Ê\™]\›ˆ™\ËœÙ[™š[J]š›Ú[Š›ÛÝ™\K™]™[šYš[[˜[YJJNÂˆÛÛœÝÝ™X[OX]ØZ]ÝÔÝÜ˜YÙK™Ù]Ý™X[J™\K™]™[šYš[[˜[YJNÂˆÝ™X[K›ÛŠ	Ù\œ›Ü‰Ë
+
+OOœ™\Ë™\Ý›ÞJ
+JNÜÝ™X[Kœ\J™\ÊNÂˆJJNÂˆ\œÜÝ
+	ËØ\KÙ]™[Î™]™[YÙ\ÚYÛ‹XÛÝ™\‰ËÙÚ[”™\]Z\™YÝÛ™\‹\ØY[Z]
+™\K™\Ë™^
+OO™\ÚYÛÛÝ™\•\ØY
+™\K™\Ë\œO™\œÛ™^
+\œŠN›™^
+
+JKÜ˜\
+\Þ[˜Ê™\K™\ÊOOžÂˆYŠ\™XYX›J™\K™]™[
+J\™]\›ˆ˜Z[
+™\Ë‹	Ñ°ïˆY\Ù\È]™[\Ý›ØÚÙZ[ˆðéÝ^YØ[™È™\™°ïØ˜\‹‰ÊNÂˆYŠ\™\K™š[J\™]\›ˆ˜Z[
+™\Ë	Ðš]HðéHZ[ˆ][[Ý]ˆ]\Ë‰ÊNÂˆÛÛœÝ›ØÙ\ÜÙY\]š›Ú[Š[\	Ü˜[™ÛJ
+_KšœØ
+NÂˆÛÛœÝš[[˜[YOX\ÚYÛ‹IØÜž\Ëœ˜[™ÛUURQ
+
+_KšœØÂˆ]ÝÜ™YY˜[ÙNÂˆžHÂˆ]ØZ]Ú\œ
+™\K™š[Kœ]
+Kœ›Ý]J
+Kœ™\Ú^™JŒŒÙš]‰Ú[œÚYIËÚ]Ý][›\™Ù[Y[Y_JKšœYÊÜ]X[]NŽ[ÞšœYÎY_JKÑš[J›ØÙ\ÜÙY
+NÂˆYŠÝÔÝÜ˜YÙK›[ÙOOOIÛØØ[	ÊHÂˆÛÛœÝ]™[\™XÝÜžO\]š›Ú[Š›ÛÝ™\K™]™[šY
+NÂˆ]ØZ]œËœ›ÛZ\Ù\Ë›ZÙ\Š]™[\™XÝÜžKÜ™XÝ\œÚ]™NY_JNÂˆ]ØZ]œËœ›ÛZ\Ù\Ë˜ÛÜQš[J›ØÙ\ÜÙY]š›Ú[Š]™[\™XÝÜžKš[[˜[YJJNÂˆH[ÙH]ØZ]ÝÔÝÜ˜YÙKœ]
+™\K™]™[šYš[[˜[YK›ØÙ\ÜÙY
+NÂˆÝÜ™Y]YNÂˆÛÛœÝ™]š[Ý\Ï\™XY\ÚYÛŠ™\K™]™[
+K˜ÛÝ™\‘š[[˜[YNÂˆÛÛœÝ™^^Ë‹‹œ™XY\ÚYÛŠ™\K™]™[
+KÛÝ™\‘š[[˜[YN™š[[˜[Y_NÂˆ‹œ™\\™J	ÕTUH]™[ÈÑU\ÚYÛ—ÚœÛÛOÈÒT‘HYOÉÊKœ[Š”ÓÓ‹œÝš[™ÚYžJ™^
+K™\K™]™[šY
+NÂˆYŠ\[Ùˆ™]š[Ý\ÏOOIÜÝš[™ÉÉ‰‹×™\ÚYÛ‹VØK^ŒNKWJ×šœÉË\Ý
+™]š[Ý\ÊJ^Ø]ØZ]ÝÔÝÜ˜YÙK™[]TÝÊ™\K™]™[šY™]š[Ý\ÊNØ]ØZ]˜XÚÝ\Ù\šXÙK™[]TÝÊ™\K™]™[šY™]š[Ý\ÊNßBˆ™\ËšœÛÛŠÜÝXØÙ\ÜÎYK\ÚYÛŽœX›XÑ\ÚYÛŠÛÚÝ\
+™\K™]™[šY
+J_JNÂˆHØ]Ú
+\œ›ÜŠHÂˆYŠÝÜ™Y
+]ž^Ø]ØZ]ÝÔÝÜ˜YÙK™[]TÝÊ™\K™]™[šYš[[˜[YJNØ]ØZ]˜XÚÝ\Ù\šXÙK™[]TÝÊ™\K™]™[šYš[[˜[YJNßXØ]Ú
+ÛX[\\œ›ÜŠ^ØÛÛœÛÛK™\œ›ÜŠ	Ñ\ÚYÛ›[Ý]ˆÛÛ›HšXÚ]Y™Ù\°é[]Ù\™[Ž‰ËÛX[\\œ›Ü‹›Y\ÜØYÙJNßBˆ›ÝÈ\œ›ÜŽÂˆHš[˜[HÂˆœËœ›TÞ[˜Ê™\K™š[Kœ]Ù›Ü˜ÙNY_JNÂˆœËœ›TÞ[˜Ê›ØÙ\ÜÙYÙ›Ü˜ÙNY_JNÂˆBˆJJNÂˆÛÛœÝ\ÞO[™]ÈÙ]
+
+NÂˆ]™[[ÝTÝÜ˜YÙT™\Ù\™Yž]\ÏLÂˆ\œÜÝ
+	ËØ\KÙ]™[Î™]™[YÝ\ØY	Ë\ØY[Z]XØÙ\ÜË
+™\K™\Ë™^
+OOžÂˆYŠ™\K™]™[›ÝÛ™\—ÚY	‰ˆ[][™Õ\Ù\œËš\Ê™\K™]™[›ÝÛ™\—ÚY
+JH™]\›ˆ˜Z[
+™\ËK	Ñ\ÈÛÛÈÚ\™Ù\˜YHÙ[0íœØÚˆ\ØYÈÚ[™Ù\Ü\œ‰ÊNÂˆYŠXXÝ]™J™\K™]™[
+JH™]\›ˆ˜Z[
+™\Ë‹	Ñ\ˆ[[^™Z]˜][H\Ý™Y[™]ˆ›ÝÜÈðí››™[ˆ›ØÚðé™[™\ˆÝÛ›ØY\ÙH[™Ù\ÙZ[ˆ[™\[\™Ù[Y[ˆÙ\™[‹‰ÊNÂˆYŠ\ÞKš\Ê™\K™]™[šY
+JH™]\›ˆ˜Z[
+™\ËŽK	Õ\ØY0éY™\™Z]Ëˆš]HÝ\žˆØ\[‹‰ÊNÂˆÛÛœÝØ\XÚ]O]\ØYØ\XÚ]K˜XÜ]Z\™J
+NÂˆYŠXØ\XÚ]K›ÚÊ^ÂˆYŠØ\XÚ]Kœ™X\ÛÛOOIØÛÛ˜Ý\œ™[˜ÞIÊ\™\ËœÙ]
+	Ô™]žKPY\‰Ë	ÍŒ	ÊNÂˆ™]\›ˆ˜Z[
+™\ËØ\XÚ]Kœ™X\ÛÛOOIÙ\ÚÉÏÍLÎŽKØ\XÚ]Kœ™X\ÛÛOOIÙ\ÚÉÏÉÑ\ˆ[\Ü°é™H\ØYÜZXÚ\ˆ\ÝÙ\˜YHÝ\šÈ™[YÝˆš]H[ˆZ[šYÙ[ˆZ[][ˆ\›™]]™\œÝXÚ[‹‰Î‰Ñ\ˆ›ÝÜÜZXÚ\ˆ™\˜\˜™Z]]Ù\˜YH[™\™H\ØYËˆš]H[ˆZ[™\ˆZ[]H\›™]]™\œÝXÚ[‹‰ÊNÂˆBˆ\ÞK˜Y
+™\K™]™[šY
+NÂˆ\ØY
+™\K™\Ë\Þ[˜È\œOžÂˆÛÛœÝÜš][V×NÂˆžHÂˆYŠ\œŠH›ÝÈ\œŽÂˆÛÛœÝ\ÚÏYœËœÝ]œÔÞ[˜Ê›ÛÝ
+NÚYŠ[X™\Š\ÚË˜˜]˜Z[
+J“[X™\Š\ÚË˜œÚ^™JOL
+ŒL
+ŠŒŠ]›ÝÈ™]È\œ›ÜŠ	Ñ›ÝÜÜZXÚ\ˆ›Ü°ï™\™ÙZ[™]\ÙÙ[\Ý]ˆš]H[ˆ™\˜[œÝ[\ˆ[™›Ü›ZY\™[‹‰ÊNÂˆYŠ\™\K™š[\ÏË›[™Ý
+H™]\›ˆ˜Z[
+™\Ë	ÒÙZ[™H›ÝÜÈ[\˜[™Ù[‹‰ÊNÂˆÛÛœÝ\\ÝÔÝÜ˜YÙK›[ÙOOOIÛØØ[	ÏÜ]š›Ú[Š›ÛÝ™\K™]™[šY
+N[\ÚYŠÝÔÝÜ˜YÙK›[ÙOOOIÛØØ[	ÊYœË›ZÙ\”Þ[˜Ê\‹Ü™XÝ\œÚ]™NY_JNÂˆÛÛœÝÝ[Y‹œ™\\™J	ÔÑSPÕÓÕS•
+
+ŠHÛÝ[ÓÐSTÐÑJÕSJž]\ÊK
+Hž]\È”“ÓHÝÜÈÒT‘H]™[ÚYOÉÊK™Ù]
+™\K™]™[šY
+NÂˆÛÛœÝÝÓ[Z]Y]™[ÝÓ[Z]
+™\K™]™[
+KÝÜ˜YÙS[Z]Y]™[ÝÜ˜YÙS[Z]
+™\K™]™[Ù™ÊNÂˆYŠÝÓ[Z]OO[[	‰Ý[˜ÛÝ[
+Ü™\K™š[\Ë›[™ÝœÝÓ[Z]
+H›ÝÈ™]È\œ›ÜŠ	ÑYHHÛÜÝ[›ÜÙ[ˆ\Ý›ÝÜÈÚ[™Ù[]ˆ˜XÚ™\Ý0éYÝ\ˆXÚ[™ÈÚ[\È]™[ZÙ]Xˆ[H™\˜[œÝ[[™ÜÙ][K‰ÊNÂˆ]ž]\Ï]Ý[˜ž]\ÎÂˆ›ÜŠÛÛœÝš[HÙˆ™\K™š[\ÊHÂˆÛÛœÝ[XYÙO\Ú\œ
+š[Kœ]Û[Z][œ]^[Î[š[X]Y™˜[Ù_JNÂˆÛÛœÝY]OX]ØZ][XYÙK›Y]Y]J
+NÂˆYŠVÉÚœYÉË	Ü™ÉË	ÝÙXœ	Ë	ÚZY‰×Kš[˜ÛY\ÊY]K™›Ü›X]
+JH›ÝÈ™]È\œ›ÜŠ	Ó\ˆ”QË‘ËÙX”[™[\œÝ0ïHRQ‹Pš[\ˆ\›]X‰ÊNÂˆÛÛœÝYXÜž\Ëœ˜[™ÛUURQ
+
+Kš[[˜[YOX	ÚYKšœØ\Ý\]š›Ú[Š\‹š[[˜[YJNÂˆÜš][‹œ\Ú
+ÚYš[[˜[YK\ÝJNÂˆ]ØZ][XYÙKœ›Ý]J
+Kœ™\Ú^™JÝÚYŒMŒZYÚŒMŒš]‰Ú[œÚYIËÚ]Ý][›\™Ù[Y[Y_JKšœYÊÜ]X[]NŽ‹[ÞšœYÎY_JKÑš[J\Ý
+NÂˆÛÛœÝÚ^™OYœËœÝ]Þ[˜Ê\Ý
+KœÚ^™NÚYŠÚ^™O“PVÕTÐQÑ’SWÐ–UTÊ]›ÝÈ™]È\œ›ÜŠ	ÑY\Ù\È›ÝÈ\Ý˜XÚ\ˆ™\˜\˜™Z][™ÈHÜ›ðçËˆš]HZ[™HÛZ[™\™H]ZHØÚY[‹‰ÊNØž]\ÊÏ\Ú^™NÝÜš][–ÝÜš][‹›[™ÝLWK˜ž]\Ï\Ú^™NÂˆYŠž]\ÏœÝÜ˜YÙS[Z]
+H›ÝÈ™]È\œ›ÜŠ	Ñ\ˆ›ÝÜÜZXÚ\ˆY\Ù\È[[\È\Ý]\ÙÙ\ØÚ0íœˆš]H[ˆ™\˜[œÝ[\ˆ[™›Ü›ZY\™[‹‰ÊNÂˆBˆYŠÝÔÝÜ˜YÙK›[ÙOOOIÜÌÉÊHÂˆÛÛœÝ\ÙYž]\ÏS[X™\Š‹œ™\\™J	ÔÑSPÕÓÐSTÐÑJÕSJž]\ÊK
+Hž]\È”“ÓHÝÜÉÊK™Ù]
+
+K˜ž]\ÊNÂˆÛÛœÝ[˜ÛÛZ[™Ðž]\Ï]Üš][‹œ™YXÙJ
+Ý[Kš[JOOœÝ[JÙš[K˜ž]\Ë
+NÂˆYŠ\ÙYž]\ÊÜ™[[ÝTÝÜ˜YÙT™\Ù\™Yž]\ÊÚ[˜ÛÛZ[™Ðž]\ÏœÝÜ˜YÙS[Z]
+H›ÝÈ™]È\œ›ÜŠ	Ñ\ˆÙ[YZ[œØ[YH›ÝÜÜZXÚ\ˆ\Ý]\ÙÙ\ØÚ0íœˆš]H[ˆ™\˜[œÝ[\ˆ[™›Ü›ZY\™[‹‰ÊNÂˆ™[[ÝTÝÜ˜YÙT™\Ù\™Yž]\ÊÏZ[˜ÛÛZ[™Ðž]\ÎÂˆžHÙ›ÜŠÛÛœÝš[HÙˆÜš][ŠH]ØZ]ÝÔÝÜ˜YÙKœ]
+™\K™]™[šYš[K™š[[˜[YKš[K™\Ý
+NßBˆš[˜[HÜ™[[ÝTÝÜ˜YÙT™\Ù\™Yž]\ËOZ[˜ÛÛZ[™Ðž]\ÎßBˆBˆËÈ™XÚXÚÈ^\žHY\ˆ›ØÙ\ÜÚ[™È[™™Y›Ü™HX›XØ][Û‹‚ˆYŠXXÝ]™JÛÚÝ\
+™\K™]™[šY
+JJH›ÝÈ™]È\œ›ÜŠ	Ñ]™[[žÚ\ØÚ[ˆX™Ù[]Y™[‹‰ÊNÂˆ‹˜[œØXÝ[ÛŠ
+
+OOžÙ›ÜŠÛÛœÝˆÙˆÜš][ŠH‹œ™\\™J	ÒS”ÑT•S•ÈÝÜÈ
+Y]™[ÚYš[[˜[YKž]\Ë\›Ý™YÜ™X]YØ]\ØY\—ÝÚÙ[—Ú\Ú
+HSQTÈ
+ËËËËËËÊIÊKœ[Š‹šY™\K™]™[šY‹™š[[˜[YK‹˜ž]\Ë™\K™]™[›[Ù\˜][ÛÌŒK]K››ÝÊ
+K™\K™ÝY\ÝÚÙ[’\Ú[
+NßJJ
+NÂˆ‹œ™\\™J	ÕTUH]™[ÈÑU\ØYÜÝXØÙ\ÜÙ\Ï]\ØYÜÝXØÙ\ÜÙ\ÊÌHÒT‘HYOÉÊKœ[Š™\K™]™[šY
+NÂˆ™\ËšœÛÛŠÜÝXØÙ\ÜÎYKÛÝ[Üš][‹›[™Ý[™[™ÎˆH\™\K™]™[›[Ù\˜][ÛŸJNÂˆHØ]Ú
+\œ›ÜŠHÙ‹œ™\\™J	ÕTUH]™[ÈÑU\ØYÙ˜Z[\™\Ï]\ØYÙ˜Z[\™\ÊÌHÒT‘HYOÉÊKœ[Š™\K™]™[šY
+NÙ›ÜŠÛÛœÝˆÙˆÜš][Š^Ýž^ÚYŠÝÔÝÜ˜YÙK›[ÙOOOIÜÌÉÊ^Ø]ØZ]ÝÔÝÜ˜YÙK™[]TÝÊ™\K™]™[šY‹™š[[˜[YJNØ]ØZ]˜XÚÝ\Ù\šXÙK™[]TÝÊ™\K™]™[šY‹™š[[˜[YJNßY[ÙHœËœ›TÞ[˜Ê‹™\ÝÙ›Ü˜ÙNY_JNßXØ]Ú
+ÛX[\\œ›ÜŠ^ØÛÛœÛÛK™\œ›ÜŠ	Õ\ØYP]Yœ°é[Y[ˆ™ZÙ\ØÚYÙ[Ž‰ËÛX[\\œ›Ü‹›Y\ÜØYÙJNß_ZYŠ\œ›Ü‹˜ÛÙOOOIÔÕ×ÔÕÔQÑWÕSURSP“IÊXÛÛœÛÛK™\œ›ÜŠ	Ò]›™\ˆØš™XÝÝÜ˜YÙN‰Ë\œ›Ü‹˜Ø]\ÙOË›Y\ÜØYÙ_\œ›Ü‹›Y\ÜØYÙJNÙ˜Z[
+™\Ë\œ›Ü‹˜ÛÙOOOIÔÕ×ÔÕÔQÑWÕSURSP“IÏÍLÎ\œ›Ü‹›Y\ÜØYÙJNßBˆš[˜[HÙ›ÜŠÛÛœÝˆÙˆ™\K™š[\ß×JHœËœ›TÞ[˜Ê‹œ]Ù›Ü˜ÙNY_JNÚYŠÝÔÝÜ˜YÙK›[ÙOOOIÜÌÉÊY›ÜŠÛÛœÝˆÙˆÜš][ŠYœËœ›TÞ[˜Ê‹™\ÝÙ›Ü˜ÙNY_JNØ\ÞK™[]J™\K™]™[šY
+NØØ\XÚ]Kœ™[X\ÙJ
+NßBˆJNÂˆJNÂˆ[˜Ý[ÛˆÝÕ\›
+™\K
+HÜ™]\›ˆÝ\ØYËÉÜ™\K™]™[šYKÉÜ™š[[˜[Y_IÛÝÛŠ™\K™\K™]™[
+OÉÉÎ˜ÝÚÙ[IÜ™\K™]™[™ÝY\ÝÝÚÙ[ŸXXßBˆ\™Ù]
+	ËØ\KÙ]™[Î™]™[YÚ[™›ÉËXØÙ\ÜË
+™\K™\ÊOOžÂˆÛÛœÝØ[“X[˜YÙO[ÝÛŠ™\K™\K™]™[
+NÂˆÛÛœÝÝÐÛÝ[XØ[“X[˜YÙBˆÈ‹œ™\\™J	ÔÑSPÕÓÕS•
+
+ŠHÛÝ[”“ÓHÝÜÈÒT‘H]™[ÚYOÉÊK™Ù]
+™\K™]™[šY
+K˜ÛÝ[ˆˆ‹œ™\\™J	ÔÑSPÕÓÕS•
+
+ŠHÛÝ[”“ÓHÝÜÈÒT‘H]™[ÚYOÈS‘\ØY\—ÝÚÙ[—Ú\ÚOÉÊK™Ù]
+™\K™]™[šY™\K™ÝY\ÝÚÙ[’\Ú
+K˜ÛÝ[Âˆ™\ËšœÛÛŠÝ]Nœ™\K™]™[]K]™[]Nœ™\K™]™[™]™[Ù]KÝ\Ð]œÝ\]
+™\K™]™[
+K^\™\Ð]œ™\K™]™[™]™[Ù]OÜ™][[Û•[[
+™\K™]™[
+Nœ™\K™]™[™^\™\×Ø]™][[Û•[[œ™][[Û•[[
+™\K™]™[
+K™XYÛ›NˆXXÝ]™J™\K™]™[
+K[Ù\˜][ÛŽˆH\™\K™]™[›[Ù\˜][Û‹ÝY\Ý›ÛÚÓ[Ù\˜][ÛŽˆH\™\K™]™[™ÝY\Ý›ÛÚ×Û[Ù\˜][Û‹šX[œ™\K™]™[œÝ]\ÏOOIÝšX[	Ë™Q]™[\Ýœ™\K™]™[œÝ]\ÏOOIÜZY	É‰œÝ\]
+™\K™]™[
+O‘]K››ÝÊ
+K\Ý[ÙN\Ý[ÙJ™\K™]™[
+KÝÐÛÝ[ÝÓ[Z]™]™[ÝÓ[Z]
+™\K™]™[Ù™ÊKÝÜ˜YÙPž]\Î“[X™\Š‹œ™\\™J	ÔÑSPÕÓÐSTÐÑJÕSJž]\ÊK
+Hž]\È”“ÓHÝÜÈÒT‘H]™[ÚYOÉÊK™Ù]
+™\K™]™[šY
+K˜ž]\ÊKÝÜ˜YÙS[Z]ž]\Î™]™[ÝÜ˜YÙS[Z]
+™\K™]™[Ù™ÊK[Ýœ™\K™]™[œÝ]\ÏOOIÜ[Ý	ËØ[“X[˜YÙK\ÚYÛŽœX›XÑ\ÚYÛŠ™\K™]™[
+_JNÂˆJNÂˆ\™Ù]
+	ËØ\KÙ]™[Î™]™[YÙÝY\Ý›ÛÚÉËXØÙ\ÜË
+™\K™\ÊOOžÂˆÛÛœÝ[šY\Ï[ÝÛŠ™\K™\K™]™[
+BˆÈ‹œ™\\™J	ÔÑSPÕYÝY\ÝÛ˜[YH˜[YKY\ÜØYÙK\›Ý™YÜ™X]YØ]Ü™X]Y]”“ÓHÝY\Ý›ÛÚ×Ù[šY\ÈÒT‘H]™[ÚYOÈÔ‘Tˆ–HÜ™X]YØ]TÐÈSRUŒ	ÊK˜[
+™\K™]™[šY
+Bˆˆ‹œ™\\™J	ÔÑSPÕYÝY\ÝÛ˜[YH˜[YKY\ÜØYÙK\›Ý™YÜ™X]YØ]Ü™X]Y]”“ÓHÝY\Ý›ÛÚ×Ù[šY\ÈÒT‘H]™[ÚYOÈS‘\›Ý™YLHÔ‘Tˆ–HÜ™X]YØ]TÐÈSRUŒ	ÊK˜[
+™\K™]™[šY
+NÂˆ™\ËšœÛÛŠÙ[šY\ËØ[“X[˜YÙN›ÝÛŠ™\K™\K™]™[
+K[Ù\˜][ÛŽˆH\™\K™]™[™ÝY\Ý›ÛÚ×Û[Ù\˜][ÛŸJNÂˆJNÂˆ\œÜÝ
+	ËØ\KÙ]™[Î™]™[YÙÝY\Ý›ÛÚÉËÝY\Ý›ÛÚÓ[Z]XØÙ\ÜË
+™\K™\ÊOOžÂˆYŠXXÝ]™J™\K™]™[
+J\™]\›ˆ˜Z[
+™\Ë‹	Ñ\È[[H\Ý[ˆ\ˆÝÛ›ØY\ÙKˆ™]YHðéÝXXÚZ[°éÙHÚ[™Ù\ØÚÜÜÙ[‹‰ÊNÂˆÛÛœÝ˜[YOTÝš[™Ê™\K˜›ÙK›˜[Y_	ÉÊKš[J
+KY\ÜØYÙOTÝš[™Ê™\K˜›ÙK›Y\ÜØYÙ_	ÉÊKš[J
+NÂˆYŠ˜[YK›[™Ý[Y\ÜØYÙ_Y\ÜØYÙK›[™ÝL
+\™]\›ˆ˜Z[
+™\Ë	Ðš]HZ[™[ˆ˜[Y[ˆZ]0í˜ÚÝ[œÈ[™Z[™H˜XÚšXÚZ]0í˜ÚÝ[œÈL™ZXÚ[ˆZ[™ÙX™[‹‰ÊNÂˆYŠ‹œ™\\™J	ÔÑSPÕÓÕS•
+
+ŠHÛÝ[”“ÓHÝY\Ý›ÛÚ×Ù[šY\ÈÒT‘H]™[ÚYOÉÊK™Ù]
+™\K™]™[šY
+K˜ÛÝ[ML
+\™]\›ˆ˜Z[
+™\ËŽK	Ñ\ÈðéÝXXÚ\Ý›Ûˆš]HÙ[™HXÚ[ˆ[ˆ™\˜[œÝ[\‹‰ÊNÂˆÛÛœÝ\›Ý™Y\™\K™]™[™ÝY\Ý›ÛÚ×Û[Ù\˜][ÛÌŒKYXÜž\Ëœ˜[™ÛUURQ
+
+NÂˆ‹œ™\\™J	ÒS”ÑT•S•ÈÝY\Ý›ÛÚ×Ù[šY\È
+Y]™[ÚYÝY\ÝÛ˜[YKY\ÜØYÙK\›Ý™YÜ™X]YØ]
+HSQTÈ
+ËËËËËÊIÊKœ[ŠY™\K™]™[šY˜[YKY\ÜØYÙK\›Ý™Y]K››ÝÊ
+JNÂˆ™\ËœÝ]\ÊŒJKšœÛÛŠÜÝXØÙ\ÜÎYK[™[™ÎˆX\›Ý™YJNÂˆJNÂˆ\œ]Ú
+	ËØ\KÙ]™[Î™]™[YÙÝY\Ý›ÛÚËÎ™[žRY	ËÙÚ[”™\]Z\™YÝÛ™\‹
+™\K™\ÊOOžÂˆYŠ\[Ùˆ™\K˜›ÙK˜\›Ý™YOOIØ›ÛÛX[‰Ê\™]\›ˆ˜Z[
+™\Ë	Ñœ™ZYØX™H]\ÜÈYHÙ\ˆ˜[ÙHÙZ[‹‰ÊNÂˆÛÛœÝ™\Ý[Y‹œ™\\™J	ÕTUHÝY\Ý›ÛÚ×Ù[šY\ÈÑU\›Ý™YOÈÒT‘HYOÈS‘]™[ÚYOÉÊKœ[Š™\K˜›ÙK˜\›Ý™YÌNŒ™\Kœ\˜[\Ë™[žRY™\K™]™[šY
+NÂˆYŠ\™\Ý[˜Ú[™Ù\Ê\™]\›ˆ˜Z[
+™\Ë	ÑZ[˜YÈšXÚÙY[™[‹‰ÊNÜ™\ËšœÛÛŠÜÝXØÙ\ÜÎY_JNÂˆJNÂˆ\™[]J	ËØ\KÙ]™[Î™]™[YÙÝY\Ý›ÛÚËÎ™[žRY	ËÙÚ[”™\]Z\™YÝÛ™\‹
+™\K™\ÊOOžÂˆÛÛœÝ™\Ý[Y‹œ™\\™J	ÑSUH”“ÓHÝY\Ý›ÛÚ×Ù[šY\ÈÒT‘HYOÈS‘]™[ÚYOÉÊKœ[Š™\Kœ\˜[\Ë™[žRY™\K™]™[šY
+NÂˆYŠ\™\Ý[˜Ú[™Ù\Ê\™]\›ˆ˜Z[
+™\Ë	ÑZ[˜YÈšXÚÙY[™[‹‰ÊNÜ™\ËšœÛÛŠÜÝXØÙ\ÜÎY_JNÂˆJNÂˆ\™Ù]
+	ËØ\KÙ]™[Î™]™[YÜÝÜÉËXØÙ\ÜË
+™\K™\ÊOOžÂˆÛÛœÝYZ[[ÝÛŠ™\K™\K™]™[
+I‰œ™\Kœ]Y\žK›X[˜YÙOOOIÌIÎÂˆÛÛœÝÝÜÏ[ÝÛŠ™\K™\K™]™[
+BˆÈ‹œ™\\™JÑSPÕ
+ˆ”“ÓHÝÜÈÒT‘H]™[ÚYOÈ	ØYZ[ÉÉÎ‰ÐS‘\›Ý™YLIßHÔ‘Tˆ–HÜ™X]YØ]Y
+K˜[
+™\K™]™[šY
+Bˆˆ‹œ™\\™J	ÔÑSPÕ
+ˆ”“ÓHÝÜÈÒT‘H]™[ÚYOÈS‘\›Ý™YLHS‘\ØY\—ÝÚÙ[—Ú\ÚOÈÔ‘Tˆ–HÜ™X]YØ]Y	ÊK˜[
+™\K™]™[šY™\K™ÝY\ÝÚÙ[’\Ú
+NÂˆ™\ËšœÛÛŠÜÝÜÎœÝÜË›X\
+OŠÚYœšY\›œÝÕ\›
+™\K
+K[Y\Ý[\œ˜Ü™X]YØ]\›Ý™YˆH\˜\›Ý™YJJKÙ\™\•[YN‘]K››ÝÊ
+_JNÂˆJNÂˆ\™Ù]
+	ËÝ\ØYËÎ™]™[YÎ™š[[˜[YIËXØÙ\ÜËÜ˜\
+\Þ[˜Ê™\K™\ÊOOžÂˆÛÛœÝY‹œ™\\™J	ÔÑSPÕ
+ˆ”“ÓHÝÜÈÒT‘H]™[ÚYOÈS‘š[[˜[YOOÉÊK™Ù]
+™\K™]™[šY™\Kœ\˜[\Ë™š[[˜[YJNÂˆYŠ\
+\˜\›Ý™Y	‰ˆ[ÝÛŠ™\K™\K™]™[
+JJH™]\›ˆ˜Z[
+™\Ë	Ñ›ÝÈšXÚÙY[™[‹‰ÊNÂˆYŠ[ÝÛŠ™\K™\K™]™[
+H	‰ˆ\ØY\—ÝÚÙ[—Ú\ÚOO\™\K™ÝY\ÝÚÙ[’\Ú
+H™]\›ˆ˜Z[
+™\Ë	Ñ›ÝÈšXÚÙY[™[‹‰ÊNÂˆYŠÝÔÝÜ˜YÙK›[ÙOOOIÛØØ[	ÊH™]\›ˆ™\ËœÙ[™š[J]š›Ú[Š›ÛÝ™\K™]™[šY™š[[˜[YJJNÂˆÛÛœÝÝ™X[OX]ØZ]ÝÔÝÜ˜YÙK™Ù]Ý™X[J™\K™]™[šY™š[[˜[YJNÂˆ™\Ë\J	ÚœYÉÊNÜ™\ËœÙ]
+	ÐØXÚKPÛÛ›Û	Ë	Üš]˜]K›Ë\ÝÜ™IÊNÜÝ™X[K›ÛŠ	Ù\œ›Ü‰Ë
+
+OOœ™\Ë™\Ý›ÞJ
+JNÜÝ™X[Kœ\J™\ÊNÂˆJJNÂˆ\œ]Ú
+	ËØ\KÙ]™[Î™]™[YÜÝÜËÎœÝÒY	ËÙÚ[”™\]Z\™YÝÛ™\‹
+™\K™\ÊOOžÂˆYŠ\[Ùˆ™\K˜›ÙK˜\›Ý™YOOIØ›ÛÛX[‰ÊH™]\›ˆ˜Z[
+™\Ë	Ñœ™ZYØX™H]\ÜÈYHÙ\ˆ˜[ÙHÙZ[‹‰ÊNÂˆÛÛœÝ™\Ý[Y‹œ™\\™J	ÕTUHÝÜÈÑU\›Ý™YOÈÒT‘HYOÈS‘]™[ÚYOÉÊKœ[Š™\K˜›ÙK˜\›Ý™YÌNŒ™\Kœ\˜[\ËœÝÒY™\K™]™[šY
+NÂˆYŠ\™\Ý[˜Ú[™Ù\ÊH™]\›ˆ˜Z[
+™\Ë	Ñ›ÝÈšXÚÙY[™[‹‰ÊNÜ™\ËšœÛÛŠÜÝXØÙ\ÜÎY_JNÂˆJNÂˆ\™[]J	ËØ\KÙ]™[Î™]™[YÜÝÜËÎœÝÒY	ËÙÚ[”™\]Z\™YÝÛ™\‹Ü˜\
+\Þ[˜Ê™\K™\ÊOOžÂˆÛÛœÝY‹œ™\\™J	ÔÑSPÕ
+ˆ”“ÓHÝÜÈÒT‘HYOÈS‘]™[ÚYOÉÊK™Ù]
+™\Kœ\˜[\ËœÝÒY™\K™]™[šY
+NÂˆYŠ\
+H™]\›ˆ˜Z[
+™\Ë	Ñ›ÝÈšXÚÙY[™[‹‰ÊNÂˆ]ØZ]ÝÔÝÜ˜YÙK™[]TÝÊ™\K™]™[šY™š[[˜[YJNØ]ØZ]˜XÚÝ\Ù\šXÙK™[]TÝÊ™\K™]™[šY™š[[˜[YJNÙ‹œ™\\™J	ÑSUH”“ÓHÝÜÈÒT‘HYOÉÊKœ[ŠšY
+NÜ™\ËšœÛÛŠÜÝXØÙ\ÜÎY_JNÂˆJJNÂˆ\™Ù]
+	ËØ\KÙ]™[Î™]™[YÙÝÛ›ØY	ËXØÙ\ÜËÜ˜\
+\Þ[˜Ê™\K™\ÊOOžÂˆÛÛœÝÝÜÏ[ÝÛŠ™\K™\K™]™[
+BˆÈ‹œ™\\™J	ÔÑSPÕ
+ˆ”“ÓHÝÜÈÒT‘H]™[ÚYOÉÊK˜[
+™\K™]™[šY
+Bˆˆ‹œ™\\™J	ÔÑSPÕ
+ˆ”“ÓHÝÜÈÒT‘H]™[ÚYOÈS‘\›Ý™YLHS‘\ØY\—ÝÚÙ[—Ú\ÚOÉÊK˜[
+™\K™]™[šY™\K™ÝY\ÝÚÙ[’\Ú
+NÂˆYŠ\ÝÜË›[™Ý
+H™]\›ˆ˜Z[
+™\Ë	ÒÙZ[™H›ÝÜÈ›Üš[™[‹‰ÊNÂˆ™\Ë˜]XÚY[
+]™[IÜ™\K™]™[šYKY›ÝÜËžš\
+NÂˆÛÛœÝ\˜Ú]™O[™]È\˜Ú]™\‹–š\\˜Ú]™JÞ›XŽžÛ]™[Œ__JNÂˆ\˜Ú]™K›ÛŠ	Ù\œ›Ü‰Ë
+
+OOœ™\Ë™\Ý›ÞJ
+JNÜ™\Ë›ÛŠ	ØÛÜÙIË
+
+OO˜\˜Ú]™K˜X›Ü
+
+JNØ\˜Ú]™Kœ\J™\ÊNÂˆ›ÜŠÛÛœÝÙˆÝÜÊHÂˆYŠÝÔÝÜ˜YÙK›[ÙOOOIÛØØ[	ÊH\˜Ú]™K™š[J]š›Ú[Š›ÛÝ™\K™]™[šY™š[[˜[YJKÛ˜[YNœ™š[[˜[Y_JNÂˆ[ÙH\˜Ú]™K˜\[™
+]ØZ]ÝÔÝÜ˜YÙK™Ù]Ý™X[J™\K™]™[šY™š[[˜[YJKÛ˜[YNœ™š[[˜[Y_JNÂˆBˆ\˜Ú]™K™š[˜[^™J
+NÂˆJJNÂˆ\Þ[˜È[˜Ý[Ûˆ\˜\ÙJJHÂˆYŠ\ÞKš\ÊKšY
+JH™]\›ˆ˜[ÙNÂˆËÈYØXÞH[›ÝÛ™Y]™[È\™H™]™\ˆ™[[Ý™Y]]ÛX]XØ[Nˆ™]šY]ËÚ[\Üš\œÝ‚ˆ]ØZ]ÝÔÝÜ˜YÙK™[]Q]™[
+KšY
+NÂˆ]ØZ]˜XÚÝ\Ù\šXÙK™[]Q]™[
+KšY
+NÂˆ‹˜[œØXÝ[ÛŠ
+
+OOžÙ‹œ™\\™J	ÑSUH”“ÓHÝÜÈÒT‘H]™[ÚYOÉÊKœ[ŠKšY
+NÙ‹œ™\\™J	ÑSUH”“ÓHÝY\Ý›ÛÚ×Ù[šY\ÈÒT‘H]™[ÚYOÉÊKœ[ŠKšY
+NÙ‹œ™\\™J•TUH]™[ÈÑUÝ]\ÏIÙ^\™Y	Ë[]YØ]OËÝY\ÝÝÚÙ[S•SÒT‘HYOÈŠKœ[Š]K››ÝÊ
+KKšY
+NßJJ
+NÂˆ™]\›ˆYNÂˆBˆ\™[]J	ËØ\KÙ]™[Î™]™[Y	ËÙÚ[”™\]Z\™YÝÛ™\‹Ü˜\
+\Þ[˜Ê™\K™\ÊOOžÚYŠX]ØZ]\˜\ÙJ™\K™]™[
+JH™]\›ˆ˜Z[
+™\ËK	Õ\ØY0éYˆš]H\›™]]™\œÝXÚ[‹‰ÊNÜ™\ËšœÛÛŠÜÝXØÙ\ÜÎY_JNßJJNÂˆ\™[]J	ËØ\KØ]]ØXØÛÝ[	Ë]][Z]ÙÚ[”™\]Z\™YÜ˜\
+\Þ[˜Ê™\K™\ÊOOžÂˆÛÛœÝ\ÜÝÛÜ™\™\K˜›ÙKœ\ÜÝÛÜ™ÂˆYŠ™\K˜›ÙK˜ÛÛ™š\›HOOIÒÓÓ•È0å”ÐÒS‰ÊH™]\›ˆ˜Z[
+™\Ë	Ðš]HYH0íœØÚ[™ÈZ]8 '’ÓÓ•È0å”ÐÒS¸ '™\Ý0éYÙ[‹‰ÊNÂˆYŠ\[Ùˆ\ÜÝÛÜ™OOIÜÝš[™Éß\ÜÝÛÜ™›[™ÝŒLŽ
+H™]\›ˆ˜Z[
+™\Ë	Ðš]HZ[ˆ\ÜÝÛÜZ[™ÙX™[‹‰ÊNÂˆÛÛœÝ\Ù\Y‹œ™\\™J	ÔÑSPÕ
+ˆ”“ÓH\Ù\œÈÒT‘HYOÉÊK™Ù]
+™\K\Ù\‹šY
+NÂˆÛÛœÝÜØ[ÝÜ™YOJ\Ù\Ëœ\ÜÝÛÜ™Ú\Ú	ÉÌ	Ëœ™\X]
+
+_N‰ÉÌ	Ëœ™\X]
+LŽ
+_X
+KœÜ]
+	Î‰ÊNÂˆÛÛœÝ\š]™YX]ØZ]ØÜž\
+\ÜÝÛÜ™Ø[
+NÂˆYŠ]\Ù\ŸXÜž\Ë[Z[™ÔØY™Q\]X[
+Y™™\‹™œ›ÛJÝÜ™Y	Ú^	ÊK\š]™Y
+JH™]\›ˆ˜Z[
+™\ËK	Ñ\È\ÜÝÛÜÝ[[]šXÚ‰ÊNÂˆÛÛœÝ]™[ÏY‹œ™\\™J	ÔÑSPÕ
+ˆ”“ÓH]™[ÈÒT‘HÝÛ™\—ÚYOÉÊK˜[
+™\K\Ù\‹šY
+NÂˆYŠ]™[ËœÛÛYJ]™[O˜\ÞKš\Ê]™[šY
+JJH™]\›ˆ˜Z[
+™\ËK	Ñ°ïˆZ[™H™\˜[œÝ[[™È0éYÙ\˜YHZ[ˆ›ÝËU\ØYˆš]HØ\HÝ\žˆ[™™\œÝXÚH\È\›™]]‰ÊNÂˆ[][™Õ\Ù\œË˜Y
+™\K\Ù\‹šY
+NÂˆžHÂˆËÈ™]™[HÝ[[Ü[ˆÚXÚÛÝ]œ›ÛHÚ\™Ú[™ÈY\ˆHÝÛ™\ˆ\È[]YH[[\Ë‚ˆ›ÜŠÛÛœÝ]™[Ùˆ]™[ÊHÂˆÛÛœÝ^[Y[Y‹œ™\\™J	ÔÑSPÕ
+ˆ”“ÓH^[Y[ÈÒT‘H]™[ÚYOÉÊK™Ù]
+]™[šY
+NÂˆYŠ\^[Y[ËœÝš\WÜÙ\ÜÚ[Û—ÚYÉÜZY	Ë	Ü\X[WÜ™Y[™Y	Ë	Ü™Y[™Y	Ë	Ù\Ü]Y	Ë	Ù\Ü]YÛÜÝ	×Kš[˜ÛY\Ê^[Y[œÝ]\ÊJHÛÛ[YNÂˆYŠ\Ýš\JH™]\›ˆ˜Z[
+™\ËLË	ÑZ[ˆÙ™™[™\ˆ˜Z[™ÜËPÚXÚÛÝ]Ø[›ˆÙ\˜YHšXÚÙ\°ïÙ\™[‹ˆš]HÜ0é\ˆ\›™]]™\œÝXÚ[‹‰ÊNÂˆÛÛœÝÙ\ÜÚ[ÛX]ØZ]Ýš\K˜ÚXÚÛÝ]œÙ\ÜÚ[ÛœËœ™]šY]™J^[Y[œÝš\WÜÙ\ÜÚ[Û—ÚY
+NÂˆYŠÙ\ÜÚ[Û‹œÝ]\ÏOOIÛÜ[‰ÊH]ØZ]Ýš\K˜ÚXÚÛÝ]œÙ\ÜÚ[ÛœË™^\™JÙ\ÜÚ[Û‹šY
+NÂˆYŠÙ\ÜÚ[Û‹œ^[Y[ÜÝ]\ÏOOIÜZY	É‰œ^[Y[œÝ]\ÈOOIÜZY	ÊH‹œ™\\™J•TUH^[Y[ÈÑUÝ]\ÏIÜZY	ÈÒT‘HYOÈŠKœ[Š^[Y[šY
+NÂˆBˆ›ÜŠÛÛœÝ]™[Ùˆ]™[ÊHYŠX]ØZ]\˜\ÙJ]™[
+JH™]\›ˆ˜Z[
+™\ËK	Ñ°ïˆZ[™H™\˜[œÝ[[™È0éYÙ\˜YHZ[ˆ›ÝËU\ØYˆš]H™\œÝXÚH\È\›™]]‰ÊNÂˆÛÛœÝ™]Z[™Y^[Y[ÏY]™[Ë™š[\Š]™[O™‹œ™\\™J”ÑSPÕH”“ÓH^[Y[ÈÒT‘H]™[ÚYOÈS‘Ý]\ÈSˆ
+	ÜZY	Ë	Ü\X[WÜ™Y[™Y	Ë	Ü™Y[™Y	Ë	Ù\Ü]Y	Ë	Ù\Ü]YÛÜÝ	ÊHŠK™Ù]
+]™[šY
+JK›[™ÝÂˆ‹˜[œØXÝ[ÛŠ
+
+OOžÂˆÛÛœÝ\]TZYY‹œ™\\™J•TUH]™[ÈÑUÝÛ™\—ÚYS•S[XZ[S•S]OIÑÙ[0íœØÚ\È[[IË]™[Ù]OS•S\ÚYÛ—ÚœÛÛIÞßIËÝY\ÝÝÚÙ[S•SÝš\WÜÙ\ÜÚ[Û—ÚYS•SÝ]\ÏIÙ^\™Y	Ë[]YØ]OË\ØYÜÝXØÙ\ÜÙ\ÏL\ØYÙ˜Z[\™\ÏLÒT‘HYOÈŠNÂˆÛÛœÝ[]T^[Y[ÏY‹œ™\\™J‘SUH”“ÓH^[Y[ÈÒT‘H]™[ÚYOÈS‘Ý]\È“ÕSˆ
+	ÜZY	Ë	Ü\X[WÜ™Y[™Y	Ë	Ü™Y[™Y	Ë	Ù\Ü]Y	Ë	Ù\Ü]YÛÜÝ	ÊHŠNÂˆÛÛœÝ[]U[œZYY‹œ™\\™J	ÑSUH”“ÓH]™[ÈÒT‘HYOÉÊNÂˆ›ÜŠÛÛœÝ]™[Ùˆ]™[ÊHÂˆ[]T^[Y[Ëœ[Š]™[šY
+NÂˆYŠ‹œ™\\™J”ÑSPÕH”“ÓH^[Y[ÈÒT‘H]™[ÚYOÈS‘Ý]\ÈSˆ
+	ÜZY	Ë	Ü\X[WÜ™Y[™Y	Ë	Ü™Y[™Y	Ë	Ù\Ü]Y	Ë	Ù\Ü]YÛÜÝ	ÊHŠK™Ù]
+]™[šY
+JH\]TZYœ[Š]K››ÝÊ
+K]™[šY
+NÂˆ[ÙH[]U[œZYœ[Š]™[šY
+NÂˆBˆ‹œ™\\™J	ÑSUH”“ÓHÙ\ÜÚ[ÛœÈÒT‘H\Ù\—ÚYOÉÊKœ[Š™\K\Ù\‹šY
+NÂˆ‹œ™\\™J	ÑSUH”“ÓH\ÜÝÛÜ™Ü™\Ù]ÈÒT‘H\Ù\—ÚYOÉÊKœ[Š™\K\Ù\‹šY
+NÂˆ‹œ™\\™J	ÑSUH”“ÓH[XZ[Ý™\šYšXØ][ÛœÈÒT‘H\Ù\—ÚYOÉÊKœ[Š™\K\Ù\‹šY
+NÂˆ‹œ™\\™J	ÑSUH”“ÓH\Ù\œÈÒT‘HYOÉÊKœ[Š™\K\Ù\‹šY
+NÂˆJJ
+NÂˆ™\Ë˜ÛX\ÛÛÚÚYJ	Ù]™[ÜÙ\ÜÚ[Û‰ËÜ]‰ËÉßJNÂˆ™\ËšœÛÛŠÜÝXØÙ\ÜÎYK[]Y]™[Î™]™[Ë›[™Ý™]Z[™Y^[Y[ßJNÂˆHš[˜[HÙ[][™Õ\Ù\œË™[]J™\K\Ù\‹šY
+NßBˆJJNÂˆ[˜Ý[ÛˆÛX[\
+
+HÂˆÛÛœÝ^\™YY‹œ™\\™J”ÑSPÕ
+ˆ”“ÓH]™[ÈÒT‘HÝÛ™\—ÚYTÈ“Õ•SS‘[]YØ]TÈ•SS‘Ý]\ÈSˆ
+	ÜZY	Ë	ÝšX[	Ë	Ü[Ý	Ë	Ü™Y[™Y	ÊHŠK˜[
+
+K™š[\ŠOOœ™][[Û•[[
+JOQ]K››ÝÊ
+JNÂˆÛÛœÝ[™T™XÛÜ™ÏJ
+OOžÂˆ‹œ™\\™J	ÑSUH”“ÓHÙ\ÜÚ[ÛœÈÒT‘H^\™\×Ø]OÉÊKœ[Š]K››ÝÊ
+JNÂˆ‹œ™\\™J	ÑSUH”“ÓH[XZ[Ý™\šYšXØ][ÛœÈÒT‘H^\™\×Ø]OÉÊKœ[Š]K››ÝÊ
+JNÂˆ‹œ™\\™J	ÑSUH”“ÓH\ÜÝÛÜ™Ü™\Ù]ÈÒT‘H^\™\×Ø]OÉÊKœ[Š]K››ÝÊ
+JNÂˆ›ÜŠÛÛœÝ[žHÙˆœËœ™XY\”Þ[˜Ê[\
+JHØÛÛœÝš[O\]š›Ú[Š[\[žJNÚYŠœËœÝ]Þ[˜Êš[JK›][YS\Ï]K››ÝÊ
+KN
+HœËœ›TÞ[˜Êš[KÙ›Ü˜ÙNY_JNßBˆNÂˆYŠÝÔÝÜ˜YÙK›[ÙOOOIÛØØ[	ÊHÙ›ÜŠÛÛœÝHÙˆ^\™Y
+HÚYŠX\ÞKš\ÊKšY
+J^ÙœËœ›TÞ[˜Ê]š›Ú[Š›ÛÝKšY
+KÜ™XÝ\œÚ]™NYK›Ü˜ÙNY_JNÙ‹˜[œØXÝ[ÛŠ
+
+OOžÙ‹œ™\\™J	ÑSUH”“ÓHÝÜÈÒT‘H]™[ÚYOÉÊKœ[ŠKšY
+NÙ‹œ™\\™J	ÑSUH”“ÓHÝY\Ý›ÛÚ×Ù[šY\ÈÒT‘H]™[ÚYOÉÊKœ[ŠKšY
+NÙ‹œ™\\™J•TUH]™[ÈÑUÝ]\ÏIÙ^\™Y	Ë[]YØ]OËÝY\ÝÝÚÙ[S•SÒT‘HYOÈŠKœ[Š]K››ÝÊ
+KKšY
+NßJJ
+Nß_\[™T™XÛÜ™Ê
+NÜ™]\›ŽßBˆ™]\›ˆ
+\Þ[˜Ê
+OOžÙ›ÜŠÛÛœÝHÙˆ^\™Y
+H]ØZ]\˜\ÙJJNÜ[™T™XÛÜ™Ê
+NßJJ
+NÂˆBˆÛÛœÝX\]š›Ú[Š×Ù\›˜[YK	ÜX›XÉÊNÂˆ\™Ù]
+	ËÉË
+™\K™\ÊOOœ™\ËœÙ[™š[J]š›Ú[ŠX‹	Û[™[™Ëš[	ÊJJNÂˆ\™Ù]
+ÉËÙ›Ü™ÛÝ\\ÜÝÛÜ™	Ë	ËÜ™\Ù]\\ÜÝÛÜ™	×K
+™\K™\ÊOOœ™\ËœÙ[™š[J]š›Ú[ŠX‹	Ü\ÜÝÛÜ™\™XÛÝ™\žKš[	ÊJJNÂˆ\™Ù]
+	ËÝ™\šYžKY[XZ[	Ë
+™\K™\ÊOOœ™\ËœÙ[™š[J]š›Ú[ŠX‹	Ý™\šYžKY[XZ[š[	ÊJJNÂˆ\™Ù]
+	ËÚ[\™\ÜÝ[IË
+™\K™\ÊOOœ™\ËœÙ[™š[J]š›Ú[ŠX‹	Ú[\™\ÜÝ[Kš[	ÊJJNÂˆ\™Ù]
+	ËÙ][œØÚ]‰Ë
+™\K™\ÊOOœ™\ËœÙ[™š[J]š›Ú[ŠX‹	Ù][œØÚ]‹š[	ÊJJNÂˆ\™Ù]
+	ËÝÚY\œY‰Ë
+™\K™\ÊOOœ™\ËœÙ[™š[J]š›Ú[ŠX‹	ÝÚY\œY‹š[	ÊJJNÂˆ\™Ù]
+	ËØ™Y[™Ý[™Ù[‰Ë
+™\K™\ÊOOœ™\ËœÙ[™š[J]š›Ú[ŠX‹	Ø™Y[™Ý[™Ù[‹š[	ÊJJNÂˆ\™Ù]
+	ËÜ™YÚ\Ý\‰Ë
+™\K™\ÊOOœ™\K\Ù\Ü™\Ëœ™Y\™XÝ
+ÉÙ]™[	Ë	Ì[IË	ÌÛIË	Í›I×Kš[˜ÛY\Ê™\Kœ]Y\žKœ[ŠOØÙ\Ú›Ø\™Ü[IÙ[˜ÛÙUT’PÛÛ\Û™[
+™\Kœ]Y\žKœ[Š_X‰ËÙ\Ú›Ø\™	ÊNœ™\ËœÙ[™š[J]š›Ú[ŠX‹	ÛÙÚ[‹š[	ÊJJNÂˆ\™Ù]
+	ËÛÙÚ[‰Ë
+™\K™\ÊOOœ™\ËœÙ[™š[J]š›Ú[ŠX‹	ÛÙÚ[‹š[	ÊJJNÂˆ\™Ù]
+	ËÙ\Ú›Ø\™	Ë
+™\K™\ÊOOœ™\K\Ù\Ü™\ËœÙ[™š[J]š›Ú[ŠX‹	Ù\Ú›Ø\™š[	ÊJNœ™\Ëœ™Y\™XÝ
+	ËÛÙÚ[‰ÊJNÂˆ\™Ù]
+	ËÜÝXØÙ\ÜÉË
+™\K™\ÊOOœ™\K\Ù\Ü™\ËœÙ[™š[J]š›Ú[ŠX‹	ÜÝXØÙ\ÜËš[	ÊJNœ™\Ëœ™Y\™XÝ
+	ËÛÙÚ[‰ÊJNÂˆ\›ØØ[Ëœ^[Y[[\[Y\\Ù][\˜[
+
+
+OOžÙ›\Ú^[Y[[\Ê
+K˜Ø]Ú
+\œ›ÜO˜ÛÛœÛÛK™\œ›ÜŠ	Ö˜Z[™ÜØ[\›YHÛÛ›[ˆšXÚ™\˜\˜™Z]]Ù\™[Ž‰Ë\œ›Ü‹›Y\ÜØYÙJJNÙ›\ÚÛÛ˜XÝÛÛ™š\›X][ÛœÊ
+K˜Ø]Ú
+\œ›ÜO˜ÛÛœÛÛK™\œ›ÜŠ	Õ™\˜YÜØ™\Ý0éYÝ[™Ù[ˆÛÛ›[ˆšXÚ™\˜\˜™Z]]Ù\™[Ž‰Ë\œ›Ü‹›Y\ÜØYÙJJNÙ›\ÚÚ]˜]Ø[ÛÛ™š\›X][ÛœÊ
+K˜Ø]Ú
+\œ›ÜO˜ÛÛœÛÛK™\œ›ÜŠ	ÕÚY\œYœØ™\Ý0éYÝ[™Ù[ˆÛÛ›[ˆšXÚ™\˜\˜™Z]]Ù\™[Ž‰Ë\œ›Ü‹›Y\ÜØYÙJJNßKŒ
+NØ\›ØØ[Ëœ^[Y[[\[Y\‹[œ™YŠ
+NÂˆ\™Ù]
+	ËÙ]™[Î™]™[YØYZ[‰ËÙÚ[”™\]Z\™YÝÛ™\‹
+™\K™\ÊOOœ™\Ëœ™Y\™XÝ
+	ËÙ\Ú›Ø\™	ÊJNÂˆ\™Ù]
+	ËÙ]™[Î™]™[YÙ\ÚYÛ‰ËÙÚ[”™\]Z\™YÝÛ™\‹
+™\K™\ÊOOžÂˆYŠ\™XYX›J™\K™]™[
+J\™]\›ˆ™\Ëœ™Y\™XÝ
+Ù\Ú›Ø\™Ù]™[IÙ[˜ÛÙUT’PÛÛ\Û™[
+™\K™]™[šY
+_X
+NÂˆËÈHY]Ü‰ÜÈš[Ú[™ÝÈZ[ÈHÙ[‹XÛÛZ[™YYÙHÚ][›[™H^[Ý]Ý[\Ë‚ˆËÈ[ÝÈÜÙHÝ[\ÈÛ›HÛˆ\È]][XØ]YY]ÜˆYÙNÈÝ\ˆYÙ\ÈÙY\[Y]	ÜÈÛXÞK‚ˆ™\ËœÙ]
+	ÐÛÛ[TÙXÝ\š]KTÛXÞIËÂˆ™Y˜][\Ü˜È	ÜÙ[‰È‹ˆ˜˜\ÙK]\šH	ÜÙ[‰È‹ˆ™›Û\Ü˜È	ÜÙ[‰ÈÎˆ]Nˆ‹ˆ™›Ü›KXXÝ[Ûˆ	ÜÙ[‰È‹ˆ™œ˜[YKX[˜Ù\ÝÜœÈ	ÜÙ[‰È‹ˆš[YË\Ü˜È	ÜÙ[‰È]Nˆ›ØŽˆ‹ˆ›Øš™XÝ\Ü˜È	Û›Û™IÈ‹ˆœØÜš\\Ü˜È	ÜÙ[‰È‹ˆœØÜš\\Ü˜ËX]ˆ	Û›Û™IÈ‹ˆœÝ[K\Ü˜È	ÜÙ[‰È	Ý[œØY™KZ[›[™IÈ‹ˆ‹‹Š˜\ÙU\›œ›ÝØÛÛOOIÚÎ‰ÏÖÉÝ\Ü˜YKZ[œÙXÝ\™K\™\]Y\ÝÉ×N–×JBˆKš›Ú[Š	ÎÈ	ÊJNÂˆ™\ËœÙ[™š[J]š›Ú[ŠX‹	Ù\ÚYÛ‹YY]Ü‹š[	ÊJNÂˆJNÂˆ›ÜŠÛÛœÝÜÝY™š^š[WHÙˆÖÉÉË	ÙØ[\žKš[	×KÉËÝ\ØY	Ë	Ý\ØYš[	×KÉËÙØ[\žIË	ÙØ[\žKš[	×KÉËÜÛY\ÚÝÉË	ÜÛY\ÚÝËš[	×KÉËÙØ[Y\ÉË	ÙØ[Y\Ëš[	×KÉËÙÝY\Ý›ÛÚÉË	ÙÝY\Ý›ÛÚËš[	×WJH\™Ù]
+Ù]™[Î™]™[Y	ÜÝY™š^XXØÙ\ÜË
+™\K™\ÊOOœ™\ËœÙ[™š[J]š›Ú[ŠX‹š[JJJNÂˆËÈÛ›H[[™YX›XÈ\ÜÙ]ÎÈÛÝ\˜ÙHÛÙH[™Ù[™\šXÈS›Ý]\ÈØ[››Ýž\\ÜÈÝX\™Ë‚ˆ›ÜŠÛÛœÝš[HÙˆÉÜÝ[K˜ÜÜÉË	Ù\ÚYÛ‹YY]Ü‹˜ÜÜÉË	Ù\ÚYÛ‹YY]Ü‹šœÉË	Ý\ØYšœÉË	ÜÛY\ÚÝËšœÉË	ÙÝY\ÝXXØÙ\ÜËšœÉË	ØXØÛÝ[šœÉË	Ý™\šYžKY[XZ[šœÉË	Ü\ÜÝÛÜ™\™XÛÝ™\žKšœÉË	ÙØ[Y\ËšœÉË	ÙÝY\Ý›ÛÚËšœÉË	Ü^[Y[ËXYZ[‹šœÉË	Û[™[™ËšœÉË	ÜÝXØÙ\ÜËšœÉË	ÙØ[\žKZ[š]šœÉË	ØYZ[‹šœÉË	Ú›Ú[›˜KX˜\ÝX[‹œ™ÉË	ÜÝÙÜ˜\\‹ÙXœ	Ë	Ù]™[]ÙY[™ËšœÉË	Ù]™[Xš\^KšœÉË	Ù]™[\Ý[[Y\‹šœÉË	Ù]™[XÛÛ\[žKšœÉ×JH\™Ù]
+ÉÙš[_X
+™\K™\ÊOOœ™\ËœÙ[™š[J]š›Ú[ŠX‹š[JJJNÂˆËÈ]™[™\ÜÈÝ^\ÈÚX\›ÜˆHÜÝ	ÜÈ™\Ý\ÚXÚËˆ™XY[™\ÜÈÚXÚÜÈÜš]XØ[\[™[˜ÚY\Ë‚ˆ\™Ù]
+	ËÚX[	Ë
+™\K™\ÊOOœ™\ËšœÛÛŠÛÚÎY_JJNÂˆ\™Ù]
+	ËÜ™XYIË\Þ[˜Ê™\K™\ÊOOžÂˆžHÂˆ‹œ™\\™J	ÔÑSPÕIÊK™Ù]
+
+NÂˆÛÛœÝ\ÚÏYœËœÝ]œÔÞ[˜Ê›ÛÝ
+Kœ™YPž]\ÏS[X™\Š\ÚË˜˜]˜Z[
+J“[X™\Š\ÚË˜œÚ^™JNÂˆYŠœ™YPž]\ÏL
+ŒL
+ŠŒŠ]›ÝÈ™]È\œ›ÜŠ	Õ\ØY›Û[YH™[ÝÈHLZPˆÜ\˜][™È™\Ù\™K‰ÊNÂˆ]ØZ]ÝÔÝÜ˜YÙK˜ÚXÚÊ
+NÂˆ™\ËšœÛÛŠÛÚÎY_JNÂˆHØ]Ú
+\œ›ÜŠHÂˆÛÛœÛÛK™\œ›ÜŠ	Ô™XY[™\ÜÈÚXÚÈ˜Z[Y‰Ë\œ›Ü‹›Y\ÜØYÙJNÂˆ™\ËœÝ]\ÊLÊKšœÛÛŠÛÚÎ™˜[Ù_JNÂˆBˆJNÂˆ\\ÙJ
+™\K™\ÊOO™˜Z[
+™\Ë	ÓšXÚÙY[™[‹‰ÊJNÂˆ\\ÙJ
+\œ‹™\K™\Ë™^
+OOžØÛÛœÛÛK™\œ›ÜŠ\œ‹›Y\ÜØYÙJNÚYŠ\™\ËšXY\œÔÙ[
+H˜Z[
+™\ËL	Ò[\›™\ˆ™Z\‹‰ÊNßJNÂˆ\›ØØ[Ë™YŽØ\›ØØ[Ë˜ÛX[\XÛX[\Ø\›ØØ[Ë™[š[Y[š[Ø\›ØØ[Ë™›\Ú^[Y[[\ÏY›\Ú^[Y[[\ÎØ\›ØØ[Ë™›\ÚÛÛ˜XÝÛÛ™š\›X][ÛœÏY›\ÚÛÛ˜XÝÛÛ™š\›X][ÛœÎØ\›ØØ[Ë™›\ÚÚ]˜]Ø[ÛÛ™š\›X][ÛœÏY›\ÚÚ]˜]Ø[ÛÛ™š\›X][ÛœÎØ\›ØØ[ËœÝÔÝÜ˜YÙO\ÝÔÝÜ˜YÙNØ\›ØØ[Ë˜˜XÚÝ\Ù\šXÙOX˜XÚÝ\Ù\šXÙNØ\›ØØ[Ë›Ü\˜][ÛœÓ[Ûš]Ü[Ü\˜][ÛœÓ[Ûš]ÜŽÂˆ™]\›ˆ\ÂŸBšYŠ™\]Z\™K›XZ[OO[[Ù[JHÂˆÛÛœÝ\XÜ™X]P\
+
+NÂˆ\›ØØ[Ë˜˜XÚÝ\Ù\šXÙKœÝ\
+
+NÂˆ\›ØØ[Ë›Ü\˜][ÛœÓ[Ûš]Ü‹œÝ\
+
+NÂˆ›ÛZ\ÙKœ™\ÛÛ™J\›ØØ[Ë˜ÛX[\
+
+JK˜Ø]Ú
+\œO˜ÛÛœÛÛK™\œ›ÜŠ	Ó0íœØÚ[™È™ZÙ\ØÚYÙ[Ž‰Ë\œ‹›Y\ÜØYÙJJNÂˆÛÛœÝ\ÚÏYœËœÝ]œÔÞ[˜Ê]œ™\ÛÛ™J›ØÙ\ÜË™[‹•TÐQÑTˆ]š›Ú[Š×Ù\›˜[YK	Ý\ØYÉÊJJNÂˆÛÛœÛÛKš[™›Ê\›ØØ[ËœÝÔÝÜ˜YÙK›[ÙOOOIÜÌÉÏÉÕ[\Ü°é™\ˆ\ØYTÜZXÚ\ˆ™\™°ïØ˜\ˆ
+ZPŠN‰Î‰Ñ›ÝÜÜZXÚ\ˆ™\™°ïØ˜\ˆ
+ZPŠN‰ËX]™›ÛÜŠ[X™\Š\ÚË˜˜]˜Z[
+J“[X™\Š\ÚË˜œÚ^™JKÌL
+ŠŒŠJNÂˆÛÛœÝÛX[\[Y\\Ù][\˜[
+
+
+OOžÝž^Ô›ÛZ\ÙKœ™\ÛÛ™J\›ØØ[Ë˜ÛX[\
+
+JK˜Ø]Ú
+\œO˜ÛÛœÛÛK™\œ›ÜŠ	Ó0íœØÚ[™È™ZÙ\ØÚYÙ[Ž‰Ë\œ‹›Y\ÜØYÙJJNßXØ]Ú
+\œŠ^ØÛÛœÛÛK™\œ›ÜŠ	Ó0íœØÚ[™È™ZÙ\ØÚYÙ[Ž‰Ë\œ‹›Y\ÜØYÙJNß_KÍŒ
+NÂˆÛX[\[Y\‹[œ™YŠ
+NÂˆÛÛœÝÙ\™\X\›\Ý[Š›ØÙ\ÜË™[‹”Ô•Ì
+
+OO˜ÛÛœÛÛK›ÙÊ	Ñ]™[Q›ÝËT]›Ü›HÙ\Ý\]
+Ýš\KU\Ý[Ù\ÊK‰ÊJNÂˆ]Ú][™ÑÝÛY˜[ÙNÂˆÛÛœÝÚ]ÝÛ\ÚYÛ˜[OžÂˆYŠÚ][™ÑÝÛŠ\™]\›ŽÂˆÚ][™ÑÝÛ]YNÂˆÛÛœÛÛKš[™›Ê	ÜÚYÛ˜[Nˆ™Y[™H]Y™[™H[™œ˜YÙ[‹˜
+NÂˆÛX\’[\˜[
+ÛX[\[Y\ŠNÂˆ\›ØØ[Ë˜˜XÚÝ\Ù\šXÙKœÝÜ
+
+NÂˆ\›ØØ[Ë›Ü\˜][ÛœÓ[Ûš]Ü‹œÝÜ
+
+NÂˆÛÛœÝ[Y[Ý]\Ù][Y[Ý]
+
+
+OOžÂˆÛÛœÛÛK™\œ›ÜŠ	ÑÙ[Ü™™]\È\[\™˜Z™[ˆ]Y\HH[™ÙNÈÙ™™[™H™\˜š[™[™Ù[ˆÙ\™[ˆÙ\ØÚÜÜÙ[‹‰ÊNÂˆÙ\™\‹˜ÛÜÙP[ÛÛ›™XÝ[ÛœÏËŠ
+NÂˆž^Ø\›ØØ[Ë™‹˜ÛÜÙJ
+NßXØ]ÚßBˆ›ØÙ\ÜË™^]
+JNÂˆKL
+NÂˆ[Y[Ý][œ™YŠ
+NÂˆÙ\™\‹˜ÛÜÙJ
+
+OOžÂˆÛX\•[Y[Ý]
+[Y[Ý]
+NÂˆ\›ØØ[Ë™‹˜ÛÜÙJ
+NÂˆÛÛœÛÛKš[™›Ê	ÔÙ\™\ˆØ]X™\ˆ™Y[™]‰ÊNÂˆJNÂˆNÂˆ›ØÙ\ÜË›Û˜ÙJ	ÔÒQÕT“IË
+
+OOœÚ]ÝÛŠ	ÔÒQÕT“IÊJNÂˆ›ØÙ\ÜË›Û˜ÙJ	ÔÒQÒS•	Ë
+
+OOœÚ]ÝÛŠ	ÔÒQÒS•	ÊJNÂŸB›[Ù[K™^ÜÏ^ØÜ™X]P\]™[XY[™K™][[Û•[[NÂ

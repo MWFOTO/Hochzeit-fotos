@@ -1,87 +1,75 @@
-// Additive migration: existing events and their IDs remain intact.
-const Database = require('better-sqlite3');
-const fs = require('node:fs');
-const path = require('node:path');
-function openDatabase(filename) {
-  fs.mkdirSync(path.dirname(filename), { recursive: true });
-  const db = new Database(filename);
-  db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
-  db.exec(`CREATE TABLE IF NOT EXISTS events (
-    id TEXT PRIMARY KEY, email TEXT, plan TEXT, amount_cents INTEGER,
-    stripe_session_id TEXT, status TEXT NOT NULL DEFAULT 'pending',
-    created_at INTEGER NOT NULL, expires_at INTEGER);
-    CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL,
-      password_hash TEXT NOT NULL, created_at INTEGER NOT NULL);
-    CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL REFERENCES users(id), csrf TEXT NOT NULL, expires_at INTEGER NOT NULL);
-    CREATE TABLE IF NOT EXISTS photos (id TEXT PRIMARY KEY,
-      event_id TEXT NOT NULL REFERENCES events(id), filename TEXT NOT NULL,
-      bytes INTEGER NOT NULL, approved INTEGER NOT NULL DEFAULT 0,
-      created_at INTEGER NOT NULL, UNIQUE(event_id, filename));
-    CREATE TABLE IF NOT EXISTS payments (id TEXT PRIMARY KEY,
-      event_id TEXT NOT NULL REFERENCES events(id), stripe_session_id TEXT UNIQUE,
-      amount_cents INTEGER NOT NULL, months INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
-      stripe_payment_intent_id TEXT, stripe_invoice_id TEXT, stripe_customer_id TEXT, refunded_at INTEGER,
-      customer_type TEXT NOT NULL DEFAULT 'consumer', early_start_requested_at INTEGER,
-      early_start_acknowledged_at INTEGER, terms_accepted_at INTEGER, terms_version TEXT);
-    CREATE TABLE IF NOT EXISTS payment_attempts (
-      id TEXT PRIMARY KEY, payment_id TEXT NOT NULL REFERENCES payments(id) ON DELETE CASCADE,
-      stripe_session_id TEXT NOT NULL UNIQUE, attempt_no INTEGER NOT NULL,
-      status TEXT NOT NULL DEFAULT 'open', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
-      UNIQUE(payment_id,attempt_no));
-    CREATE TABLE IF NOT EXISTS refunds (
-      id TEXT PRIMARY KEY, payment_id TEXT NOT NULL REFERENCES payments(id) ON DELETE CASCADE,
-      stripe_refund_id TEXT UNIQUE, amount_cents INTEGER NOT NULL,
-      reason TEXT NOT NULL, decision_note TEXT NOT NULL, actor_email TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'requested', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
-    CREATE TABLE IF NOT EXISTS payment_events (
-      id TEXT PRIMARY KEY, stripe_event_id TEXT UNIQUE, payment_id TEXT NOT NULL REFERENCES payments(id) ON DELETE CASCADE,
-      source TEXT NOT NULL, event_type TEXT NOT NULL, status TEXT NOT NULL,
-      amount_cents INTEGER, actor_email TEXT, note TEXT, details_json TEXT NOT NULL DEFAULT '{}',
-      created_at INTEGER NOT NULL);
-    CREATE TABLE IF NOT EXISTS payment_alerts (
-      event_id TEXT PRIMARY KEY REFERENCES payment_events(id), status TEXT NOT NULL DEFAULT 'pending',
-      attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, created_at INTEGER NOT NULL, sent_at INTEGER);
-    CREATE TABLE IF NOT EXISTS contract_confirmations (
-      payment_id TEXT PRIMARY KEY REFERENCES payments(id) ON DELETE CASCADE,
-      recipient TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
-      last_error TEXT, created_at INTEGER NOT NULL, sent_at INTEGER);
-    CREATE TABLE IF NOT EXISTS backup_runs (
-      id TEXT PRIMARY KEY, started_at INTEGER NOT NULL, completed_at INTEGER,
-      status TEXT NOT NULL, db_object_key TEXT, photo_objects INTEGER, photo_bytes INTEGER,
-      error TEXT);
-    CREATE TABLE IF NOT EXISTS backup_photo_deletes (
-      event_id TEXT NOT NULL, filename TEXT NOT NULL, created_at INTEGER NOT NULL,
-      attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT,
-      PRIMARY KEY(event_id,filename));
-    CREATE TABLE IF NOT EXISTS operational_alerts (
-      alert_key TEXT PRIMARY KEY, active INTEGER NOT NULL DEFAULT 0,
-      last_sent_at INTEGER, last_value INTEGER NOT NULL DEFAULT 0);
-    CREATE TABLE IF NOT EXISTS webhook_receipts (id TEXT PRIMARY KEY, created_at INTEGER NOT NULL);`);
-  const paymentColumns=new Set(db.prepare('PRAGMA table_info(payments)').all().map(x=>x.name));
-  if(!paymentColumns.has('stripe_payment_intent_id'))db.exec('ALTER TABLE payments ADD COLUMN stripe_payment_intent_id TEXT');
-  if(!paymentColumns.has('stripe_invoice_id'))db.exec('ALTER TABLE payments ADD COLUMN stripe_invoice_id TEXT');
-  if(!paymentColumns.has('stripe_customer_id'))db.exec('ALTER TABLE payments ADD COLUMN stripe_customer_id TEXT');
-  if(!paymentColumns.has('refunded_at'))db.exec('ALTER TABLE payments ADD COLUMN refunded_at INTEGER');
-  if(!paymentColumns.has('customer_type'))db.exec("ALTER TABLE payments ADD COLUMN customer_type TEXT NOT NULL DEFAULT 'consumer'");
-  if(!paymentColumns.has('early_start_requested_at'))db.exec('ALTER TABLE payments ADD COLUMN early_start_requested_at INTEGER');
-  if(!paymentColumns.has('early_start_acknowledged_at'))db.exec('ALTER TABLE payments ADD COLUMN early_start_acknowledged_at INTEGER');
-  if(!paymentColumns.has('terms_accepted_at'))db.exec('ALTER TABLE payments ADD COLUMN terms_accepted_at INTEGER');
-  if(!paymentColumns.has('terms_version'))db.exec('ALTER TABLE payments ADD COLUMN terms_version TEXT');
-  db.prepare(`INSERT OR IGNORE INTO payment_attempts (id,payment_id,stripe_session_id,attempt_no,status,created_at,updated_at)
-    SELECT 'legacy-'||p.id,p.id,p.stripe_session_id,1,CASE WHEN p.status='paid' THEN 'paid' ELSE 'open' END,e.created_at,e.created_at
-    FROM payments p JOIN events e ON e.id=p.event_id WHERE p.stripe_session_id IS NOT NULL`).run();
-  const columns = new Set(db.prepare('PRAGMA table_info(events)').all().map(x => x.name));
-  for (const [name, type] of Object.entries({owner_id:'TEXT REFERENCES users(id)', title:"TEXT NOT NULL DEFAULT 'Veranstaltung'", event_date:'TEXT', guest_token:'TEXT', moderation:'INTEGER NOT NULL DEFAULT 1', guestbook_moderation:'INTEGER NOT NULL DEFAULT 1', deleted_at:'INTEGER', trial_used:'INTEGER NOT NULL DEFAULT 0', upload_successes:'INTEGER NOT NULL DEFAULT 0', upload_failures:'INTEGER NOT NULL DEFAULT 0', design_json:"TEXT NOT NULL DEFAULT '{}'"})) {
-    if (!columns.has(name)) db.exec(`ALTER TABLE events ADD COLUMN ${name} ${type}`);
-  }
-  const userColumns=new Set(db.prepare('PRAGMA table_info(users)').all().map(x=>x.name));
-  if(!userColumns.has('email_verified_at'))db.exec('ALTER TABLE users ADD COLUMN email_verified_at INTEGER');
-  const photoColumns=new Set(db.prepare('PRAGMA table_info(photos)').all().map(x=>x.name));
-  if(!photoColumns.has('uploader_token_hash'))db.exec('ALTER TABLE photos ADD COLUMN uploader_token_hash TEXT');
-  db.exec(`CREATE TABLE IF NOT EXISTS guestbook_entries (id TEXT PRIMARY KEY, event_id TEXT NOT NULL REFERENCES events(id), guest_name TEXT NOT NULL DEFAULT '', message TEXT NOT NULL, approved INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS password_resets (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS email_verifications (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL);`);
-  db.exec('CREATE INDEX IF NOT EXISTS photos_event ON photos(event_id); CREATE INDEX IF NOT EXISTS guestbook_event ON guestbook_entries(event_id,created_at); CREATE INDEX IF NOT EXISTS events_owner ON events(owner_id); CREATE UNIQUE INDEX IF NOT EXISTS payments_event ON payments(event_id); CREATE INDEX IF NOT EXISTS payment_attempts_payment ON payment_attempts(payment_id,attempt_no); CREATE INDEX IF NOT EXISTS payment_events_payment ON payment_events(payment_id,created_at); CREATE INDEX IF NOT EXISTS payment_alerts_status ON payment_alerts(status,created_at); CREATE INDEX IF NOT EXISTS backup_runs_status ON backup_runs(status,completed_at); CREATE INDEX IF NOT EXISTS backup_photo_deletes_created ON backup_photo_deletes(created_at);');
-  return db;
-}
-module.exports = { openDatabase };
+YЄзЉxі¬uз%j·ќВ+ar‰м¶л•л_ўєЮjЛ"‚v›•лЪ®&›•лЛИY]]™HZYЬ][ЫЋ€^\Э[™И]™[ќИ[™Z\€QИ™[XZ[€[ќXЭ‚ЫЫњЭ]X\ЩHH™\]Z\™J	Ш™]\‹\Ь[]LЙКNВЫЫњЭњИH™\]Z\™J	Ы›ЩN™њЙКNВЫЫњЭ]H™\]Z\™J	Ы›ЩNњ]	КNВ™ќ[Э[Ы€Ь[‘]X\ЩJљ[[[YJHВ€њЛ›ZЩ\”Ю[К]™\›[YJљ[[[YJKИ™XЭ\њЪ]™N€ќYHJNВ€ЫЫњЭ€H™]И]X\ЩJљ[[[YJNВ€‹њYЫXJ	Ъ›Э\›[Ы[ЩHHРS	КNВ€‹њYЫXJ	Щ›Ь™ZYЫ—ЪЩ^\ИHУ‰КNВ€‹™^XКФ‘PUHP“HQ€“ХVTХИ]™[ќИ
+€YV’SPT–HСVK[XZ[V[€V[[Э[ќШЩ[ќИS•QСT‹€Эљ\WЬЩ\ЬЪ[Ы—ЪYVЭ]\ИV“Х•SQђUS	Ь[™[™ЙЛ€Ь™X]YШ]S•QСT€“Х•S^\™\ЧШ]S•QСTЉNВ€Ф‘PUHP“HQ€“ХVTХИ\Щ\њИ
+YV’SPT–HСVK[XZ[VS’TUQH“Х•S€\ЬЭЫЬ™Ъ\ЪV“Х•SЬ™X]YШ]S•QСT€“Х•S
+NВ€Ф‘PUHP“HQ€“ХVTХИЩ\ЬЪ[ЫњИ
+ЪЩ[—Ъ\ЪV’SPT–HСVK€\Щ\—ЪYV“Х•S‘Q‘T‘SђСTИ\Щ\њКY
+KЬЬ™€V“Х•S^\™\ЧШ]S•QСT€“Х•S
+NВ€Ф‘PUHP“HQ€“ХVTХИЭЬИ
+YV’SPT–HСVK€]™[ќЪYV“Х•S‘Q‘T‘SђСTИ]™[ќКY
+Kљ[[[YHV“Х•S€ћ]\ИS•QСT€“Х•S\›Э™YS•QСT€“Х•SQђUS€Ь™X]YШ]S•QСT€“Х•SS’TUQJ]™[ќЪYљ[[[YJJNВ€Ф‘PUHP“HQ€“ХVTХИ^[Y[ќИ
+YV’SPT–HСVK€]™[ќЪYV“Х•S‘Q‘T‘SђСTИ]™[ќКY
+KЭљ\WЬЩ\ЬЪ[Ы—ЪYVS’TUQK€[[Э[ќШЩ[ќИS•QСT€“Х•S[ЫќИS•QСT€“Х•SЭ]\ИV“Х•SQђUS	Ь[™[™ЙЛ€Эљ\WЬ^[Y[ќЪ[ќ[ќЪYVЭљ\WЪ[ќ›ЪXЩWЪYVЭљ\WШЭ\ЭЫY\—ЪYV™Yќ[™YШ]S•QСT‹€Э\ЭЫY\—Э\HV“Х•SQђUS	ШЫЫњЭ[Y\‰ЛX\›WЬЭ\ќЬ™\]Y\ЭYШ]S•QСT‹€X\›WЬЭ\ќШXЪЫ›ЭЫYЩYШ]S•QСT‹\›\ЧШXШЩ\YШ]S•QСT‹\›\ЧЭ™\њЪ[Ы€V€ZYШ]S•QСTЉNВ€Ф‘PUHP“HQ€“ХVTХИ^[Y[ќШ][\И
+€YV’SPT–HСVK^[Y[ќЪYV“Х•S‘Q‘T‘SђСTИ^[Y[ќКY
+HУ€SUHРTРРQK€Эљ\WЬЩ\ЬЪ[Ы—ЪYV“Х•SS’TUQK][\Ы›ИS•QСT€“Х•S€Э]\ИV“Х•SQђUS	ЫЬ[‰ЛЬ™X]YШ]S•QСT€“Х•S\]YШ]S•QСT€“Х•S€S’TUQJ^[Y[ќЪY][\Ы›КJNВ€Ф‘PUHP“HQ€“ХVTХИ™Yќ[™И
+€YV’SPT–HСVK^[Y[ќЪYV“Х•S‘Q‘T‘SђСTИ^[Y[ќКY
+HУ€SUHРTРРQK€Эљ\WЬ™Yќ[™ЪYVS’TUQK[[Э[ќШЩ[ќИS•QСT€“Х•S€™X\ЫЫ€V“Х•SXЪ\Ъ[Ы—Ы›ЭHV“Х•SXЭЬ—Щ[XZ[V“Х•S€Э]\ИV“Х•SQђUS	Ь™\]Y\ЭY	ЛЬ™X]YШ]S•QСT€“Х•S\]YШ]S•QСT€“Х•S
+NВ€Ф‘PUHP“HQ€“ХVTХИ^[Y[ќЩ]™[ќИ
+€YV’SPT–HСVKЭљ\WЩ]™[ќЪYVS’TUQK^[Y[ќЪYV“Х•S‘Q‘T‘SђСTИ^[Y[ќКY
+HУ€SUHРTРРQK€ЫЭ\ЩHV“Х•S]™[ќЭ\HV“Х•SЭ]\ИV“Х•S€[[Э[ќШЩ[ќИS•QСT‹XЭЬ—Щ[XZ[V›ЭHV]Z[ЧЪњЫЫ€V“Х•SQђUS	ЮЯIЛ€Ь™X]YШ]S•QСT€“Х•S
+NВ€Ф‘PUHP“HQ€“ХVTХИ^[Y[ќШ[\ќИ
+€]™[ќЪYV’SPT–HСVH‘Q‘T‘SђСTИ^[Y[ќЩ]™[ќКY
+KЭ]\ИV“Х•SQђUS	Ь[™[™ЙЛ€][\ИS•QСT€“Х•SQђUS\ЭЩ\њ›Ь€VЬ™X]YШ]S•QСT€“Х•SЩ[ќШ]S•QСTЉNВ€Ф‘PUHP“HQ€“ХVTХИЫЫќXЭШЫЫ™љ\›X][ЫњИ
+€^[Y[ќЪYV’SPT–HСVH‘Q‘T‘SђСTИ^[Y[ќКY
+HУ€SUHРTРРQK€™XЪ\Y[ќV“Х•SЭ]\ИV“Х•SQђUS	Ь[™[™ЙЛ][\ИS•QСT€“Х•SQђUS€\ЭЩ\њ›Ь€VЬ™X]YШ]S•QСT€“Х•SЩ[ќШ]S•QСTЉNВ€Ф‘PUHP“HQ€“ХVTХИЪ]]Ш[ШЫЫ™љ\›X][ЫњИ
+€^[Y[ќЪYV’SPT–HСVH‘Q‘T‘SђСTИ^[Y[ќКY
+HУ€SUHРTРРQK€Э\ЭЫY\—Ы[YHV“Х•S™XЪ\Y[ќV“Х•SЭ][Y[ќV“Х•S€ЭX›Z]YШ]S•QСT€“Х•SЭ]\ИV“Х•SQђUS	Ь[™[™ЙЛ][\ИS•QСT€“Х•SQђUS€\ЭЩ\њ›Ь€VЩ[ќШ]S•QСTЉNВ€Ф‘PUHP“HQ€“ХVTХИXЪЭ\Ьќ[њИ
+€YV’SPT–HСVKЭ\ќYШ]S•QСT€“Х•SЫЫ\]YШ]S•QСT‹€Э]\ИV“Х•S—ЫШљ™XЭЪЩ^HVЭЧЫШљ™XЭИS•QСT‹ЭЧШћ]\ИS•QСT‹€\њ›Ь€V
+NВ€Ф‘PUHP“HQ€“ХVTХИXЪЭ\ЬЭЧЩ[]\И
+€]™[ќЪYV“Х•Sљ[[[YHV“Х•SЬ™X]YШ]S•QСT€“Х•S€][\ИS•QСT€“Х•SQђUS\ЭЩ\њ›Ь€V€’SPT–HСVJ]™[ќЪYљ[[[YJJNВ€Ф‘PUHP“HQ€“ХVTХИЬ\][Ы[Ш[\ќИ
+€[\ќЪЩ^HV’SPT–HСVKXЭ]™HS•QСT€“Х•SQђUS€\ЭЬЩ[ќШ]S•QСT‹\ЭЭ[YHS•QСT€“Х•SQђUS
+NВ€Ф‘PUHP“HQ€“ХVTХИЩXљЫЪЧЬ™XЩZ\И
+YV’SPT–HСVKЬ™X]YШ]S•QСT€“Х•S
+NШ
+NВ€ЫЫњЭ^[Y[ќЫЫ[[њП[™]ИЩ]
+‹њ™\\™J	ФђQУPHX›WЪ[™›К^[Y[ќКIКK[
+
+K›X\
+Oћ›[YJJNВ€YЉ\^[Y[ќЫЫ[[њЛљ\К	ЬЭљ\WЬ^[Y[ќЪ[ќ[ќЪY	КJY‹™^XК	РST€P“H^[Y[ќИQУУSS€Эљ\WЬ^[Y[ќЪ[ќ[ќЪYV	КNВ€YЉ\^[Y[ќЫЫ[[њЛљ\К	ЬЭљ\WЪ[ќ›ЪXЩWЪY	КJY‹™^XК	РST€P“H^[Y[ќИQУУSS€Эљ\WЪ[ќ›ЪXЩWЪYV	КNВ€YЉ\^[Y[ќЫЫ[[њЛљ\К	ЬЭљ\WШЭ\ЭЫY\—ЪY	КJY‹™^XК	РST€P“H^[Y[ќИQУУSS€Эљ\WШЭ\ЭЫY\—ЪYV	КNВ€YЉ\^[Y[ќЫЫ[[њЛљ\К	Ь™Yќ[™YШ]	КJY‹™^XК	РST€P“H^[Y[ќИQУУSS€™Yќ[™YШ]S•QСT‰КNВ€YЉ\^[Y[ќЫЫ[[њЛљ\К	ШЭ\ЭЫY\—Э\IКJY‹™^XКђST€P“H^[Y[ќИQУУSS€Э\ЭЫY\—Э\HV“Х•SQђUS	ШЫЫњЭ[Y\‰ИЉNВ€YЉ\^[Y[ќЫЫ[[њЛљ\К	ЩX\›WЬЭ\ќЬ™\]Y\ЭYШ]	КJY‹™^XК	РST€P“H^[Y[ќИQУУSS€X\›WЬЭ\ќЬ™\]Y\ЭYШ]S•QСT‰КNВ€YЉ\^[Y[ќЫЫ[[њЛљ\К	ЩX\›WЬЭ\ќШXЪЫ›ЭЫYЩYШ]	КJY‹™^XК	РST€P“H^[Y[ќИQУУSS€X\›WЬЭ\ќШXЪЫ›ЭЫYЩYШ]S•QСT‰КNВ€YЉ\^[Y[ќЫЫ[[њЛљ\К	Э\›\ЧШXШЩ\YШ]	КJY‹™^XК	РST€P“H^[Y[ќИQУУSS€\›\ЧШXШЩ\YШ]S•QСT‰КNВ€YЉ\^[Y[ќЫЫ[[њЛљ\К	Э\›\ЧЭ™\њЪ[Ы‰КJY‹™^XК	РST€P“H^[Y[ќИQУУSS€\›\ЧЭ™\њЪ[Ы€V	КNВ€YЉ\^[Y[ќЫЫ[[њЛљ\К	ЬZYШ]	КJY‹™^XК	РST€P“H^[Y[ќИQУУSS€ZYШ]S•QСT‰КNВ€‹њ™\\™JS”СT•Ф€QУ“Ф‘HS•И^[Y[ќШ][\И
+Y^[Y[ќЪYЭљ\WЬЩ\ЬЪ[Ы—ЪY][\Ы›ЛЭ]\ЛЬ™X]YШ]\]YШ]
+B€СSPХ	ЫYШXЮKIЯљYљYњЭљ\WЬЩ\ЬЪ[Ы—ЪYKРTСHТS€њЭ]\ПIЬZY	ИS€	ЬZY	ИSСH	ЫЬ[‰ИS‘KЬ™X]YШ]KЬ™X]YШ]€”“УH^[Y[ќИ“ТS€]™[ќИHУ€KљY\™]™[ќЪYТT‘HњЭљ\WЬЩ\ЬЪ[Ы—ЪYTИ“Х•S
+Kњќ[Љ
+NВ€ЫЫњЭЫЫ[[њИH™]ИЩ]
+‹њ™\\™J	ФђQУPHX›WЪ[™›К]™[ќКIКK[
+
+K›X\
+O€›[YJJNВ€›Ь€
+ЫЫњЭЫ[YK\WHЩ€Шљ™XЭ™[ќљY\КЫЭЫ™\—ЪY‰ХV‘Q‘T‘SђСTИ\Щ\њКY
+IЛ]N€•V“Х•SQђUS	Х™\[њЭ[[™ЙИ‹]™[ќЩ]N‰ХV	ЛЭY\ЭЭЪЩ[Ћ‰ХV	Л[Щ\][ЫЋ‰ТS•QСT€“Х•SQђUSIЛЭY\Э›ЫЪЧЫ[Щ\][ЫЋ‰ТS•QСT€“Х•SQђUSIЛ[]YШ]‰ТS•QСT‰ЛљX[Э\ЩY‰ТS•QСT€“Х•SQђUS	Л\ШYЬЭXШЩ\ЬЩ\О‰ТS•QСT€“Х•SQђUS	Л\ШYЩZ[\™\О‰ТS•QСT€“Х•SQђUS	Л\ЪYЫ—ЪњЫЫЋ€•V“Х•SQђUS	ЮЯIИџJJHВ€Y€
+XЫЫ[[њЛљ\К[YJJH‹™^XКST€P“H]™[ќИQУУSS€	Ы[Y_H	Э\_X
+NВ€B€ЫЫњЭ\Щ\ђЫЫ[[њП[™]ИЩ]
+‹њ™\\™J	ФђQУPHX›WЪ[™›К\Щ\њКIКK[
+
+K›X\
+Oћ›[YJJNВ€YЉ]\Щ\ђЫЫ[[њЛљ\К	Щ[XZ[Э™\љYљYYШ]	КJY‹™^XК	РST€P“H\Щ\њИQУУSS€[XZ[Э™\љYљYYШ]S•QСT‰КNВ€ЫЫњЭЭРЫЫ[[њП[™]ИЩ]
+‹њ™\\™J	ФђQУPHX›WЪ[™›КЭЬКIКK[
+
+K›X\
+Oћ›[YJJNВ€YЉ\ЭРЫЫ[[њЛљ\К	Э\ШY\—ЭЪЩ[—Ъ\Ъ	КJY‹™^XК	РST€P“HЭЬИQУУSS€\ШY\—ЭЪЩ[—Ъ\ЪV	КNВ€‹™^XКФ‘PUHP“HQ€“ХVTХИЭY\Э›ЫЪЧЩ[ќљY\И
+YV’SPT–HСVK]™[ќЪYV“Х•S‘Q‘T‘SђСTИ]™[ќКY
+KЭY\ЭЫ[YHV“Х•SQђUS	ЙЛY\ЬШYЩHV“Х•S\›Э™YS•QСT€“Х•SQђUSЬ™X]YШ]S•QСT€“Х•S
+NИФ‘PUHP“HQ€“ХVTХИ\ЬЭЫЬ™Ь™\Щ]И
+ЪЩ[—Ъ\ЪV’SPT–HСVK\Щ\—ЪYV“Х•S‘Q‘T‘SђСTИ\Щ\њКY
+K^\™\ЧШ]S•QСT€“Х•S
+NИФ‘PUHP“HQ€“ХVTХИ[XZ[Э™\љYљXШ][ЫњИ
+ЪЩ[—Ъ\ЪV’SPT–HСVK\Щ\—ЪYV“Х•S‘Q‘T‘SђСTИ\Щ\њКY
+K^\™\ЧШ]S•QСT€“Х•S
+NШ
+NВ€‹™^XК	РФ‘PUHS‘VQ€“ХVTХИЭЬЧЩ]™[ќУ€ЭЬК]™[ќЪY
+NИФ‘PUHS‘VQ€“ХVTХИЭY\Э›ЫЪЧЩ]™[ќУ€ЭY\Э›ЫЪЧЩ[ќљY\К]™[ќЪYЬ™X]YШ]
+NИФ‘PUHS‘VQ€“ХVTХИ]™[ќЧЫЭЫ™\€У€]™[ќКЭЫ™\—ЪY
+NИФ‘PUHS’TUQHS‘VQ€“ХVTХИ^[Y[ќЧЩ]™[ќУ€^[Y[ќК]™[ќЪY
+NИФ‘PUHS‘VQ€“ХVTХИ^[Y[ќШ][\ЧЬ^[Y[ќУ€^[Y[ќШ][\К^[Y[ќЪY][\Ы›КNИФ‘PUHS‘VQ€“ХVTХИ^[Y[ќЩ]™[ќЧЬ^[Y[ќУ€^[Y[ќЩ]™[ќК^[Y[ќЪYЬ™X]YШ]
+NИФ‘PUHS‘VQ€“ХVTХИ^[Y[ќШ[\ќЧЬЭ]\ИУ€^[Y[ќШ[\ќКЭ]\ЛЬ™X]YШ]
+NИФ‘PUHS‘VQ€“ХVTХИXЪЭ\Ьќ[њЧЬЭ]\ИУ€XЪЭ\Ьќ[њКЭ]\ЛЫЫ\]YШ]
+NИФ‘PUHS‘VQ€“ХVTХИXЪЭ\ЬЭЧЩ[]\ЧШЬ™X]YУ€XЪЭ\ЬЭЧЩ[]\КЬ™X]YШ]
+NЙКNВ€™]\›€ЋВџB›[Щ[K™^ЬќИHИЬ[‘]X\ЩHNВ

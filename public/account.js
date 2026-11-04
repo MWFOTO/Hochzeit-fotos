@@ -1,175 +1,547 @@
-(() => {
-  const TERMS_VERSION='2026-11-04';
-  let csrf;
-  const message = document.getElementById('message');
-  const report = error => {message.textContent = error.message;};
-  async function api(url, method='GET', body) {
-    if(method!=='GET'&&!csrf){const me=await fetch('/api/auth/me');if(me.ok)csrf=(await me.json()).csrf;}
-    const res=await fetch(url,{method,headers:{'Content-Type':'application/json',...(csrf?{'X-CSRF-Token':csrf}:{})},...(body?{body:JSON.stringify(body)}:{})});
-    const data=await res.json();
-    if(!res.ok) throw new Error(data.error||'Anfrage fehlgeschlagen.');
-    if(data.csrf) csrf=data.csrf;
-    return data;
-  }
-  const login=document.getElementById('login-form');
-  if(login) {
-    const registering=location.pathname==='/register';
-    document.body.classList.toggle('login-page', !registering);
-    const selectedPlan=new URLSearchParams(location.search).get('plan');
-    if(new URLSearchParams(location.search).get('deleted')==='1')message.textContent='Dein FinalSnap-Konto und deine Alben wurden gelГ¶scht. Eine erneute Anmeldung ist nicht mehr mГ¶glich.';
-    if(selectedPlan==='event'){document.getElementById('auth-description').textContent='Deine Paketauswahl wird Гјbernommen. Jede neue Veranstaltung kannst du mit bis zu 25 Fotos kostenlos testen.';const switchLink=document.querySelector('#auth-switch a');if(switchLink)switchLink.href=`/${registering?'login':'register'}?plan=${encodeURIComponent(selectedPlan)}`;}
-    const password=document.getElementById('password');
-    const confirmation=document.getElementById('password-confirm');
-    if(registering){
-      document.getElementById('auth-eyebrow').textContent='DEIN ERSTES GEMEINSAMES ALBUM';
-      document.getElementById('auth-title').textContent='Konto erstellen';
-      document.getElementById('auth-description').textContent='Mit deinem Konto legst du Veranstaltungen an, erhГ¤ltst den QR-Code und verwaltest alle Fotos.';
-      document.getElementById('password-hint').hidden=false;
-      document.getElementById('confirm-label').hidden=false;confirmation.required=true;
-      password.autocomplete='new-password';
-      document.getElementById('auth-submit').textContent='Konto erstellen & Event anlegen';
-      const switcher=document.getElementById('auth-switch');switcher.replaceChildren(document.createTextNode('Schon ein Konto? '));const a=document.createElement('a');a.href=selectedPlan==='event'?`/login?plan=${encodeURIComponent(selectedPlan)}`:'/login';a.textContent='Anmelden';switcher.append(a);
-    }
-    login.onsubmit=async e=>{
-      e.preventDefault();
-      if(registering && password.value!==confirmation.value){report(new Error('Die PasswГ¶rter stimmen nicht Гјberein.'));confirmation.focus();return;}
-      const button=document.getElementById('auth-submit');button.disabled=true;
-      try{await api(`/api/auth/${registering?'register':'login'}`,'POST',{email:document.getElementById('email').value,password:password.value});const event=new URLSearchParams(location.search).get('event');location.href=event?`/dashboard?event=${encodeURIComponent(event)}`:selectedPlan==='event'?`/dashboard?plan=${encodeURIComponent(selectedPlan)}`:'/dashboard';}catch(err){report(err);button.disabled=false;}
-    };return;
-  }
+YЄзЉxі¬uз%j·ќВ+ar‰м¶л•л_ўєЮjЛ"‚v›•лЪ®&›•л
 
-  const element=(tag,text)=>{const el=document.createElement(tag);if(text)el.textContent=text;return el;};
-  const button=(parent,label,action)=>{const el=element('button',label);el.className='secondary';el.onclick=()=>Promise.resolve(action()).catch(report);parent.append(el);return el;};
-  const link=(parent,label,url)=>{const el=element('a',label);el.href=url;el.className='button secondary';parent.append(el);};
-  let availablePlans={};
-  let activeEvent=null;
-  async function manage(event) {
-    const section=document.getElementById('photo-manager');section.hidden=false;
-    document.getElementById('manager-title').textContent=`Fotos: ${event.title}`;
-    if(!section.dataset.opened){section.scrollIntoView({behavior:'smooth',block:'start'});section.dataset.opened='1';}
-    const {photos}=await api(`/api/event/${event.id}/photos?manage=1`);
-    const list=document.getElementById('managed-photos');list.replaceChildren();
-    if(!photos.length)list.textContent='Noch keine Fotos vorhanden.';
-    const toolbar=element('div');toolbar.className='actions photo-toolbar';list.before(toolbar);document.querySelectorAll('.photo-toolbar').forEach(el=>{if(el!==toolbar)el.remove();});
-    const selected=new Set();const counter=element('span','0 ausgewГ¤hlt');counter.setAttribute('role','status');
-    const all=button(toolbar,'Alle auswГ¤hlen',()=>{const check=selected.size!==photos.length;list.querySelectorAll('input[type=checkbox]').forEach(box=>{box.checked=check;box.dispatchEvent(new Event('change'));});});
-    toolbar.append(counter);
-    const bulk=async(method,body)=>{if(!selected.size)return;if(method==='DELETE'&&!confirm(`${selected.size} ausgewГ¤hlte Fotos endgГјltig lГ¶schen?`))return;toolbar.querySelectorAll('button').forEach(b=>b.disabled=true);try{for(const id of selected)await api(`/api/event/${event.id}/photos/${id}`,method,body);await load();}catch(err){await load();throw err;}};
-    button(toolbar,'Auswahl freigeben',()=>bulk('PATCH',{approved:true}));button(toolbar,'Auswahl verbergen',()=>bulk('PATCH',{approved:false}));button(toolbar,'Auswahl lГ¶schen',()=>bulk('DELETE')).className='danger';
-    for(const photo of photos) {
-      const card=element('article'),img=element('img');img.src=photo.url;img.alt='Veranstaltungsfoto';img.loading='lazy';const choice=element('label','AuswГ¤hlen');choice.className='check-label';const box=element('input');box.type='checkbox';box.setAttribute('aria-label','Foto auswГ¤hlen');box.onchange=()=>{box.checked?selected.add(photo.id):selected.delete(photo.id);counter.textContent=`${selected.size} ausgewГ¤hlt`;card.classList.toggle('selected',box.checked);};choice.prepend(box);card.append(choice,img,element('p',photo.approved?'Sichtbar fГјr GГ¤ste':'Wartet auf Freigabe'));card.lastChild.className='photo-state';
-      button(card,photo.approved?'Freigabe zurГјcknehmen':'Freigeben',async()=>{await api(`/api/event/${event.id}/photos/${photo.id}`,'PATCH',{approved:!photo.approved});await manage(event);});
-      button(card,'Foto lГ¶schen',async()=>{if(confirm('Dieses Foto endgГјltig lГ¶schen?')){await api(`/api/event/${event.id}/photos/${photo.id}`,'DELETE');await load();}});
-      list.append(card);
-    }
-  }
-  async function load() {
-    const {events}=await api('/api/events');if(activeEvent&&!events.some(e=>e.id===activeEvent))activeEvent=null;document.querySelector('.create-panel').hidden=!!activeEvent;const section=document.getElementById('events');section.replaceChildren();
-    if(!events.length){section.append(element('p','Dein erstes Album wartet auf dich. Erstelle oben eine Veranstaltung.'));document.querySelector('.create-panel').open=true;}
-    for(const event of events) {
-      const card=element('article');card.className='event-card';const heading=element('div');heading.className='page-heading';const badge=element('span',event.paymentStatus==='disputed'?'Zahlungsstreitfall В· Zugang vorerst aktiv':event.status==='refunded'&&event.paymentStatus==='disputed_lost'?'Streitfall verloren В· Zugang beendet':event.status==='refunded'?'Erstattet В· Zugang beendet':event.readOnly?'Downloadphase':event.status==='trial'?'Kostenlos testen':event.status==='pilot'?'Geschlossener Praxistest':event.status==='paid'?(event.startsAt>Date.now()?'Start geplant':'Aktiv'):event.status==='pending'?'Zahlung offen':'Abgelaufen');badge.className='status-pill '+(event.status==='pending'||event.paymentStatus==='disputed'?'pending':'');heading.append(element('h2',event.title),badge);card.append(heading);if(activeEvent===event.id){const back=element('a','в†ђ Zur VeranstaltungsГјbersicht');back.href='/dashboard';back.className='button secondary event-back';back.onclick=e=>{e.preventDefault();activeEvent=null;history.replaceState(null,'','/dashboard');document.getElementById('photo-manager').hidden=true;load();};card.append(back);}card.append(element('p',`${event.id}${event.event_date?` В· Start ${new Date(event.startsAt).toLocaleDateString('de-DE')}`:''}${event.expires_at?` В· Online bis ${new Date(event.expires_at).toLocaleDateString('de-DE')}${event.retentionUntil&&event.retentionUntil!==event.expires_at?` В· Downloads bis ${new Date(event.retentionUntil).toLocaleDateString('de-DE')}`:''}`:''}`));card.lastChild.className='event-meta';if(event.paymentStatus==='disputed')card.append(element('p','Der Zahlungsstreitfall wird geprГјft. Der Albumzugang bleibt bis zur Entscheidung bestehen.'));if(event.status==='refunded')card.append(element('p',event.paymentStatus==='disputed_lost'?`Die Bank hat den Streitfall zu Gunsten des Karteninhabers entschieden; der Albumzugang wurde beendet. Fotos werden spГ¤testens am ${new Date(event.retentionUntil||event.expires_at).toLocaleDateString('de-DE')} gemГ¤Гџ der Album-Aufbewahrungsfrist gelГ¶scht.`:`Der Vollrefund ist bestГ¤tigt; der GГ¤ste- und Veranstalterzugang wurde beendet. Die gespeicherten Fotos werden spГ¤testens am ${new Date(event.retentionUntil||event.expires_at).toLocaleDateString('de-DE')} gemГ¤Гџ der Album-Aufbewahrungsfrist gelГ¶scht.`));if(event.hasInvoice){const invoiceLink=element('a','Rechnung / Zahlungsbeleg Г¶ffnen');invoiceLink.href=`/api/event/${encodeURIComponent(event.id)}/invoice`;invoiceLink.target='_blank';invoiceLink.rel='noopener';invoiceLink.className='button secondary';card.append(invoiceLink);}
-      const stats=element('p',event.photoLimit===null?`${(event.storageBytes/1024**3).toFixed(2)} GB von ${(event.storageLimitBytes/1024**3).toFixed(1)} GB Fotospeicher belegt В· keine feste Fotoanzahl`:event.status==='pilot'?`${event.photoCount} von ${event.photoLimit} Fotos В· ${(event.storageBytes/1024**2).toFixed(1)} MB belegt`:`${event.photoCount} von 25 Testfotos В· ${(event.storageBytes/1024**2).toFixed(1)} MB belegt`);stats.id=`stats-${event.id}`;card.append(element('p',`Uploads: ${event.upload_successes} erfolgreich В· ${event.upload_failures} fehlgeschlagen`));if(event.readOnly)card.append(element('p',`Die Uploadzeit ist beendet. Deine Fotos bleiben bis ${new Date(event.retentionUntil).toLocaleDateString('de-DE')} zum Ansehen und Herunterladen verfГјgbar; danach werden sie gelГ¶scht.`));if(event.status==='pilot'&&!event.readOnly)card.append(element('p','Kostenloser Praxistest ohne Zahlung. MaГџgeblich ist das angezeigte Ablaufdatum; bei Veranstaltungen mit Datum gibt es keine zusГ¤tzliche Downloadphase.'));if(event.status==='trial'&&!event.readOnly)card.append(element('p',`Bis zu 25 Fotos kostenlos testen вЂ“ dafГјr ist keine Zahlung nГ¶tig. Das vollstГ¤ndige Paket startet am ${new Date(event.startsAt).toLocaleDateString('de-DE')}; ohne Buchung bleibt es beim Testkontingent.`));if(event.status==='paid'&&event.startsAt>Date.now())card.append(element('p',`Testmodus bis ${new Date(event.startsAt).toLocaleDateString('de-DE')}: bis zu 25 Fotos. Ab dem Veranstaltungsdatum gilt das vollstГ¤ndige Speicherpaket.`));card.append(stats);const meter=element('progress');meter.max=event.storageLimitBytes;meter.value=event.storageBytes;meter.setAttribute('aria-label','Belegter Fotospeicher');card.append(meter);
-      const open=button(card,'Veranstaltung verwalten',()=>{activeEvent=event.id;history.replaceState(null,'',`/dashboard?event=${encodeURIComponent(event.id)}`);load();});open.className='primary event-open';
-      const tabs=element('nav');tabs.className='actions event-tabs';tabs.setAttribute('aria-label','Veranstaltungsbereiche');card.append(tabs);
-      const panels=[];
-      const showPanel=index=>{panels.forEach((panel,i)=>panel.hidden=i!==index);tabs.querySelectorAll('button').forEach((b,i)=>b.setAttribute('aria-pressed',String(i===index)));document.getElementById('photo-manager').hidden=index!==0;if(index===0)return manage(event);};
-      if(['pending','trial'].includes(event.status)&&!event.readOnly){
-        const chooser=element('details');chooser.className='upgrade-panel';chooser.open=activeEvent===event.id;chooser.append(element('summary','Paket & Buchung'));
-        chooser.append(element('p','Kostenlos testen braucht keine Zahlung: Bis zu 25 Fotos kannst du direkt Гјber вЂћFotos verwaltenвЂњ hochladen. Der Endpreis betrГ¤gt 49,90 в‚¬ inkl. 19 % USt. fГјr Privat- und GeschГ¤ftskunden. вЂћTestzahlung startenвЂњ Г¶ffnet den Stripe-Testcheckout; es wird kein echtes Geld eingezogen.'));
-        const buyerLabel=element('label','Kauf als');const buyerType=element('select');for(const [value,label] of [['consumer','Privatkunde'],['business','GeschГ¤ftskunde']]){const option=element('option',label);option.value=value;buyerType.append(option);}buyerType.value=event.customerType||'consumer';buyerLabel.append(buyerType);chooser.append(buyerLabel);
-        const termsLabel=element('label');termsLabel.className='check-label';const termsAcceptance=element('input');termsAcceptance.type='checkbox';termsAcceptance.checked=event.termsAccepted&&event.termsVersion===TERMS_VERSION;const termsText=document.createTextNode(' Ich habe die ');const termsLink=element('a','Leistungsbedingungen');termsLink.href='/bedingungen';termsLink.target='_blank';termsLink.rel='noopener';termsLabel.append(termsAcceptance,termsText,termsLink,document.createTextNode(' gelesen und akzeptiere sie.'));
-        const earlyStartRequired=!!event.startsAt&&event.startsAt<Date.now()+14*86400000;
-        const earlyStartRequestLabel=element('label');earlyStartRequestLabel.className='check-label';const earlyStartRequest=element('input');earlyStartRequest.type='checkbox';earlyStartRequest.checked=event.earlyStartRequested;earlyStartRequestLabel.append(earlyStartRequest,document.createTextNode(' Ich verlange ausdrГјcklich, dass FinalSnap mit dem entgeltlichen Albumdienst vor Ablauf der 14-tГ¤gigen Widerrufsfrist beginnt, wenn mein Veranstaltungsdatum innerhalb dieser Frist liegt.'));
-        const earlyStartAcknowledgementLabel=element('label');earlyStartAcknowledgementLabel.className='check-label';const earlyStartAcknowledgement=element('input');earlyStartAcknowledgement.type='checkbox';earlyStartAcknowledgement.checked=event.earlyStartAcknowledged;earlyStartAcknowledgementLabel.append(earlyStartAcknowledgement,document.createTextNode(' Ich bestГ¤tige, dass ich bei einem Widerruf angemessenen Wertersatz fГјr bereits erbrachte Leistungen schulden kann und mein Widerrufsrecht erst mit vollstГ¤ndiger Erbringung des Dienstes erlischt.'));
-        const withdrawalInfo=element('p');withdrawalInfo.className='small';withdrawalInfo.append(document.createTextNode('Widerrufsinformation: '));const withdrawalLink=element('a','Widerrufsrecht und Musterformular');withdrawalLink.href='/widerruf';withdrawalLink.target='_blank';withdrawalLink.rel='noopener';withdrawalInfo.append(withdrawalLink);
-        const consentMessage=element('p');consentMessage.setAttribute('role','status');consentMessage.setAttribute('aria-live','polite');
-        const updateEarlyStartVisibility=()=>{const visible=buyerType.value==='consumer'&&earlyStartRequired;earlyStartRequestLabel.hidden=!visible;earlyStartAcknowledgementLabel.hidden=!visible;withdrawalInfo.hidden=buyerType.value!=='consumer';};buyerType.addEventListener('change',updateEarlyStartVisibility);updateEarlyStartVisibility();
-        chooser.append(termsLabel,earlyStartRequestLabel,earlyStartAcknowledgementLabel,withdrawalInfo,consentMessage);
-        const grid=element('div');grid.className='plan-grid';chooser.append(grid);
-        for(const [key,plan] of Object.entries(availablePlans)){
-          if(plan.legacy&&event.plan!==key)continue;
-          const item=element('div');item.className='plan-card';const priceLabel=new Intl.NumberFormat('de-DE',{style:'currency',currency:'EUR'}).format(plan.priceCents/100);item.append(element('h3',plan.label),element('p',priceLabel),element('p','inkl. 19 % USt. В· Endpreis fГјr Privat- und GeschГ¤ftskunden'),element('p',`Keine feste Fotoanzahl В· bis zu ${plan.storageLimitGB.toLocaleString('de-DE',{maximumFractionDigits:1})} GB Fotospeicher. QR-Code, GГ¤stebuch, Fotoaufgaben, Diashow und Downloads enthalten.`));
-          const actionLabel=`${event.checkoutStarted&&event.plan===key?'Testzahlung fortsetzen':'Testzahlung starten'} В· ${priceLabel} inkl. USt.`;const choose=button(item,actionLabel,async()=>{if(!termsAcceptance.checked){consentMessage.textContent='Bitte lies und akzeptiere vor der Bestellung die Leistungsbedingungen.';termsAcceptance.focus();return;}const needsConsent=buyerType.value==='consumer'&&earlyStartRequired;if(needsConsent&&(!earlyStartRequest.checked||!earlyStartAcknowledgement.checked)){consentMessage.textContent='Bitte bestГ¤tige beide Hinweise zum vorzeitigen Leistungsbeginn und Widerruf, bevor du fortfГ¤hrst.';return;}choose.disabled=true;try{const data=await api('/api/checkout','POST',{eventId:event.id,plan:key,customerType:buyerType.value,termsAccepted:termsAcceptance.checked,earlyStartRequest:needsConsent&&earlyStartRequest.checked,earlyStartAcknowledged:needsConsent&&earlyStartAcknowledgement.checked});if(!data.url)throw new Error('Der Test-Checkout hat keinen Link zurГјckgegeben. Bitte spГ¤ter erneut versuchen.');location.href=data.url;}finally{choose.disabled=false;}});choose.className='primary';choose.disabled=event.checkoutStarted&&event.plan!==key;grid.append(item);
-        }
-        if(event.checkoutStarted)chooser.append(element('p','Die begonnene Testzahlung ist an das einmalige FinalSnap-Fotoalbum gebunden.'));
-        card.append(chooser);
-      }
-      if(event.guestUrl) {
-        const photosSection=element('div');photosSection.className='event-section';photosSection.append(element('h3','Fotos & Live-Diashow'));card.append(photosSection);const photoActions=element('div');photoActions.className='actions';photosSection.append(photoActions);
-        const accessSection=element('div');accessSection.className='event-section';accessSection.append(element('h3','QR-Code & GГ¤stezugang'));card.append(accessSection);const accessActions=element('div');accessActions.className='actions';accessSection.append(accessActions);
-        const settings=element('details');settings.className='event-section event-settings';settings.open=true;settings.append(element('summary','Einstellungen & Freigabe'));card.append(settings);const settingsActions=element('div');settingsActions.className='actions';settings.append(element('p',event.readOnly?'Die Uploadzeit ist beendet. GГ¤ste kГ¶nnen die vorhandenen Fotos noch bis zum Ende der Downloadphase ansehen.':event.moderation?'Neue Fotos warten auf deine Freigabe.':'GГ¤ste sehen auf ihrem GerГ¤t nur ihre eigenen Uploads.'),settingsActions);if(event.event_date&&event.startsAt>Date.now()){const dateLabel=element('label','Veranstaltungsdatum Г¤ndern');const dateField=element('input');dateField.type='date';dateField.value=event.event_date;dateField.min=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Berlin'}).format(new Date());dateLabel.append(dateField);settingsActions.append(dateLabel);button(settingsActions,'Datum speichern',async()=>{await api(`/api/event/${event.id}`,'PATCH',{eventDate:dateField.value});message.textContent='Veranstaltungsdatum gespeichert. Der Albumzeitraum wurde angepasst.';await load();});}
-        panels.push(photosSection,accessSection,settings);
-        ['Fotos','GГ¤stezugang','Einstellungen'].forEach((label,i)=>button(tabs,label,()=>showPanel(i)));
-        button(accessActions,'GГ¤stelink kopieren',async()=>{try{await navigator.clipboard.writeText(event.guestUrl);message.textContent='GГ¤stelink kopiert.';}catch{const input=element('input');input.value=event.guestUrl;input.readOnly=true;accessSection.append(input);input.select();message.textContent='Bitte den markierten GГ¤stelink kopieren.';}});
-        link(accessActions,'GГ¤steansicht Г¶ffnen',event.guestUrl);
-        link(photoActions,'Galerie Г¶ffnen',event.guestUrl.replace('?','/gallery?'));
-        link(photoActions,'Live-Diashow',event.guestUrl.replace('?','/slideshow?'));
-        link(photoActions,'Fotoaufgaben',event.guestUrl.replace('?','/games?'));
-        link(photoActions,'GГ¤stebuch ansehen',event.guestUrl.replace('?','/guestbook?'));
-        link(accessActions,'GГ¤stebuch verwalten',`/event/${encodeURIComponent(event.id)}/guestbook`);
-        link(photoActions,'Design-Editor & QR-Druck',`/event/${encodeURIComponent(event.id)}/design`);
-        link(accessActions,'QR-Code herunterladen',`/api/event/${event.id}/qr`);
-        button(accessActions,'QR-Karte drucken',async()=>{
-          const blob=await (await fetch(`/api/event/${event.id}/qr`)).blob();
-          const url=URL.createObjectURL(blob),frame=document.createElement('iframe');frame.hidden=true;document.body.append(frame);
-          const doc=frame.contentDocument;doc.body.append(element('h1',event.title),element('p','Fotos teilen: QR-Code scannen.'));
-          const img=doc.createElement('img');img.width=350;img.onload=()=>{frame.contentWindow.focus();frame.contentWindow.print();setTimeout(()=>{frame.remove();URL.revokeObjectURL(url);},60000);};img.src=url;doc.body.append(img);
-        });
-        link(photoActions,'Alle Fotos herunterladen',`/api/event/${event.id}/download`);
-        button(photoActions,'Fotos verwalten',()=>manage(event)).className='primary';
-        button(settingsActions,event.moderation?'Automatische Freigabe aktivieren':'Manuelle Freigabe aktivieren',async()=>{await api(`/api/event/${event.id}`,'PATCH',{moderation:!event.moderation});await load();});
-        button(settingsActions,event.guestbook_moderation?'GГ¤stebuch: Freigabe ausschalten':'GГ¤stebuch: Freigabe einschalten',async()=>{await api(`/api/event/${event.id}`,'PATCH',{guestbookModeration:!event.guestbook_moderation});await load();});
-        button(settingsActions,'GГ¤stelink erneuern',async()=>{if(confirm('Alte Links und QR-Codes werden dadurch ungГјltig. Fortfahren?')){await api(`/api/event/${event.id}/rotate-token`,'POST');await load();}});
-      }
-      const danger=element('details');danger.className='event-section event-settings';danger.append(element('summary','Veranstaltung lГ¶schen'));card.append(danger);
-      button(danger,'Event und Fotos lГ¶schen',async()=>{if(confirm('Event und alle Fotos endgГјltig lГ¶schen?')){await api(`/api/event/${event.id}`,'DELETE');document.getElementById('photo-manager').hidden=true;await load();}}).className='danger';
-      section.append(card);
-      if(activeEvent){card.hidden=event.id!==activeEvent;open.hidden=true;if(event.id===activeEvent){tabs.hidden=false;if(event.guestUrl)await showPanel(0);else document.getElementById('photo-manager').hidden=true;}}else{tabs.hidden=true;panels.forEach(panel=>panel.hidden=true);danger.hidden=true;}
 
-    }
-  }
-  document.getElementById('close-manager').onclick=()=>{activeEvent=null;history.replaceState(null,'','/dashboard');document.getElementById('photo-manager').hidden=true;load().catch(report);};
-  activeEvent=new URLSearchParams(location.search).get('event');
-  document.getElementById('logout').onclick=()=>api('/api/auth/logout','POST').then(()=>location.href='/login').catch(report);
-  const deleteAccountForm=document.getElementById('delete-account-form');
-  deleteAccountForm.onsubmit=async e=>{
-    e.preventDefault();
-    if(document.getElementById('delete-account-confirm').value!=='KONTO LГ–SCHEN'){report(new Error('Bitte вЂћKONTO LГ–SCHENвЂњ genau so eingeben.'));return;}
-    const submit=deleteAccountForm.querySelector('button');submit.disabled=true;
-    try{await api('/api/auth/account','DELETE',{password:document.getElementById('delete-account-password').value,confirm:'KONTO LГ–SCHEN'});location.href='/login?deleted=1';}
-    catch(err){report(err);submit.disabled=false;}
-  };
-  const eventIdInput=document.getElementById('event-id');
-  const normalizeEventId=value=>value.trim().toLowerCase().replace(/Г¤/g,'ae').replace(/Г¶/g,'oe').replace(/Гј/g,'ue').replace(/Гџ/g,'ss').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9_-]+/g,'-').replace(/^[-_]+|[-_]+$/g,'');
-  eventIdInput.addEventListener('blur',()=>{eventIdInput.value=normalizeEventId(eventIdInput.value);});
-  const eventDateInput=document.getElementById('event-date');
-  const timelinePreview=document.getElementById('event-timeline-preview');
-  const shiftDate=(value,months=0,days=0)=>{
-    const [year,month,day]=value.split('-').map(Number);
-    const monthStart=new Date(Date.UTC(year,month-1+months,1));
-    const lastDay=new Date(Date.UTC(monthStart.getUTCFullYear(),monthStart.getUTCMonth()+1,0)).getUTCDate();
-    const shifted=new Date(Date.UTC(monthStart.getUTCFullYear(),monthStart.getUTCMonth(),Math.min(day,lastDay)+days));
-    return shifted.toISOString().slice(0,10);
-  };
-  const displayDate=value=>new Intl.DateTimeFormat('de-DE',{dateStyle:'long',timeZone:'UTC'}).format(new Date(`${value}T12:00:00Z`));
-  const updateTimelinePreview=()=>{
-    if(!timelinePreview)return;
-    timelinePreview.replaceChildren(element('strong','So lГ¤uft dein Album'));
-    if(!eventDateInput.value){timelinePreview.append(element('p','WГ¤hle ein Veranstaltungsdatum, um den Zeitplan zu sehen.'));return;}
-    const start=eventDateInput.value,end=shiftDate(start,0,90),list=element('ul');
-    list.append(element('li',`Vor der Feier: bis zu 25 kostenlose Testfotos.`));
-    list.append(element('li',`Ab ${displayDate(start)}: Der Veranstaltungszeitraum beginnt; bei Buchung gilt das vollstГ¤ndige Speicherpaket.`));
-    list.append(element('li',`Bis ${displayDate(end)}: Fotos hochladen, ansehen und herunterladen вЂ“ 90 Tage ab Veranstaltungsdatum.`));
-    list.append(element('li',`Am ${displayDate(end)} werden die Fotos automatisch gelГ¶scht. Bitte vorher herunterladen.`));
-    timelinePreview.append(list);
-  };
-  eventDateInput.addEventListener('input',updateTimelinePreview);
-  eventDateInput.addEventListener('change',updateTimelinePreview);
-  updateTimelinePreview();
-  document.getElementById('event-form').onsubmit=async e=>{
-    e.preventDefault();eventIdInput.value=normalizeEventId(eventIdInput.value);if(!/^[a-z0-9][a-z0-9_-]{2,63}$/.test(eventIdInput.value)){message.textContent='Bitte einen Kurznamen mit mindestens 3 Buchstaben oder Zahlen eingeben.';message.scrollIntoView({block:'center'});eventIdInput.focus();return;}try{const created=await api('/api/events','POST',{title:document.getElementById('title').value,eventId:document.getElementById('event-id').value,plan:'event',eventDate:document.getElementById('event-date').value,moderation:document.getElementById('moderation').checked,guestbookModeration:document.getElementById('guestbook-moderation').checked});activeEvent=created.eventId;history.replaceState(null,'',`/dashboard?event=${encodeURIComponent(activeEvent)}`);message.textContent='Veranstaltung erstellt. Du kannst jetzt kostenlos mit bis zu 25 Fotos testen.';e.target.reset();document.getElementById('guestbook-moderation').checked=true;await load();message.scrollIntoView({block:'center',behavior:'smooth'});}catch(err){report(err);message.scrollIntoView({block:'center',behavior:'smooth'});}
-  };
-  (async()=>{
-    try{const account=await api('/api/auth/me');if(account.emailDeliveryAvailable&&!account.emailVerified){const notice=element('div');notice.className='test-notice';notice.append(element('p','Bitte bestГ¤tige deine E-Mail-Adresse Гјber den Link in deiner Mail.'));button(notice,'BestГ¤tigungsmail erneut senden',async()=>{await api('/api/auth/request-verification','POST');message.textContent='BestГ¤tigungsmail angefordert. Bitte auch im Spamordner nachsehen.';});document.getElementById('events').before(notice);}const storage=await api('/api/storage');if(storage.warning)message.textContent=storage.uploadsPaused?'Uploads sind wegen des knappen temporГ¤ren Speichers vorГјbergehend pausiert. Bitte in einigen Minuten erneut versuchen.':'Der Speicher wird knapp. Bitte vor weiteren Uploads Speicherbelegung prГјfen.';const photoUsed=storage.usedBytes??storage.totalBytes-storage.freeBytes;const photoLabel=storage.location==='object-storage'?'Hetzner-Fotospeicher':'Fotospeicher auf der App-Disk';const diskNote=element('p',`${photoLabel}: ${(photoUsed/1024**3).toFixed(2)} GB von ${(storage.totalBytes/1024**3).toFixed(1)} GB belegt. TemporГ¤rer Render-Uploadpuffer: ${(storage.uploadDisk.freeBytes/1024**3).toFixed(2)} GB frei; bei weniger als ${(storage.uploadDisk.minimumFreeBytes/1024**3).toFixed(0)} GB pausiert FinalSnap neue Uploads.`);diskNote.className='small';document.getElementById('events').before(diskNote);const plans=await api('/api/plans');availablePlans=plans;const dateInput=document.getElementById('event-date');const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Berlin'}).format(new Date());dateInput.min=today;const maxDate=new Date(`${today}T12:00:00Z`);maxDate.setUTCMonth(maxDate.getUTCMonth()+24);dateInput.max=maxDate.toISOString().slice(0,10);if(new URLSearchParams(location.search).get('plan')==='event')document.querySelector('.create-panel').open=true;await load();}catch(err){report(err);}
-  })();
-})();
+HO€В€ЫЫњЭT“TЧХ‘T”ТSУЏIМЊЌ‹LLKLL‰ОВ€]ЬЬ™ЋВ€ЫЫњЭY\ЬШYЩHHШЭ[Y[ќ™Щ][[Y[ќћRY
+	ЫY\ЬШYЩIКNВ€ЫЫњЭ™\ЬќH\њ›Ь€O€ЫY\ЬШYЩKќ^ЫЫќ[ќH\њ›Ь‹›Y\ЬШYЩNЯNВ€\Ю[Иќ[Э[Ы€\J\›Y]ЩIССU	Л›ЩJHВ€YЉY]ЩOOIССU	Й‰€XЬЬ™Љ^ШЫЫњЭYOX]ШZ]™]Ъ
+	ЛШ\KШ]]ЫYIКNЪYЉYK›ЪКXЬЬ™ЏJ]ШZ]YKљњЫЫЉ
+JKЬЬ™ЋЯB€ЫЫњЭ™\ПX]ШZ]™]Ъ
+\›ЫY]ЩXY\њОћЙРЫЫќ[ќU\IО‰Ш\XШ][Ы‹ЪњЫЫ‰Л‹‹ЉЬЬ™ЏЮЙЦPФФ‘‹UЪЩ[‰ОЬЬ™џNћЯJ_K‹‹Љ›ЩOЮШ›ЩN’”УУ‹њЭљ[™ЪYћJ›ЩJ_NћЯJ_JNВ€ЫЫњЭ]OX]ШZ]™\ЛљњЫЫЉ
+NВ€YЉ\™\Л›ЪКH›ЭИ™]И\њ›ЬЉ]K™\њ›Ьџ	Р[™њYЩH™ZЩ\ШЪYЩ[‹‰КNВ€YЉ]KЬЬ™ЉHЬЬ™ЏY]KЬЬ™ЋВ€™]\›€]NВ€B€ЫЫњЭЩЪ[ЏYШЭ[Y[ќ™Щ][[Y[ќћRY
+	ЫЩЪ[‹Y›Ь›IКNВ€YЉЩЪ[ЉHВ€ЫЫњЭ™YЪ\Э\љ[™П[ШШ][Ы‹њ][YOOOIЛЬ™YЪ\Э\‰ОВ€ШЭ[Y[ќ›ЩKЫ\ЬУ\ЭќЩЩЫJ	ЫЩЪ[‹\YЩIЛ\™YЪ\Э\љ[™КNВ€ЫЫњЭЩ[XЭY[Џ[™]ИT“ЩX\Ъ\[\КШШ][Ы‹њЩX\Ъ
+K™Щ]
+	Ь[‰КNВ€YЉ™]ИT“ЩX\Ъ\[\КШШ][Ы‹њЩX\Ъ
+K™Щ]
+	Щ[]Y	КOOOIМIК[Y\ЬШYЩKќ^ЫЫќ[ќIСZ[€љ[[Ы\RЫЫќИ[™Z[™H[™[€Э\™[€Щ[0нњШЪ€Z[™H\›™]]H[›Y[[™И\ЭљXЪYZ€pн™ЫXЪ‰ОВ€YЉЩ[XЭY[ЏOOIЩ]™[ќ	К^ЩШЭ[Y[ќ™Щ][[Y[ќћRY
+	Ш]]Y\ШЬљ\[Ы‰КKќ^ЫЫќ[ќIСZ[™HZЩ]]\ЭШZЪ\™0п™\››Ы[Y[‹€™YH™]YH™\[њЭ[[™ИШ[›њЭHZ]љ\ИќHЌH›ЭЬИЫЬЭ[›ЬИ\Э[‹‰ОШЫЫњЭЭЪ]Ъ[љПYШЭ[Y[ќњ]Y\ћTЩ[XЭЬЉ	ИШ]]\ЭЪ]ЪIКNЪYЉЭЪ]Ъ[љК\ЭЪ]Ъ[љЛљ™YЏXЙЬ™YЪ\Э\љ[™ПЙЫЩЪ[‰О‰Ь™YЪ\Э\‰ЯOЬ[ЏIЩ[ЫЩUT’PЫЫ\Ы™[ќ
+Щ[XЭY[Љ_XЯB€ЫЫњЭ\ЬЭЫЬ™YШЭ[Y[ќ™Щ][[Y[ќћRY
+	Ь\ЬЭЫЬ™	КNВ€ЫЫњЭЫЫ™љ\›X][ЫЏYШЭ[Y[ќ™Щ][[Y[ќћRY
+	Ь\ЬЭЫЬ™XЫЫ™љ\›IКNВ€YЉ™YЪ\Э\љ[™К^В€ШЭ[Y[ќ™Щ][[Y[ќћRY
+	Ш]]Y^YXњ›ЭЙКKќ^ЫЫќ[ќIСRS€T”ХTИСSQRS”РSQTИS•SIОВ€ШЭ[Y[ќ™Щ][[Y[ќћRY
+	Ш]]]]IКKќ^ЫЫќ[ќIТЫЫќИ\њЭ[[‰ОВ€ШЭ[Y[ќ™Щ][[Y[ќћRY
+	Ш]]Y\ШЬљ\[Ы‰КKќ^ЫЫќ[ќIУZ]Z[™[HЫЫќИYЬЭH™\[њЭ[[™Щ[€[‹\љ0йЭ[€T‹PЫЩH[™™\ќШ[\Э[H›ЭЬЛ‰ОВ€ШЭ[Y[ќ™Щ][[Y[ќћRY
+	Ь\ЬЭЫЬ™Z[ќ	КKљY[ЏY[ЩNВ€ШЭ[Y[ќ™Щ][[Y[ќћRY
+	ШЫЫ™љ\›K[X™[	КKљY[ЏY[ЩNШЫЫ™љ\›X][Ы‹њ™\]Z\™Y]ќYNВ€\ЬЭЫЬ™]]ШЫЫ\]OIЫ™]Л\\ЬЭЫЬ™	ОВ€ШЭ[Y[ќ™Щ][[Y[ќћRY
+	Ш]]\ЭX›Z]	КKќ^ЫЫќ[ќIТЫЫќИ\њЭ[[€	€]™[ќ[›YЩ[‰ОВ€ЫЫњЭЭЪ]Ъ\ЏYШЭ[Y[ќ™Щ][[Y[ќћRY
+	Ш]]\ЭЪ]Ъ	КNЬЭЪ]Ъ\‹њ™\XЩPЪ[™[ЉШЭ[Y[ќЬ™X]U^›ЩJ	ФШЪЫ€Z[€ЫЫќПИ	КJNШЫЫњЭOYШЭ[Y[ќЬ™X]Q[[Y[ќ
+	ШIКNШKљ™YЏ\Щ[XЭY[ЏOOIЩ]™[ќ	ПШЫЩЪ[ЏЬ[ЏIЩ[ЫЩUT’PЫЫ\Ы™[ќ
+Щ[XЭY[Љ_X‰ЛЫЩЪ[‰ОШKќ^ЫЫќ[ќIР[›Y[[‰ОЬЭЪ]Ъ\‹\[™
+JNВ€B€ЩЪ[‹›ЫњЭX›Z]X\Ю[ИOOћВ€Kњ™]™[ќY][
+
+NВ€YЉ™YЪ\Э\љ[™И	‰€\ЬЭЫЬ™ќ[YHOOXЫЫ™љ\›X][Ы‹ќ[YJ^Ь™\Ьќ
+™]И\њ›ЬЉ	СYH\ЬЭрнњќ\€Э[[Y[€љXЪ0п™\™Z[‹‰КJNШЫЫ™љ\›X][Ы‹™›ШЭ\К
+NЬ™]\›ЋЯB€ЫЫњЭќ]ЫЏYШЭ[Y[ќ™Щ][[Y[ќћRY
+	Ш]]\ЭX›Z]	КNШќ]Ы‹™\ШX›Y]ќYNВ€ћ^Ш]ШZ]\JШ\KШ]]ЙЬ™YЪ\Э\љ[™ПЙЬ™YЪ\Э\‰О‰ЫЩЪ[‰ЯX	ФФХ	ЛЩ[XZ[™ШЭ[Y[ќ™Щ][[Y[ќћRY
+	Щ[XZ[	КKќ[YK\ЬЭЫЬ™њ\ЬЭЫЬ™ќ[Y_JNШЫЫњЭ]™[ќ[™]ИT“ЩX\Ъ\[\КШШ][Ы‹њЩX\Ъ
+K™Щ]
+	Щ]™[ќ	КNЫШШ][Ы‹љ™YЏY]™[ќШЩ\Ъ›Ш\™Щ]™[ќIЩ[ЫЩUT’PЫЫ\Ы™[ќ
+]™[ќ
+_XњЩ[XЭY[ЏOOIЩ]™[ќ	ПШЩ\Ъ›Ш\™Ь[ЏIЩ[ЫЩUT’PЫЫ\Ы™[ќ
+Щ[XЭY[Љ_X‰ЛЩ\Ъ›Ш\™	ОЯXШ]Ъ
+\њЉ^Ь™\Ьќ
+\њЉNШќ]Ы‹™\ШX›YY[ЩNЯB€NЬ™]\›ЋВ€B‚€ЫЫњЭ[[Y[ќJYЛ^
+OOћШЫЫњЭ[YШЭ[Y[ќЬ™X]Q[[Y[ќ
+YКNЪYЉ^
+Y[ќ^ЫЫќ[ќ]^Ь™]\›€[ЯNВ€ЫЫњЭќ]ЫЏJ\™[ќX™[XЭ[ЫЉOOћШЫЫњЭ[Y[[Y[ќ
+	Шќ]Ы‰ЛX™[
+NЩ[Ы\ЬУ[YOIЬЩXЫЫ™\ћIОЩ[›ЫЫXЪПJ
+OO”›ЫZ\ЩKњ™\ЫЫ™JXЭ[ЫЉ
+JKШ]Ъ
+™\Ьќ
+NЬ\™[ќ\[™
+[
+NЬ™]\›€[ЯNВ€ЫЫњЭ[љПJ\™[ќX™[\›
+OOћШЫЫњЭ[Y[[Y[ќ
+	ШIЛX™[
+NЩ[љ™YЏ]\›Щ[Ы\ЬУ[YOIШќ]Ы€ЩXЫЫ™\ћIОЬ\™[ќ\[™
+[
+NЯNВ€]]Z[X›T[њП^ЯNВ€]XЭ]™Q]™[ќ[ќ[В€\Ю[Иќ[Э[Ы€X[YЩJ]™[ќ
+HВ€ЫЫњЭЩXЭ[ЫЏYШЭ[Y[ќ™Щ][[Y[ќћRY
+	ЬЭЛ[X[YЩ\‰КNЬЩXЭ[Ы‹љY[ЏY[ЩNВ€ШЭ[Y[ќ™Щ][[Y[ќћRY
+	ЫX[YЩ\‹]]IКKќ^ЫЫќ[ќX›ЭЬО€	Щ]™[ќќ]_XВ€YЉ\ЩXЭ[Ы‹™]\Щ]›Ь[™Y
+^ЬЩXЭ[Ы‹њШЬ›Ы[ќХљY]КШ™Z]љ[ЬЋ‰ЬЫ[ЫЭ	Л›ШЪО‰ЬЭ\ќ	ЯJNЬЩXЭ[Ы‹™]\Щ]›Ь[™YIМIОЯB€ЫЫњЭЬЭЬЯOX]ШZ]\JШ\KЩ]™[ќЙЩ]™[ќљYKЬЭЬПЫX[YЩOLX
+NВ€ЫЫњЭ\ЭYШЭ[Y[ќ™Щ][[Y[ќћRY
+	ЫX[YЩY\ЭЬЙКNЫ\Эњ™\XЩPЪ[™[Љ
+NВ€YЉ\ЭЬЛ›[™Э
+[\Эќ^ЫЫќ[ќIУ›ШЪЩZ[™H›ЭЬИ›Ьљ[™[‹‰ОВ€ЫЫњЭЫЫ\ЏY[[Y[ќ
+	Щ]‰КNЭЫЫ\‹Ы\ЬУ[YOIШXЭ[ЫњИЭЛ]ЫЫ\‰ОЫ\Э™Y›Ь™JЫЫ\ЉNЩШЭ[Y[ќњ]Y\ћTЩ[XЭЬђ[
+	ЛњЭЛ]ЫЫ\‰КK™›Ь‘XXЪ
+[OћЪYЉ[OO]ЫЫ\ЉY[њ™[[Э™J
+NЯJNВ€ЫЫњЭЩ[XЭY[™]ИЩ]
+
+NШЫЫњЭЫЭ[ќ\ЏY[[Y[ќ
+	ЬЬ[‰Л	М]\ЩЩ]рй	КNШЫЭ[ќ\‹њЩ]]љXќ]J	Ь›ЫIЛ	ЬЭ]\ЙКNВ€ЫЫњЭ[Xќ]ЫЉЫЫ\‹	Р[H]\Эрй[‰Л
+
+OOћШЫЫњЭЪXЪП\Щ[XЭYњЪ^™HOO\ЭЬЛ›[™ЭЫ\Эњ]Y\ћTЩ[XЭЬђ[
+	Ъ[њ]Э\OXЪXЪШ›ЮIКK™›Ь‘XXЪ
+›ЮOћШ›ЮЪXЪЩYXЪXЪОШ›Ю™\Ь]Ъ]™[ќ
+™]И]™[ќ
+	ШЪ[™ЩIКJNЯJNЯJNВ€ЫЫ\‹\[™
+ЫЭ[ќ\ЉNВ€ЫЫњЭќ[ПX\Ю[КY]Щ›ЩJOOћЪYЉ\Щ[XЭYњЪ^™J\™]\›ЋЪYЉY]ЩOOIСSUIЙ‰€XЫЫ™љ\›J	ЬЩ[XЭYњЪ^™_H]\ЩЩ]рйH›ЭЬИ[™рпYИ0нњШЪ[ЏШ
+J\™]\›ЋЭЫЫ\‹њ]Y\ћTЩ[XЭЬђ[
+	Шќ]Ы‰КK™›Ь‘XXЪ
+ЏO‹™\ШX›Y]ќYJNЭћ^Щ›ЬЉЫЫњЭYЩ€Щ[XЭY
+X]ШZ]\JШ\KЩ]™[ќЙЩ]™[ќљYKЬЭЬЛЙЪYXY]Щ›ЩJNШ]ШZ]ШY
+
+NЯXШ]Ъ
+\њЉ^Ш]ШZ]ШY
+
+NЭ›ЭИ\њЋЯ_NВ€ќ]ЫЉЫЫ\‹	Р]\ЭШZњ™ZYЩX™[‰Л
+
+OOќ[К	ФUТ	ЛШ\›Э™YќќY_JJNШќ]ЫЉЫЫ\‹	Р]\ЭШZ™\™\™Щ[‰Л
+
+OOќ[К	ФUТ	ЛШ\›Э™Y™[Щ_JJNШќ]ЫЉЫЫ\‹	Р]\ЭШZ0нњШЪ[‰Л
+
+OOќ[К	СSUIКJKЫ\ЬУ[YOIЩ[™Щ\‰ОВ€›ЬЉЫЫњЭЭИЩ€ЭЬКHВ€ЫЫњЭШ\™Y[[Y[ќ
+	Ш\ќXЫIКK[YПY[[Y[ќ
+	Ъ[YЙКNЪ[YЛњЬП\ЭЛќ\›Ъ[YЛ[IХ™\[њЭ[[™ЬЩ›ЭЙОЪ[YЛ›ШY[™ПIЫ^ћIОШЫЫњЭЪЪXЩOY[[Y[ќ
+	ЫX™[	Л	Р]\Эрй[‰КNШЪЪXЩKЫ\ЬУ[YOIШЪXЪЛ[X™[	ОШЫЫњЭ›ЮY[[Y[ќ
+	Ъ[њ]	КNШ›Юќ\OIШЪXЪШ›Ю	ОШ›ЮњЩ]]љXќ]J	Ш\љXK[X™[	Л	С›ЭИ]\Эрй[‰КNШ›Ю›ЫЪ[™ЩOJ
+OOћШ›ЮЪXЪЩYЬЩ[XЭYY
+ЭЛљY
+NњЩ[XЭY™[]JЭЛљY
+NШЫЭ[ќ\‹ќ^ЫЫќ[ќX	ЬЩ[XЭYњЪ^™_H]\ЩЩ]рйШШ\™Ы\ЬУ\ЭќЩЩЫJ	ЬЩ[XЭY	Л›ЮЪXЪЩY
+NЯNШЪЪXЩKњ™\[™
+›Ю
+NШШ\™\[™
+ЪЪXЩK[YЛ[[Y[ќ
+	Ь	ЛЭЛ\›Э™YЙФЪXЪ\€°п€рйЭIО‰ХШ\ќ]]Y€њ™ZYШX™IКJNШШ\™›\ЭЪ[Ы\ЬУ[YOIЬЭЛ\Э]IОВ€ќ]ЫЉШ\™ЭЛ\›Э™YЙСњ™ZYШX™Hќ\°пЪЫ™ZY[‰О‰Сњ™ZYЩX™[‰Л\Ю[К
+OOћШ]ШZ]\JШ\KЩ]™[ќЙЩ]™[ќљYKЬЭЬЛЙЬЭЛљYX	ФUТ	ЛШ\›Э™Y€\ЭЛ\›Э™YJNШ]ШZ]X[YЩJ]™[ќ
+NЯJNВ€ќ]ЫЉШ\™	С›ЭИ0нњШЪ[‰Л\Ю[К
+OOћЪYЉЫЫ™љ\›J	СY\Щ\И›ЭИ[™рпYИ0нњШЪ[ЏЙКJ^Ш]ШZ]\JШ\KЩ]™[ќЙЩ]™[ќљYKЬЭЬЛЙЬЭЛљYX	СSUIКNШ]ШZ]ШY
+
+NЯ_JNВ€\Э\[™
+Ш\™
+NВ€B€B€\Ю[Иќ[Э[Ы€ШY
+
+HВ€ЫЫњЭЩ]™[ќЯOX]ШZ]\J	ЛШ\KЩ]™[ќЙКNЪYЉXЭ]™Q]™[ќ	‰€Y]™[ќЛњЫЫYJOO™KљYOOXXЭ]™Q]™[ќ
+JXXЭ]™Q]™[ќ[ќ[ЩШЭ[Y[ќњ]Y\ћTЩ[XЭЬЉ	ЛЬ™X]K\[™[	КKљY[ЏHHXXЭ]™Q]™[ќШЫЫњЭЩXЭ[ЫЏYШЭ[Y[ќ™Щ][[Y[ќћRY
+	Щ]™[ќЙКNЬЩXЭ[Ы‹њ™\XЩPЪ[™[Љ
+NВ€YЉY]™[ќЛ›[™Э
+^ЬЩXЭ[Ы‹\[™
+[[Y[ќ
+	Ь	Л	СZ[€\њЭ\И[ќ[HШ\ќ]]Y€XЪ€\њЭ[HШ™[€Z[™H™\[њЭ[[™Л‰КJNЩШЭ[Y[ќњ]Y\ћTЩ[XЭЬЉ	ЛЬ™X]K\[™[	КK›Ь[Џ]ќYNЯB€›ЬЉЫЫњЭ]™[ќЩ€]™[ќКHВ€ЫЫњЭШ\™Y[[Y[ќ
+	Ш\ќXЫIКNШШ\™Ы\ЬУ[YOIЩ]™[ќXШ\™	ОШЫЫњЭXY[™ПY[[Y[ќ
+	Щ]‰КNЪXY[™ЛЫ\ЬУ[YOIЬYЩKZXY[™ЙОШЫЫњЭYЩOY[[Y[ќ
+	ЬЬ[‰Л]™[ќњ^[Y[ќЭ]\ПOOIЩ\Ь]Y	ПЙЦZ[™ЬЬЭ™Z][0­ИќYШ[™И›Ь™\њЭZЭ]‰О™]™[ќњЭ]\ПOOIЬ™Yќ[™Y	Й‰™]™[ќњ^[Y[ќЭ]\ПOOIЩ\Ь]YЫЬЭ	ПЙФЭ™Z][™\›Ь™[€0­ИќYШ[™И™Y[™]	О™]™[ќњЭ]\ПOOIЬ™Yќ[™Y	ПЙС\њЭ]]0­ИќYШ[™И™Y[™]	О™]™[ќњ™XYЫ›OЙСЭЫ›ШY\ЩIО™]™[ќњЭ]\ПOOIЭљX[	ПЙТЫЬЭ[›ЬИ\Э[‰О™]™[ќњЭ]\ПOOIЬ[Э	ПЙСЩ\ШЪЬЬЩ[™\€^\Э\Э	О™]™[ќњЭ]\ПOOIЬZY	ПК]™[ќњЭ\ќР]‘]K››ЭК
+OЙФЭ\ќЩ\[ќ	О‰РZЭ]‰КN™]™[ќњЭ]\ПOOIЬ[™[™ЙПЙЦZ[™ИЩ™™[‰О‰РX™Щ[]Y™[‰КNШYЩKЫ\ЬУ[YOIЬЭ]\Л\[	КК]™[ќњЭ]\ПOOIЬ[™[™ЙЯ]™[ќњ^[Y[ќЭ]\ПOOIЩ\Ь]Y	ПЙЬ[™[™ЙО‰ЙКNЪXY[™Л\[™
+[[Y[ќ
+	Ъ‰Л]™[ќќ]JKYЩJNШШ\™\[™
+XY[™КNЪYЉXЭ]™Q]™[ќOOY]™[ќљY
+^ШЫЫњЭXЪПY[[Y[ќ
+	ШIЛ	шЎ¤ќ\€™\[њЭ[[™Ьрп™\њЪXЪ	КNШXЪЛљ™YЏIЛЩ\Ъ›Ш\™	ОШXЪЛЫ\ЬУ[YOIШќ]Ы€ЩXЫЫ™\ћH]™[ќXXЪЙОШXЪЛ›ЫЫXЪПYOOћЩKњ™]™[ќY][
+
+NШXЭ]™Q]™[ќ[ќ[Ъ\ЭЬћKњ™\XЩTЭ]Jќ[	ЙЛ	ЛЩ\Ъ›Ш\™	КNЩШЭ[Y[ќ™Щ][[Y[ќћRY
+	ЬЭЛ[X[YЩ\‰КKљY[Џ]ќYNЫШY
+
+NЯNШШ\™\[™
+XЪКNЯXШ\™\[™
+[[Y[ќ
+	Ь	Л	Щ]™[ќљYIЩ]™[ќ™]™[ќЩ]OШ0­ИЭ\ќ	Ы™]И]J]™[ќњЭ\ќР]
+KќУШШ[Q]TЭљ[™К	ЩKQIК_X‰ЙЯIЩ]™[ќ™^\™\ЧШ]Ш0­ИЫ›[™Hљ\И	Ы™]И]J]™[ќ™^\™\ЧШ]
+KќУШШ[Q]TЭљ[™К	ЩKQIК_IЩ]™[ќњ™][ќ[Ы•[ќ[	‰™]™[ќњ™][ќ[Ы•[ќ[OOY]™[ќ™^\™\ЧШ]Ш0­ИЭЫ›ШYИљ\И	Ы™]И]J]™[ќњ™][ќ[Ы•[ќ[
+KќУШШ[Q]TЭљ[™К	ЩKQIК_X‰ЙЯX‰ЙЯX
+JNШШ\™›\ЭЪ[Ы\ЬУ[YOIЩ]™[ќ[Y]IОЪYЉ]™[ќњ^[Y[ќЭ]\ПOOIЩ\Ь]Y	КXШ\™\[™
+[[Y[ќ
+	Ь	Л	С\€Z[™ЬЬЭ™Z][Ъ\™Щ\°пќ€\€[ќ[^ќYШ[™И›ZXќљ\Иќ\€[ќШЪZY[™И™\ЭZ[‹‰КJNЪYЉ]™[ќњЭ]\ПOOIЬ™Yќ[™Y	КXШ\™\[™
+[[Y[ќ
+	Ь	Л]™[ќњ^[Y[ќЭ]\ПOOIЩ\Ь]YЫЬЭ	ПШYH[љИ][€Э™Z][ќHЭ[њЭ[€\ИШ\ќ[љ[љX™\њИ[ќШЪYY[ЋИ\€[ќ[^ќYШ[™ИЭ\™H™Y[™]€›ЭЬИЩ\™[€Ь0й\Э[њИ[H	Ы™]И]J]™[ќњ™][ќ[Ы•[ќ[]™[ќ™^\™\ЧШ]
+KќУШШ[Q]TЭљ[™К	ЩKQIК_HЩ[pй0зИ\€[ќ[KP]Y™]ШZќ[™ЬЩњљ\ЭЩ[0нњШЪ\€›Ы™Yќ[™\Э™\Э0йYЭИ\€рйЭKH[™™\[њЭ[\ћќYШ[™ИЭ\™H™Y[™]€YHЩ\ЬZXЪ\ќ[€›ЭЬИЩ\™[€Ь0й\Э[њИ[H	Ы™]И]J]™[ќњ™][ќ[Ы•[ќ[]™[ќ™^\™\ЧШ]
+KќУШШ[Q]TЭљ[™К	ЩKQIК_HЩ[pй0зИ\€[ќ[KP]Y™]ШZќ[™ЬЩњљ\ЭЩ[0нњШЪ
+JNЪYЉ]™[ќљ\Т[ќ›ЪXЩJ^ШЫЫњЭ[ќ›ЪXЩS[љПY[[Y[ќ
+	ШIЛ	Ф™XЪќ[™ИИZ[™ЬШ™[YИ0н™™›™[‰КNЪ[ќ›ЪXЩS[љЛљ™YЏXШ\KЩ]™[ќЙЩ[ЫЩUT’PЫЫ\Ы™[ќ
+]™[ќљY
+_KЪ[ќ›ЪXЩXЪ[ќ›ЪXЩS[љЛќ\™Щ]IЧШ›[љЙОЪ[ќ›ЪXЩS[љЛњ™[IЫ›ЫЬ[™\‰ОЪ[ќ›ЪXЩS[љЛЫ\ЬУ[YOIШќ]Ы€ЩXЫЫ™\ћIОШШ\™\[™
+[ќ›ЪXЩS[љКNЯB€ЫЫњЭЭ]ПY[[Y[ќ
+	Ь	Л]™[ќњЭУ[Z]OO[ќ[Ш	К]™[ќњЭЬYЩPћ]\ЛМLЌ
+ЉЊКKќСљ^Y
+Љ_HР€›Ы€	К]™[ќњЭЬYЩS[Z]ћ]\ЛМLЌ
+ЉЊКKќСљ^Y
+J_HР€›ЭЬЬZXЪ\€™[YЭ0­ИЩZ[™H™\ЭH›ЭШ[ћZ™]™[ќњЭ]\ПOOIЬ[Э	ПШ	Щ]™[ќњЭРЫЭ[ќH›Ы€	Щ]™[ќњЭУ[Z]H›ЭЬИ0­И	К]™[ќњЭЬYЩPћ]\ЛМLЌ
+ЉЊЉKќСљ^Y
+J_HP€™[YЭ	Щ]™[ќњЭРЫЭ[ќH›Ы€ЌH\Э›ЭЬИ0­И	К]™[ќњЭЬYЩPћ]\ЛМLЌ
+ЉЊЉKќСљ^Y
+J_HP€™[YЭ
+NЬЭ]ЛљYXЭ]ЛIЩ]™[ќљYXШШ\™\[™
+[[Y[ќ
+	Ь	Л\ШYО€	Щ]™[ќќ\ШYЬЭXШЩ\ЬЩ\ЯH\™›ЫЬ™ZXЪ0­И	Щ]™[ќќ\ШYЩZ[\™\ЯH™ZЩ\ШЪYЩ[
+JNЪYЉ]™[ќњ™XYЫ›JXШ\™\[™
+[[Y[ќ
+	Ь	ЛYH\ШY™Z]\Э™Y[™]€Z[™H›ЭЬИ›ZX™[€љ\И	Ы™]И]J]™[ќњ™][ќ[Ы•[ќ[
+KќУШШ[Q]TЭљ[™К	ЩKQIК_Hќ[H[њЩZ[€[™\ќ[ќ\›Y[€™\™°пШ\ЋИ[XЪЩ\™[€ЪYHЩ[0нњШЪ
+JNЪYЉ]™[ќњЭ]\ПOOIЬ[Э	Й‰€Y]™[ќњ™XYЫ›JXШ\™\[™
+[[Y[ќ
+	Ь	Л	ТЫЬЭ[›ЬЩ\€^\Э\ЭЪ™HZ[™Л€XpзЩЩX›XЪ\Э\И[™Щ^™ZYЭHX›]Y™][NИ™ZH™\[њЭ[[™Щ[€Z]][HЪXќ\ИЩZ[™Hќ\рй›XЪHЭЫ›ШY\ЩK‰КJNЪYЉ]™[ќњЭ]\ПOOIЭљX[	Й‰€Y]™[ќњ™XYЫ›JXШ\™\[™
+[[Y[ќ
+	Ь	Лљ\ИќHЌH›ЭЬИЫЬЭ[›ЬИ\Э[€8 $ИY°п€\ЭЩZ[™HZ[™И°нќYЛ€\И›ЫЭ0й™YЩHZЩ]Э\ќ][H	Ы™]И]J]™[ќњЭ\ќР]
+KќУШШ[Q]TЭљ[™К	ЩKQIК_NИЪ™HќXЪ[™И›ZXќ\И™Z[H\ЭЫЫќ[™Щ[ќ
+JNЪYЉ]™[ќњЭ]\ПOOIЬZY	Й‰™]™[ќњЭ\ќР]‘]K››ЭК
+JXШ\™\[™
+[[Y[ќ
+	Ь	Л\Э[Щ\Иљ\И	Ы™]И]J]™[ќњЭ\ќР]
+KќУШШ[Q]TЭљ[™К	ЩKQIК_N€љ\ИќHЌH›ЭЬЛ€X€[H™\[њЭ[[™ЬЩ][HЪ[\И›ЫЭ0й™YЩHЬZXЪ\њZЩ]
+JNШШ\™\[™
+Э]КNШЫЫњЭY]\ЏY[[Y[ќ
+	Ь›ЩЬ™\ЬЙКNЫY]\‹›X^Y]™[ќњЭЬYЩS[Z]ћ]\ОЫY]\‹ќ[YOY]™[ќњЭЬYЩPћ]\ОЫY]\‹њЩ]]љXќ]J	Ш\љXK[X™[	Л	Р™[YЭ\€›ЭЬЬZXЪ\‰КNШШ\™\[™
+Y]\ЉNВ€ЫЫњЭЬ[ЏXќ]ЫЉШ\™	Х™\[њЭ[[™И™\ќШ[[‰Л
+
+OOћШXЭ]™Q]™[ќY]™[ќљYЪ\ЭЬћKњ™\XЩTЭ]Jќ[	ЙЛЩ\Ъ›Ш\™Щ]™[ќIЩ[ЫЩUT’PЫЫ\Ы™[ќ
+]™[ќљY
+_X
+NЫШY
+
+NЯJNЫЬ[‹Ы\ЬУ[YOIЬљ[X\ћH]™[ќ[Ь[‰ОВ€YЉ]™[ќЭ\ЭЫY\•\OOOIШЫЫњЭ[Y\‰Й‰™]™[ќњ^[Y[ќЫЫЫYY]
+^В€ЫЫњЭЪ]]Ш[Y[[Y[ќ
+	ЬЩXЭ[Ы‰КNЭЪ]]Ш[Ы\ЬУ[YOIЩ]™[ќ\ЩXЭ[Ы€Ъ]]Ш[XXЭ[Ы‰ОЭЪ]]Ш[\[™
+[[Y[ќ
+	ЪЙЛ	Х™\њ]XЪ\‹UЪY\њќY‰КJNВ€YЉ]™[ќќЪ]]Ш[ЭX›Z]Y]
+^ЭЪ]]Ш[\[™
+[[Y[ќ
+	Ь	ЛZ[€ЪY\њќY€\Э[H	Ы™]И]J]™[ќќЪ]]Ш[ЭX›Z]Y]
+KќУШШ[TЭљ[™К	ЩKQIЛЩ]TЭ[N‰ЫЫ™ЙЛ[YTЭ[N‰ЬЪЬќ	ЯJ_HZ[™ЩYШ[™Щ[‹
+JNЭЪ]]Ш[\[™
+[[Y[ќ
+	Ь	Л]™[ќќЪ]]Ш[ЫЫ™љ\›X][Ы”Э]\ПOOIЬЩ[ќ	ПЙСYHZ[™Ш[™ЬШ™\Э0йYЭ[™ИЭ\™H[€Z[™HЫЫќЛQKSXZ[Щ\Ш[™‰О‰СYHZ[™Ш[™ЬШ™\Э0йYЭ[™И\ЭЩ\ЬZXЪ\ќИ\€KSXZ[U™\њШ[™Ъ\™\›™]]™\њЭXЪ‰КJNЯB€[ЩHВ€ЫЫњЭ™\\™OXќ]ЫЉЪ]]Ш[	Х™\ќYИЪY\њќY™[‰Л
+
+OOћЬ™\\™KљY[Џ]ќYNЩ›Ь›KљY[ЏY[ЩNЫ[YK™›ШЭ\К
+NЯJNЬ™\\™KЫ\ЬУ[YOIЬљ[X\ћHЪ]]Ш[\Э\ќ	ОВ€ЫЫњЭ›Ь›OY[[Y[ќ
+	Щ›Ь›IКNЩ›Ь›KљY[Џ]ќYNЩ›Ь›KЫ\ЬУ[YOIЭЪ]]Ш[Y›Ь›IОВ€›Ь›K\[™
+[[Y[ќ
+	Ь	Л™\ќYО€љ[[Ы\›ЭШ[ќ[H8 '‰Щ]™[ќќ]_x '
+	Щ]™[ќљYJK€YHZ[™Ш[™ЬШ™\Э0йYЭ[™ИЩZ[€	Щ]™[ќ™[XZ[K
+JNВ€ЫЫњЭ[YSX™[Y[[Y[ќ
+	ЫX™[	Л	Х›ЫЭ0й™YЩ\€[YIКNШЫЫњЭ[YOY[[Y[ќ
+	Ъ[њ]	КNЫ[YK›[YOIШЭ\ЭЫY\“[YIОЫ[YK]]ШЫЫ\]OIЫ[YIОЫ[YKњ™\]Z\™Y]ќYNЫ[YK›X^[™ЭLMЊЫ[YSX™[\[™
+[YJNЩ›Ь›K\[™
+[YSX™[
+NВ€ЫЫњЭ[XZ[X™[Y[[Y[ќ
+	ЫX™[	КNЩ[XZ[X™[Ы\ЬУ[YOIШЪXЪЛ[X™[	ОШЫЫњЭ[XZ[ЫЫ™љ\›YYY[[Y[ќ
+	Ъ[њ]	КNЩ[XZ[ЫЫ™љ\›YYќ\OIШЪXЪШ›Ю	ОЩ[XZ[ЫЫ™љ\›YYњ™\]Z\™Y]ќYNЩ[XZ[X™[\[™
+[XZ[ЫЫ™љ\›YY[[Y[ќ
+	ЬЬ[‰ЛXЪ™\Э0йYЩH	Щ]™[ќ™[XZ[H[ИKSXZ[PY™\ЬЩH°п€YHZ[™Ш[™ЬШ™\Э0йYЭ[™Л
+JNЩ›Ь›K\[™
+[XZ[X™[
+NВ€ЫЫњЭЭX›Z]Y[[Y[ќ
+	Шќ]Ы‰Л	ХЪY\њќY€™\Э0йYЩ[‰КNЬЭX›Z]ќ\OIЬЭX›Z]	ОЬЭX›Z]Ы\ЬУ[YOIЩ[™Щ\‰ОЩ›Ь›K\[™
+ЭX›Z]
+NВ€›Ь›K›ЫњЭX›Z]X\Ю[ИOOћЩKњ™]™[ќY][
+
+NЬЭX›Z]™\ШX›Y]ќYNЭћ^ШЫЫњЭ™\Э[X]ШZ]\JШ\KЩ]™[ќЛЙЩ[ЫЩUT’PЫЫ\Ы™[ќ
+]™[ќљY
+_KЭЪ]]Ш[	ФФХ	ЛШЭ\ЭЫY\“[YN›[YKќ[YK[XZ[ЫЫ™љ\›YY™[XZ[ЫЫ™љ\›YYЪXЪЩYJNЫY\ЬШYЩKќ^ЫЫќ[ќ\™\Э[›Y\ЬШYЩNШ]ШZ]ШY
+
+NЯXШ]Ъ
+\њ›ЬЉ^Ь™\Ьќ
+\њ›ЬЉNЬЭX›Z]™\ШX›YY[ЩNЯ_NВ€Ъ]]Ш[\[™
+›Ь›JNВ€B€Ш\™\[™
+Ъ]]Ш[
+NВ€B€ЫЫњЭXњПY[[Y[ќ
+	Ы]‰КNЭXњЛЫ\ЬУ[YOIШXЭ[ЫњИ]™[ќ]XњЙОЭXњЛњЩ]]љXќ]J	Ш\љXK[X™[	Л	Х™\[њЭ[[™ЬШ™\™ZXЪIКNШШ\™\[™
+XњКNВ€ЫЫњЭ[™[ПVЧNВ€ЫЫњЭЪЭФ[™[Z[™^OћЬ[™[Л™›Ь‘XXЪ
+
+[™[JOOњ[™[љY[ЏZHOOZ[™^
+NЭXњЛњ]Y\ћTЩ[XЭЬђ[
+	Шќ]Ы‰КK™›Ь‘XXЪ
+
+‹JOO‹њЩ]]љXќ]J	Ш\љXK\™\ЬЩY	ЛЭљ[™КOOOZ[™^
+JJNЩШЭ[Y[ќ™Щ][[Y[ќћRY
+	ЬЭЛ[X[YЩ\‰КKљY[ЏZ[™^OOLЪYЉ[™^OOL
+\™]\›€X[YЩJ]™[ќ
+NЯNВ€YЉЙЬ[™[™ЙЛ	ЭљX[	ЧKљ[ЫY\К]™[ќњЭ]\КI‰€Y]™[ќњ™XYЫ›J^В€ЫЫњЭЪЫЬЩ\ЏY[[Y[ќ
+	Щ]Z[ЙКNШЪЫЬЩ\‹Ы\ЬУ[YOIЭ\ЬYK\[™[	ОШЪЫЬЩ\‹›Ь[ЏXXЭ]™Q]™[ќOOY]™[ќљYШЪЫЬЩ\‹\[™
+[[Y[ќ
+	ЬЭ[[X\ћIЛ	ФZЩ]	€ќXЪ[™ЙКJNВ€ЪЫЬЩ\‹\[™
+[[Y[ќ
+	Ь	Л	ТЫЬЭ[›ЬИ\Э[€њ]XЪЩZ[™HZ[™О€љ\ИќHЌH›ЭЬИШ[›њЭH\™ZЭ0п™\€8 '‘›ЭЬИ™\ќШ[[ё 'ШЪY[‹€\€[™™Z\И™]°йЭKL8 «[љЫ€NH	HTЭ€°п€љ]]H[™Щ\ШЪ0йќЪЭ[™[‹€8 '•\ЭZ[™ИЭ\ќ[ё '0н™™›™][€Эљ\KU\ЭЪXЪЫЭ]И\ИЪ\™ЩZ[€XЪ\ИЩ[Z[™Щ^›ЩЩ[‹‰КJNВ€ЫЫњЭќ^Y\“X™[Y[[Y[ќ
+	ЫX™[	Л	ТШ]Y€[ЙКNШЫЫњЭќ^Y\•\OY[[Y[ќ
+	ЬЩ[XЭ	КNЩ›ЬЉЫЫњЭЭ[YKX™[HЩ€ЦЙШЫЫњЭ[Y\‰Л	Фљ]]Э[™IЧKЙШќ\Ъ[™\ЬЙЛ	СЩ\ШЪ0йќЪЭ[™IЧWJ^ШЫЫњЭЬ[ЫЏY[[Y[ќ
+	ЫЬ[Ы‰ЛX™[
+NЫЬ[Ы‹ќ[YO][YNШќ^Y\•\K\[™
+Ь[ЫЉNЯXќ^Y\•\Kќ[YOY]™[ќЭ\ЭЫY\•\_	ШЫЫњЭ[Y\‰ОШќ^Y\“X™[\[™
+ќ^Y\•\JNШЪЫЬЩ\‹\[™
+ќ^Y\“X™[
+NВ€ЫЫњЭ\›\УX™[Y[[Y[ќ
+	ЫX™[	КNЭ\›\УX™[Ы\ЬУ[YOIШЪXЪЛ[X™[	ОШЫЫњЭ\›\РXШЩ\[ЩOY[[Y[ќ
+	Ъ[њ]	КNЭ\›\РXШЩ\[ЩKќ\OIШЪXЪШ›Ю	ОЭ\›\РXШЩ\[ЩKЪXЪЩYY]™[ќќ\›\РXШЩ\Y	‰™]™[ќќ\›\Х™\њЪ[ЫЏOOUT“TЧХ‘T”ТSУЋШЫЫњЭ\›\Х^YШЭ[Y[ќЬ™X]U^›ЩJ	ИXЪX™HYH	КNШЫЫњЭ\›\У[љПY[[Y[ќ
+	ШIЛ	УZ\Э[™ЬШ™Y[™Э[™Щ[‰КNЭ\›\У[љЛљ™YЏIЛШ™Y[™Э[™Щ[‰ОЭ\›\У[љЛќ\™Щ]IЧШ›[љЙОЭ\›\У[љЛњ™[IЫ›ЫЬ[™\‰ОЭ\›\УX™[\[™
+\›\РXШЩ\[ЩK\›\Х^\›\У[љЛШЭ[Y[ќЬ™X]U^›ЩJ	ИЩ[\Щ[€[™ZЮ™\Y\™HЪYK‰КJNВ€ЫЫњЭX\›TЭ\ќ™\]Z\™YHHY]™[ќњЭ\ќР]	‰™]™[ќњЭ\ќР]]K››ЭК
+JМM
+ЋЌВ€ЫЫњЭX\›TЭ\ќ™\]Y\ЭX™[Y[[Y[ќ
+	ЫX™[	КNЩX\›TЭ\ќ™\]Y\ЭX™[Ы\ЬУ[YOIШЪXЪЛ[X™[	ОШЫЫњЭX\›TЭ\ќ™\]Y\ЭY[[Y[ќ
+	Ъ[њ]	КNЩX\›TЭ\ќ™\]Y\Эќ\OIШЪXЪШ›Ю	ОЩX\›TЭ\ќ™\]Y\ЭЪXЪЩYY]™[ќ™X\›TЭ\ќ™\]Y\ЭYЩX\›TЭ\ќ™\]Y\ЭX™[\[™
+X\›TЭ\ќ™\]Y\ЭШЭ[Y[ќЬ™X]U^›ЩJ	ИXЪ™\›[™ЩH]\Щ°пЪЫXЪ\ЬИљ[[Ы\Z][H[ќЩ[XЪ[€[ќ[YY[њЭ›Ь€X›]Y€\€M]0йЪYЩ[€ЪY\њќYњЩњљ\Э™YЪ[›ќЩ[›€YZ[€™\[њЭ[[™ЬЩ][H[›™\љ[€Y\Щ\€њљ\ЭYYЭ‰КJNВ€ЫЫњЭX\›TЭ\ќXЪЫ›ЭЫYЩ[Y[ќX™[Y[[Y[ќ
+	ЫX™[	КNЩX\›TЭ\ќXЪЫ›ЭЫYЩ[Y[ќX™[Ы\ЬУ[YOIШЪXЪЛ[X™[	ОШЫЫњЭX\›TЭ\ќXЪЫ›ЭЫYЩ[Y[ќY[[Y[ќ
+	Ъ[њ]	КNЩX\›TЭ\ќXЪЫ›ЭЫYЩ[Y[ќќ\OIШЪXЪШ›Ю	ОЩX\›TЭ\ќXЪЫ›ЭЫYЩ[Y[ќЪXЪЩYY]™[ќ™X\›TЭ\ќXЪЫ›ЭЫYЩYЩX\›TЭ\ќXЪЫ›ЭЫYЩ[Y[ќX™[\[™
+X\›TЭ\ќXЪЫ›ЭЫYЩ[Y[ќШЭ[Y[ќЬ™X]U^›ЩJ	ИXЪ™\Э0йYЩK\ЬИXЪ™ZHZ[™[HЪY\њќY€[™Щ[Y\ЬЩ[™[€Щ\ќ\њШ]€°п€™\™Z]И\њXЪHZ\Э[™Щ[€ШЪ[[€Ш[›€[™YZ[€ЪY\њќYњЬ™XЪ\њЭZ]›ЫЭ0й™YЩ\€\њљ[™Э[™И\ИY[њЭ\И\›\ШЪ‰КJNВ€ЫЫњЭЪ]]Ш[[™›ПY[[Y[ќ
+	Ь	КNЭЪ]]Ш[[™›ЛЫ\ЬУ[YOIЬЫX[	ОЭЪ]]Ш[[™›Л\[™
+ШЭ[Y[ќЬ™X]U^›ЩJ	ХЪY\њќYњЪ[™›Ь›X][ЫЋ€	КJNШЫЫњЭЪ]]Ш[[љПY[[Y[ќ
+	ШIЛ	ХЪY\њќYњЬ™XЪ[™]\Э\™›Ь›][\‰КNЭЪ]]Ш[[љЛљ™YЏIЛЭЪY\њќY‰ОЭЪ]]Ш[[љЛќ\™Щ]IЧШ›[љЙОЭЪ]]Ш[[љЛњ™[IЫ›ЫЬ[™\‰ОЭЪ]]Ш[[™›Л\[™
+Ъ]]Ш[[љКNВ€ЫЫњЭЫЫњЩ[ќY\ЬШYЩOY[[Y[ќ
+	Ь	КNШЫЫњЩ[ќY\ЬШYЩKњЩ]]љXќ]J	Ь›ЫIЛ	ЬЭ]\ЙКNШЫЫњЩ[ќY\ЬШYЩKњЩ]]љXќ]J	Ш\љXK[]™IЛ	ЬЫ]IКNВ€ЫЫњЭ\]QX\›TЭ\ќљ\ЪXљ[]OJ
+OOћШЫЫњЭљ\ЪX›OXќ^Y\•\Kќ[YOOOIШЫЫњЭ[Y\‰Й‰™X\›TЭ\ќ™\]Z\™YЩX\›TЭ\ќ™\]Y\ЭX™[љY[ЏH]љ\ЪX›NЩX\›TЭ\ќXЪЫ›ЭЫYЩ[Y[ќX™[љY[ЏH]љ\ЪX›NЭЪ]]Ш[[™›ЛљY[ЏXќ^Y\•\Kќ[YHOOIШЫЫњЭ[Y\‰ОЯNШќ^Y\•\KY]™[ќ\Э[™\Љ	ШЪ[™ЩIЛ\]QX\›TЭ\ќљ\ЪXљ[]JNЭ\]QX\›TЭ\ќљ\ЪXљ[]J
+NВ€ЪЫЬЩ\‹\[™
+\›\УX™[X\›TЭ\ќ™\]Y\ЭX™[X\›TЭ\ќXЪЫ›ЭЫYЩ[Y[ќX™[Ъ]]Ш[[™›ЛЫЫњЩ[ќY\ЬШYЩJNВ€ЫЫњЭЬљYY[[Y[ќ
+	Щ]‰КNЩЬљYЫ\ЬУ[YOIЬ[‹YЬљY	ОШЪЫЬЩ\‹\[™
+ЬљY
+NВ€›ЬЉЫЫњЭЪЩ^K[—HЩ€Шљ™XЭ™[ќљY\К]Z[X›T[њКJ^В€YЉ[‹›YШXЮI‰™]™[ќњ[€OOZЩ^JXЫЫќ[ќYNВ€ЫЫњЭ][OY[[Y[ќ
+	Щ]‰КNЪ][KЫ\ЬУ[YOIЬ[‹XШ\™	ОШЫЫњЭљXЩSX™[[™]И[ќ“ќ[X™\‘›Ь›X]
+	ЩKQIЛЬЭ[N‰ШЭ\њ™[ЮIЛЭ\њ™[ЮN‰СUT‰ЯJK™›Ь›X]
+[‹њљXЩPЩ[ќЛМL
+NЪ][K\[™
+[[Y[ќ
+	ЪЙЛ[‹›X™[
+K[[Y[ќ
+	Ь	ЛљXЩSX™[
+K[[Y[ќ
+	Ь	Л	Ъ[љЫ€NH	HTЭ€0­И[™™Z\И°п€љ]]H[™Щ\ШЪ0йќЪЭ[™[‰КK[[Y[ќ
+	Ь	ЛЩZ[™H™\ЭH›ЭШ[ћZ0­Иљ\ИќH	Ь[‹њЭЬYЩS[Z]Р‹ќУШШ[TЭљ[™К	ЩKQIЛЫX^[][QњXЭ[Ы‘YЪ]ОЊ_J_HР€›ЭЬЬZXЪ\‹€T‹PЫЩKрйЭXќXЪ›ЭШ]Y™ШX™[‹X\ЪЭИ[™ЭЫ›ШYИ[ќ[[‹
+JNВ€ЫЫњЭXЭ[Ы“X™[X	Щ]™[ќЪXЪЫЭ]Э\ќY	‰™]™[ќњ[ЏOOZЩ^OЙХ\ЭZ[™И›ЬќЩ]™[‰О‰Х\ЭZ[™ИЭ\ќ[‰ЯH0­И	ЬљXЩSX™[H[љЫ€TЭШЫЫњЭЪЫЬЩOXќ]ЫЉ][KXЭ[Ы“X™[\Ю[К
+OOћЪYЉ]\›\РXШЩ\[ЩKЪXЪЩY
+^ШЫЫњЩ[ќY\ЬШYЩKќ^ЫЫќ[ќIРљ]HY\И[™ZЮ™\Y\™H›Ь€\€™\Э[[™ИYHZ\Э[™ЬШ™Y[™Э[™Щ[‹‰ОЭ\›\РXШЩ\[ЩK™›ШЭ\К
+NЬ™]\›ЋЯXЫЫњЭ™YYРЫЫњЩ[ќXќ^Y\•\Kќ[YOOOIШЫЫњЭ[Y\‰Й‰™X\›TЭ\ќ™\]Z\™YЪYЉ™YYРЫЫњЩ[ќ	‰ЉYX\›TЭ\ќ™\]Y\ЭЪXЪЩYYX\›TЭ\ќXЪЫ›ЭЫYЩ[Y[ќЪXЪЩY
+J^ШЫЫњЩ[ќY\ЬШYЩKќ^ЫЫќ[ќIРљ]H™\Э0йYЩH™ZYH[ќЩZ\ЩHќ[H›Ьћ™Z]YЩ[€Z\Э[™ЬШ™YЪ[›€[™ЪY\њќY‹™]›Ь€H›Ьќ°йњЭ‰ОЬ™]\›ЋЯXЪЫЬЩK™\ШX›Y]ќYNЭћ^ШЫЫњЭ]OX]ШZ]\J	ЛШ\KШЪXЪЫЭ]	Л	ФФХ	ЛЩ]™[ќY™]™[ќљY[ЋљЩ^KЭ\ЭЫY\•\Nќ^Y\•\Kќ[YK\›\РXШЩ\Yќ\›\РXШЩ\[ЩKЪXЪЩYX\›TЭ\ќ™\]Y\Э›™YYРЫЫњЩ[ќ	‰™X\›TЭ\ќ™\]Y\ЭЪXЪЩYX\›TЭ\ќXЪЫ›ЭЫYЩY›™YYРЫЫњЩ[ќ	‰™X\›TЭ\ќXЪЫ›ЭЫYЩ[Y[ќЪXЪЩYJNЪYЉY]Kќ\›
+]›ЭИ™]И\њ›ЬЉ	С\€\ЭPЪXЪЫЭ]]ЩZ[™[€[љИќ\°пЪЩЩYЩX™[‹€љ]HЬ0й\€\›™]]™\њЭXЪ[‹‰КNЫШШ][Ы‹љ™YЏY]Kќ\›ЯYљ[[^ШЪЫЬЩK™\ШX›YY[ЩNЯ_JNШЪЫЬЩKЫ\ЬУ[YOIЬљ[X\ћIОШЪЫЬЩK™\ШX›YY]™[ќЪXЪЫЭ]Э\ќY	‰™]™[ќњ[€OOZЩ^NЩЬљY\[™
+][JNВ€B€YЉ]™[ќЪXЪЫЭ]Э\ќY
+XЪЫЬЩ\‹\[™
+[[Y[ќ
+	Ь	Л	СYH™YЫЫ›™[™H\ЭZ[™И\Э[€\ИZ[›X[YЩHљ[[Ы\Q›ЭШ[ќ[HЩXќ[™[‹‰КJNВ€Ш\™\[™
+ЪЫЬЩ\ЉNВ€B€YЉ]™[ќ™ЭY\Э\›
+HВ€ЫЫњЭЭЬФЩXЭ[ЫЏY[[Y[ќ
+	Щ]‰КNЬЭЬФЩXЭ[Ы‹Ы\ЬУ[YOIЩ]™[ќ\ЩXЭ[Ы‰ОЬЭЬФЩXЭ[Ы‹\[™
+[[Y[ќ
+	ЪЙЛ	С›ЭЬИ	€]™KQX\ЪЭЙКJNШШ\™\[™
+ЭЬФЩXЭ[ЫЉNШЫЫњЭЭРXЭ[ЫњПY[[Y[ќ
+	Щ]‰КNЬЭРXЭ[ЫњЛЫ\ЬУ[YOIШXЭ[ЫњЙОЬЭЬФЩXЭ[Ы‹\[™
+ЭРXЭ[ЫњКNВ€ЫЫњЭXШЩ\ЬФЩXЭ[ЫЏY[[Y[ќ
+	Щ]‰КNШXШЩ\ЬФЩXЭ[Ы‹Ы\ЬУ[YOIЩ]™[ќ\ЩXЭ[Ы‰ОШXШЩ\ЬФЩXЭ[Ы‹\[™
+[[Y[ќ
+	ЪЙЛ	ФT‹PЫЩH	€рйЭ^ќYШ[™ЙКJNШШ\™\[™
+XШЩ\ЬФЩXЭ[ЫЉNШЫЫњЭXШЩ\ЬРXЭ[ЫњПY[[Y[ќ
+	Щ]‰КNШXШЩ\ЬРXЭ[ЫњЛЫ\ЬУ[YOIШXЭ[ЫњЙОШXШЩ\ЬФЩXЭ[Ы‹\[™
+XШЩ\ЬРXЭ[ЫњКNВ€ЫЫњЭЩ][™ЬПY[[Y[ќ
+	Щ]Z[ЙКNЬЩ][™ЬЛЫ\ЬУ[YOIЩ]™[ќ\ЩXЭ[Ы€]™[ќ\Щ][™ЬЙОЬЩ][™ЬЛ›Ь[Џ]ќYNЬЩ][™ЬЛ\[™
+[[Y[ќ
+	ЬЭ[[X\ћIЛ	СZ[њЭ[[™Щ[€	€њ™ZYШX™IКJNШШ\™\[™
+Щ][™ЬКNШЫЫњЭЩ][™ЬРXЭ[ЫњПY[[Y[ќ
+	Щ]‰КNЬЩ][™ЬРXЭ[ЫњЛЫ\ЬУ[YOIШXЭ[ЫњЙОЬЩ][™ЬЛ\[™
+[[Y[ќ
+	Ь	Л]™[ќњ™XYЫ›OЙСYH\ШY™Z]\Э™Y[™]€рйЭHрн››™[€YH›Ьљ[™[™[€›ЭЬИ›ШЪљ\Иќ[H[™H\€ЭЫ›ШY\ЩH[њЩZ[‹‰О™]™[ќ›[Щ\][ЫЏЙУ™]YH›ЭЬИШ\ќ[€]Y€Z[™Hњ™ZYШX™K‰О‰СрйЭHЩZ[€]Y€Z™[HЩ\°йќ\€Z™HZYЩ[™[€\ШYЛ‰КKЩ][™ЬРXЭ[ЫњКNЪYЉ]™[ќ™]™[ќЩ]I‰™]™[ќњЭ\ќР]‘]K››ЭК
+J^ШЫЫњЭ]SX™[Y[[Y[ќ
+	ЫX™[	Л	Х™\[њЭ[[™ЬЩ][H0й™\›‰КNШЫЫњЭ]QљY[Y[[Y[ќ
+	Ъ[њ]	КNЩ]QљY[ќ\OIЩ]IОЩ]QљY[ќ[YOY]™[ќ™]™[ќЩ]NЩ]QљY[›Z[Џ[™]И[ќ‘]U[YQ›Ь›X]
+	Щ[‹PРIЛЭ[YV›Ы™N‰С]\›ЬKР™\›[‰ЯJK™›Ь›X]
+™]И]J
+JNЩ]SX™[\[™
+]QљY[
+NЬЩ][™ЬРXЭ[ЫњЛ\[™
+]SX™[
+NШќ]ЫЉЩ][™ЬРXЭ[ЫњЛ	С][HЬZXЪ\›‰Л\Ю[К
+OOћШ]ШZ]\JШ\KЩ]™[ќЙЩ]™[ќљYX	ФUТ	ЛЩ]™[ќ]N™]QљY[ќ[Y_JNЫY\ЬШYЩKќ^ЫЫќ[ќIХ™\[њЭ[[™ЬЩ][HЩ\ЬZXЪ\ќ€\€[ќ[^™Z]][HЭ\™H[™Щ\\ЬЭ‰ОШ]ШZ]ШY
+
+NЯJNЯB€[™[Лњ\Ъ
+ЭЬФЩXЭ[Ы‹XШЩ\ЬФЩXЭ[Ы‹Щ][™ЬКNВ€ЙС›ЭЬЙЛ	СрйЭ^ќYШ[™ЙЛ	СZ[њЭ[[™Щ[‰ЧK™›Ь‘XXЪ
+
+X™[JOOќ]ЫЉXњЛX™[
+
+OOњЪЭФ[™[
+JJJNВ€ќ]ЫЉXШЩ\ЬРXЭ[ЫњЛ	СрйЭ[[љИЫЬY\™[‰Л\Ю[К
+OOћЭћ^Ш]ШZ]]љYШ]Ь‹Ы\›Ш\™ќЬљ]U^
+]™[ќ™ЭY\Э\›
+NЫY\ЬШYЩKќ^ЫЫќ[ќIСрйЭ[[љИЫЬY\ќ‰ОЯXШ]ЪШЫЫњЭ[њ]Y[[Y[ќ
+	Ъ[њ]	КNЪ[њ]ќ[YOY]™[ќ™ЭY\Э\›Ъ[њ]њ™XYЫ›O]ќYNШXШЩ\ЬФЩXЭ[Ы‹\[™
+[њ]
+NЪ[њ]њЩ[XЭ
+
+NЫY\ЬШYЩKќ^ЫЫќ[ќIРљ]H[€X\љЪY\ќ[€рйЭ[[љИЫЬY\™[‹‰ОЯ_JNВ€[љКXШЩ\ЬРXЭ[ЫњЛ	СрйЭX[њЪXЪ0н™™›™[‰Л]™[ќ™ЭY\Э\›
+NВ€[љКЭРXЭ[ЫњЛ	СШ[\љYH0н™™›™[‰Л]™[ќ™ЭY\Э\›њ™\XЩJ	ПЙЛ	ЛЩШ[\ћOЙКJNВ€[љКЭРXЭ[ЫњЛ	У]™KQX\ЪЭЙЛ]™[ќ™ЭY\Э\›њ™\XЩJ	ПЙЛ	ЛЬЫY\ЪЭПЙКJNВ€[љКЭРXЭ[ЫњЛ	С›ЭШ]Y™ШX™[‰Л]™[ќ™ЭY\Э\›њ™\XЩJ	ПЙЛ	ЛЩШ[Y\ПЙКJNВ€[љКЭРXЭ[ЫњЛ	СрйЭXќXЪ[њЩZ[‰Л]™[ќ™ЭY\Э\›њ™\XЩJ	ПЙЛ	ЛЩЭY\Э›ЫЪПЙКJNВ€[љКXШЩ\ЬРXЭ[ЫњЛ	СрйЭXќXЪ™\ќШ[[‰ЛЩ]™[ќЙЩ[ЫЩUT’PЫЫ\Ы™[ќ
+]™[ќљY
+_KЩЭY\Э›ЫЪШ
+NВ€[љКЭРXЭ[ЫњЛ	С\ЪYЫ‹QY]Ь€	€T‹QќXЪЙЛЩ]™[ќЙЩ[ЫЩUT’PЫЫ\Ы™[ќ
+]™[ќљY
+_KЩ\ЪYЫ
+NВ€[љКXШЩ\ЬРXЭ[ЫњЛ	ФT‹PЫЩH\ќ[ќ\›Y[‰ЛШ\KЩ]™[ќЙЩ]™[ќљYKЬ\
+NВ€ќ]ЫЉXШЩ\ЬРXЭ[ЫњЛ	ФT‹RШ\ќHќXЪЩ[‰Л\Ю[К
+OOћВ€ЫЫњЭ›ШЏX]ШZ]
+]ШZ]™]Ъ
+Ш\KЩ]™[ќЙЩ]™[ќљYKЬ\
+JK›ШЉ
+NВ€ЫЫњЭ\›UT“Ь™X]SШљ™XЭT“
+›ШЉKњ[YOYШЭ[Y[ќЬ™X]Q[[Y[ќ
+	ЪYњ[YIКNЩњ[YKљY[Џ]ќYNЩШЭ[Y[ќ›ЩK\[™
+њ[YJNВ€ЫЫњЭШПYњ[YKЫЫќ[ќШЭ[Y[ќЩШЛ›ЩK\[™
+[[Y[ќ
+	ЪIЛ]™[ќќ]JK[[Y[ќ
+	Ь	Л	С›ЭЬИZ[[Ћ€T‹PЫЩHШШ[›™[‹‰КJNВ€ЫЫњЭ[YПYШЛЬ™X]Q[[Y[ќ
+	Ъ[YЙКNЪ[YЛќЪYLНLЪ[YЛ›Ы›ШYJ
+OOћЩњ[YKЫЫќ[ќЪ[™ЭЛ™›ШЭ\К
+NЩњ[YKЫЫќ[ќЪ[™ЭЛњљ[ќ
+
+NЬЩ][Y[Э]
+
+
+OOћЩњ[YKњ™[[Э™J
+NХT“њ™]›ЪЩSШљ™XЭT“
+\›
+NЯKЊ
+NЯNЪ[YЛњЬП]\›ЩШЛ›ЩK\[™
+[YКNВ€JNВ€[љКЭРXЭ[ЫњЛ	Р[H›ЭЬИ\ќ[ќ\›Y[‰ЛШ\KЩ]™[ќЙЩ]™[ќљYKЩЭЫ›ШY
+NВ€ќ]ЫЉЭРXЭ[ЫњЛ	С›ЭЬИ™\ќШ[[‰Л
+
+OO›X[YЩJ]™[ќ
+JKЫ\ЬУ[YOIЬљ[X\ћIОВ€ќ]ЫЉЩ][™ЬРXЭ[ЫњЛ]™[ќ›[Щ\][ЫЏЙР]]ЫX]\ШЪHњ™ZYШX™HZЭ]љY\™[‰О‰УX[ќY[Hњ™ZYШX™HZЭ]љY\™[‰Л\Ю[К
+OOћШ]ШZ]\JШ\KЩ]™[ќЙЩ]™[ќљYX	ФUТ	ЛЫ[Щ\][ЫЋ€Y]™[ќ›[Щ\][ЫџJNШ]ШZ]ШY
+
+NЯJNВ€ќ]ЫЉЩ][™ЬРXЭ[ЫњЛ]™[ќ™ЭY\Э›ЫЪЧЫ[Щ\][ЫЏЙСрйЭXќXЪ€њ™ZYШX™H]\ЬШЪ[[‰О‰СрйЭXќXЪ€њ™ZYШX™HZ[њШЪ[[‰Л\Ю[К
+OOћШ]ШZ]\JШ\KЩ]™[ќЙЩ]™[ќљYX	ФUТ	ЛЩЭY\Э›ЫЪУ[Щ\][ЫЋ€Y]™[ќ™ЭY\Э›ЫЪЧЫ[Щ\][ЫџJNШ]ШZ]ШY
+
+NЯJNВ€ќ]ЫЉЩ][™ЬРXЭ[ЫњЛ	СрйЭ[[љИ\›™]Y\›‰Л\Ю[К
+OOћЪYЉЫЫ™љ\›J	Р[H[љЬИ[™T‹PЫЩ\ИЩ\™[€Y\Ъ[™рпYЛ€›ЬќZ™[ЏЙКJ^Ш]ШZ]\JШ\KЩ]™[ќЙЩ]™[ќљYKЬ›Э]K]ЪЩ[	ФФХ	КNШ]ШZ]ШY
+
+NЯ_JNВ€B€ЫЫњЭ[™Щ\ЏY[[Y[ќ
+	Щ]Z[ЙКNЩ[™Щ\‹Ы\ЬУ[YOIЩ]™[ќ\ЩXЭ[Ы€]™[ќ\Щ][™ЬЙОЩ[™Щ\‹\[™
+[[Y[ќ
+	ЬЭ[[X\ћIЛ	Х™\[њЭ[[™И0нњШЪ[‰КJNШШ\™\[™
+[™Щ\ЉNВ€ќ]ЫЉ[™Щ\‹	С]™[ќ[™›ЭЬИ0нњШЪ[‰Л\Ю[К
+OOћЪYЉЫЫ™љ\›J	С]™[ќ[™[H›ЭЬИ[™рпYИ0нњШЪ[ЏЙКJ^Ш]ШZ]\JШ\KЩ]™[ќЙЩ]™[ќљYX	СSUIКNЩШЭ[Y[ќ™Щ][[Y[ќћRY
+	ЬЭЛ[X[YЩ\‰КKљY[Џ]ќYNШ]ШZ]ШY
+
+NЯ_JKЫ\ЬУ[YOIЩ[™Щ\‰ОВ€ЩXЭ[Ы‹\[™
+Ш\™
+NВ€YЉXЭ]™Q]™[ќ
+^ШШ\™љY[ЏY]™[ќљYOOXXЭ]™Q]™[ќЫЬ[‹љY[Џ]ќYNЪYЉ]™[ќљYOOXXЭ]™Q]™[ќ
+^ЭXњЛљY[ЏY[ЩNЪYЉ]™[ќ™ЭY\Э\›
+X]ШZ]ЪЭФ[™[
+
+NЩ[ЩHШЭ[Y[ќ™Щ][[Y[ќћRY
+	ЬЭЛ[X[YЩ\‰КKљY[Џ]ќYNЯ_Y[Щ^ЭXњЛљY[Џ]ќYNЬ[™[Л™›Ь‘XXЪ
+[™[Oњ[™[љY[Џ]ќYJNЩ[™Щ\‹љY[Џ]ќYNЯB‚€B€B€ШЭ[Y[ќ™Щ][[Y[ќћRY
+	ШЫЬЩK[X[YЩ\‰КK›ЫЫXЪПJ
+OOћШXЭ]™Q]™[ќ[ќ[Ъ\ЭЬћKњ™\XЩTЭ]Jќ[	ЙЛ	ЛЩ\Ъ›Ш\™	КNЩШЭ[Y[ќ™Щ][[Y[ќћRY
+	ЬЭЛ[X[YЩ\‰КKљY[Џ]ќYNЫШY
+
+KШ]Ъ
+™\Ьќ
+NЯNВ€XЭ]™Q]™[ќ[™]ИT“ЩX\Ъ\[\КШШ][Ы‹њЩX\Ъ
+K™Щ]
+	Щ]™[ќ	КNВ€ШЭ[Y[ќ™Щ][[Y[ќћRY
+	ЫЩЫЭ]	КK›ЫЫXЪПJ
+OO\J	ЛШ\KШ]]ЫЩЫЭ]	Л	ФФХ	КKќ[Љ
+
+OO›ШШ][Ы‹љ™YЏIЛЫЩЪ[‰КKШ]Ъ
+™\Ьќ
+NВ€ЫЫњЭ[]PXШЫЭ[ќ›Ь›OYШЭ[Y[ќ™Щ][[Y[ќћRY
+	Щ[]KXXШЫЭ[ќY›Ь›IКNВ€[]PXШЫЭ[ќ›Ь›K›ЫњЭX›Z]X\Ю[ИOOћВ€Kњ™]™[ќY][
+
+NВ€YЉШЭ[Y[ќ™Щ][[Y[ќћRY
+	Щ[]KXXШЫЭ[ќXЫЫ™љ\›IКKќ[YHOOIТУУ•И0е”РТS‰К^Ь™\Ьќ
+™]И\њ›ЬЉ	Рљ]H8 '’УУ•И0е”РТSё 'Щ[]HЫИZ[™ЩX™[‹‰КJNЬ™]\›ЋЯB€ЫЫњЭЭX›Z]Y[]PXШЫЭ[ќ›Ь›Kњ]Y\ћTЩ[XЭЬЉ	Шќ]Ы‰КNЬЭX›Z]™\ШX›Y]ќYNВ€ћ^Ш]ШZ]\J	ЛШ\KШ]]ШXШЫЭ[ќ	Л	СSUIЛЬ\ЬЭЫЬ™™ШЭ[Y[ќ™Щ][[Y[ќћRY
+	Щ[]KXXШЫЭ[ќ\\ЬЭЫЬ™	КKќ[YKЫЫ™љ\›N‰ТУУ•И0е”РТS‰ЯJNЫШШ][Ы‹љ™YЏIЛЫЩЪ[ЏЩ[]YLIОЯB€Ш]Ъ
+\њЉ^Ь™\Ьќ
+\њЉNЬЭX›Z]™\ШX›YY[ЩNЯB€NВ€ЫЫњЭ]™[ќY[њ]YШЭ[Y[ќ™Щ][[Y[ќћRY
+	Щ]™[ќZY	КNВ€ЫЫњЭ›Ь›X[^™Q]™[ќY][YOOќ[YKќљ[J
+KќУЭЩ\ђШ\ЩJ
+Kњ™\XЩJрйЩЛ	ШYIКKњ™\XЩJрн‹ЩЛ	ЫЩIКKњ™\XЩJрпЩЛ	ЭYIКKњ™\XЩJрзЛЩЛ	ЬЬЙКK››Ь›X[^™J	У‘’С	КKњ™\XЩJЦЧLМWLН™—KЩЛ	ЙКKњ™\XЩJЦЧK^ЊNWЛWJЛЩЛ	ЛIКKњ™\XЩJЧ–ЛWЧJЯЛWЧJЙЩЛ	ЙКNВ€]™[ќY[њ]Y]™[ќ\Э[™\Љ	Ш›\‰Л
+
+OOћЩ]™[ќY[њ]ќ[YO[›Ь›X[^™Q]™[ќY
+]™[ќY[њ]ќ[YJNЯJNВ€ЫЫњЭ]™[ќ]R[њ]YШЭ[Y[ќ™Щ][[Y[ќћRY
+	Щ]™[ќY]IКNВ€ЫЫњЭ[Y[[™T™]љY]ПYШЭ[Y[ќ™Щ][[Y[ќћRY
+	Щ]™[ќ][Y[[™K\™]љY]ЙКNВ€ЫЫњЭЪYќ]OJ[YK[ЫќПL^\ПL
+OOћВ€ЫЫњЭЮYX\‹[Ыќ^WO][YKњЬ]
+	ЛIКK›X\
+ќ[X™\ЉNВ€ЫЫњЭ[ЫќЭ\ќ[™]И]J]K•UКYX\‹[ЫќLJЫ[ЫќЛJJNВ€ЫЫњЭ\Э^O[™]И]J]K•UК[ЫќЭ\ќ™Щ]UСќ[YX\Љ
+K[ЫќЭ\ќ™Щ]UУ[Ыќ
+
+JМK
+JK™Щ]UС]J
+NВ€ЫЫњЭЪYќY[™]И]J]K•UК[ЫќЭ\ќ™Щ]UСќ[YX\Љ
+K[ЫќЭ\ќ™Щ]UУ[Ыќ
+
+KX]›Z[Љ^K\Э^JJЩ^\КJNВ€™]\›€ЪYќYќТTУФЭљ[™К
+KњЫXЩJL
+NВ€NВ€ЫЫњЭ\Ь^Q]O][YOO›™]И[ќ‘]U[YQ›Ь›X]
+	ЩKQIЛЩ]TЭ[N‰ЫЫ™ЙЛ[YV›Ы™N‰ХUЙЯJK™›Ь›X]
+™]И]J	Э[Y_ULЋЊЊ
+JNВ€ЫЫњЭ\]U[Y[[™T™]љY]ПJ
+OOћВ€YЉ][Y[[™T™]љY]К\™]\›ЋВ€[Y[[™T™]љY]Лњ™\XЩPЪ[™[Љ[[Y[ќ
+	ЬЭ›Ы™ЙЛ	ФЫИ0йYќZ[€[ќ[IКJNВ€YЉY]™[ќ]R[њ]ќ[YJ^Э[Y[[™T™]љY]Л\[™
+[[Y[ќ
+	Ь	Л	ХрйHZ[€™\[њЭ[[™ЬЩ][K[H[€™Z][€ќHЩZ[‹‰КJNЬ™]\›ЋЯB€ЫЫњЭЭ\ќY]™[ќ]R[њ]ќ[YK[™\ЪYќ]JЭ\ќL
+K\ЭY[[Y[ќ
+	Э[	КNВ€\Э\[™
+[[Y[ќ
+	ЫIЛ›Ь€\€™ZY\Ћ€љ\ИќHЌHЫЬЭ[›ЬЩH\Э›ЭЬЛ
+JNВ€\Э\[™
+[[Y[ќ
+	ЫIЛX€	Щ\Ь^Q]JЭ\ќ
+_N€\€™\[њЭ[[™ЬЮ™Z]][H™YЪ[›ќИ™ZHќXЪ[™ИЪ[\И›ЫЭ0й™YЩHЬZXЪ\њZЩ]
+JNВ€\Э\[™
+[[Y[ќ
+	ЫIЛљ\И	Щ\Ь^Q]J[™
+_N€›ЭЬИШЪY[‹[њЩZ[€[™\ќ[ќ\›Y[€8 $ИLYЩHX€™\[њЭ[[™ЬЩ][K
+JNВ€\Э\[™
+[[Y[ќ
+	ЫIЛ[H	Щ\Ь^Q]J[™
+_HЩ\™[€YH›ЭЬИ]]ЫX]\ШЪЩ[0нњШЪ€љ]H›Ьљ\€\ќ[ќ\›Y[‹
+JNВ€[Y[[™T™]љY]Л\[™
+\Э
+NВ€NВ€]™[ќ]R[њ]Y]™[ќ\Э[™\Љ	Ъ[њ]	Л\]U[Y[[™T™]љY]КNВ€]™[ќ]R[њ]Y]™[ќ\Э[™\Љ	ШЪ[™ЩIЛ\]U[Y[[™T™]љY]КNВ€\]U[Y[[™T™]љY]К
+NВ€ШЭ[Y[ќ™Щ][[Y[ќћRY
+	Щ]™[ќY›Ь›IКK›ЫњЭX›Z]X\Ю[ИOOћВ€Kњ™]™[ќY][
+
+NЩ]™[ќY[њ]ќ[YO[›Ь›X[^™Q]™[ќY
+]™[ќY[њ]ќ[YJNЪYЉKЧ–ШK^ЊNWVШK^ЊNWЛW^М‹ЊЯIЛќ\Э
+]™[ќY[њ]ќ[YJJ^ЫY\ЬШYЩKќ^ЫЫќ[ќIРљ]HZ[™[€Э\ћ›[Y[€Z]Z[™\Э[њИИќXЪЭX™[€Щ\€Z[€Z[™ЩX™[‹‰ОЫY\ЬШYЩKњШЬ›Ы[ќХљY]КШ›ШЪО‰ШЩ[ќ\‰ЯJNЩ]™[ќY[њ]™›ШЭ\К
+NЬ™]\›ЋЯ]ћ^ШЫЫњЭЬ™X]YX]ШZ]\J	ЛШ\KЩ]™[ќЙЛ	ФФХ	ЛЭ]N™ШЭ[Y[ќ™Щ][[Y[ќћRY
+	Э]IКKќ[YK]™[ќY™ШЭ[Y[ќ™Щ][[Y[ќћRY
+	Щ]™[ќZY	КKќ[YK[Ћ‰Щ]™[ќ	Л]™[ќ]N™ШЭ[Y[ќ™Щ][[Y[ќћRY
+	Щ]™[ќY]IКKќ[YK[Щ\][ЫЋ™ШЭ[Y[ќ™Щ][[Y[ќћRY
+	Ы[Щ\][Ы‰КKЪXЪЩYЭY\Э›ЫЪУ[Щ\][ЫЋ™ШЭ[Y[ќ™Щ][[Y[ќћRY
+	ЩЭY\Э›ЫЪЛ[[Щ\][Ы‰КKЪXЪЩYJNШXЭ]™Q]™[ќXЬ™X]Y™]™[ќYЪ\ЭЬћKњ™\XЩTЭ]Jќ[	ЙЛЩ\Ъ›Ш\™Щ]™[ќIЩ[ЫЩUT’PЫЫ\Ы™[ќ
+XЭ]™Q]™[ќ
+_X
+NЫY\ЬШYЩKќ^ЫЫќ[ќIХ™\[њЭ[[™И\њЭ[€HШ[›њЭ™]ќЫЬЭ[›ЬИZ]љ\ИќHЌH›ЭЬИ\Э[‹‰ОЩKќ\™Щ]њ™\Щ]
+
+NЩШЭ[Y[ќ™Щ][[Y[ќћRY
+	ЩЭY\Э›ЫЪЛ[[Щ\][Ы‰КKЪXЪЩY]ќYNШ]ШZ]ШY
+
+NЫY\ЬШYЩKњШЬ›Ы[ќХљY]КШ›ШЪО‰ШЩ[ќ\‰Л™Z]љ[ЬЋ‰ЬЫ[ЫЭ	ЯJNЯXШ]Ъ
+\њЉ^Ь™\Ьќ
+\њЉNЫY\ЬШYЩKњШЬ›Ы[ќХљY]КШ›ШЪО‰ШЩ[ќ\‰Л™Z]љ[ЬЋ‰ЬЫ[ЫЭ	ЯJNЯB€NВ€
+\Ю[К
+OOћВ€ћ^ШЫЫњЭXШЫЭ[ќX]ШZ]\J	ЛШ\KШ]]ЫYIКNЪYЉXШЫЭ[ќ™[XZ[[]™\ћP]Z[X›I‰€XXШЫЭ[ќ™[XZ[™\љYљYY
+^ШЫЫњЭ›ЭXЩOY[[Y[ќ
+	Щ]‰КNЫ›ЭXЩKЫ\ЬУ[YOIЭ\Э[›ЭXЩIОЫ›ЭXЩK\[™
+[[Y[ќ
+	Ь	Л	Рљ]H™\Э0йYЩHZ[™HKSXZ[PY™\ЬЩH0п™\€[€[љИ[€Z[™\€XZ[‰КJNШќ]ЫЉ›ЭXЩK	Р™\Э0йYЭ[™ЬЫXZ[\›™]]Щ[™[‰Л\Ю[К
+OOћШ]ШZ]\J	ЛШ\KШ]]Ь™\]Y\Э]™\љYљXШ][Ы‰Л	ФФХ	КNЫY\ЬШYЩKќ^ЫЫќ[ќIР™\Э0йYЭ[™ЬЫXZ[[™ЩY›Ь™\ќ€љ]H]XЪ[HЬ[[Ь™™\€XЪЩZ[‹‰ОЯJNЩШЭ[Y[ќ™Щ][[Y[ќћRY
+	Щ]™[ќЙКK™Y›Ь™J›ЭXЩJNЯXЫЫњЭЭЬYЩOX]ШZ]\J	ЛШ\KЬЭЬYЩIКNЪYЉЭЬYЩKќШ\›љ[™К[Y\ЬШYЩKќ^ЫЫќ[ќ\ЭЬYЩKќ\ШYФ]\ЩYЙХ\ШYИЪ[™ЩYЩ[€\ИЫ\[€[\Ь°й™[€ЬZXЪ\њИ›Ь°п™\™ЩZ[™]\ЪY\ќ€љ]H[€Z[љYЩ[€Z[ќ][€\›™]]™\њЭXЪ[‹‰О‰С\€ЬZXЪ\€Ъ\™Ы\€љ]H›Ь€ЩZ]\™[€\ШYИЬZXЪ\™[YЭ[™И°п™[‹‰ОШЫЫњЭЭХ\ЩY\ЭЬYЩKќ\ЩYћ]\ППЬЭЬYЩKќЭ[ћ]\Л\ЭЬYЩK™њ™YPћ]\ОШЫЫњЭЭУX™[\ЭЬYЩK›ШШ][ЫЏOOIЫШљ™XЭ\ЭЬYЩIПЙТ]›™\‹Q›ЭЬЬZXЪ\‰О‰С›ЭЬЬZXЪ\€]Y€\€\Q\ЪЙОШЫЫњЭ\ЪУ›ЭOY[[Y[ќ
+	Ь	Л	ЬЭУX™[N€	КЭХ\ЩYМLЌ
+ЉЊКKќСљ^Y
+Љ_HР€›Ы€	КЭЬYЩKќЭ[ћ]\ЛМLЌ
+ЉЊКKќСљ^Y
+J_HР€™[YЭ€[\Ь°й™\€™[™\‹U\ШYY™™\Ћ€	КЭЬYЩKќ\ШY\ЪЛ™њ™YPћ]\ЛМLЌ
+ЉЊКKќСљ^Y
+Љ_HР€њ™ZNИ™ZHЩ[љYЩ\€[И	КЭЬYЩKќ\ШY\ЪЛ›Z[љ[][Qњ™YPћ]\ЛМLЌ
+ЉЊКKќСљ^Y
+
+_HР€]\ЪY\ќљ[[Ы\™]YH\ШYЛ
+NЩ\ЪУ›ЭKЫ\ЬУ[YOIЬЫX[	ОЩШЭ[Y[ќ™Щ][[Y[ќћRY
+	Щ]™[ќЙКK™Y›Ь™J\ЪУ›ЭJNШЫЫњЭ[њПX]ШZ]\J	ЛШ\KЬ[њЙКNШ]Z[X›T[њП\[њОШЫЫњЭ]R[њ]YШЭ[Y[ќ™Щ][[Y[ќћRY
+	Щ]™[ќY]IКNШЫЫњЭЩ^O[™]И[ќ‘]U[YQ›Ь›X]
+	Щ[‹PРIЛЭ[YV›Ы™N‰С]\›ЬKР™\›[‰ЯJK™›Ь›X]
+™]И]J
+JNЩ]R[њ]›Z[Џ]Щ^NШЫЫњЭX^]O[™]И]J	ЭЩ^_ULЋЊЊ
+NЫX^]KњЩ]UУ[Ыќ
+X^]K™Щ]UУ[Ыќ
+
+JМЌ
+NЩ]R[њ]›X^[X^]KќТTУФЭљ[™К
+KњЫXЩJL
+NЪYЉ™]ИT“ЩX\Ъ\[\КШШ][Ы‹њЩX\Ъ
+K™Щ]
+	Ь[‰КOOOIЩ]™[ќ	КYШЭ[Y[ќњ]Y\ћTЩ[XЭЬЉ	ЛЬ™X]K\[™[	КK›Ь[Џ]ќYNШ]ШZ]ШY
+
+NЯXШ]Ъ
+\њЉ^Ь™\Ьќ
+\њЉNЯB€JJ
+NВџJJ
+NВ
