@@ -2,6 +2,8 @@
 
 Stand: 4. November 2026. Der deutsche Dienst ist live; Stripe bleibt im Testmodus. Dieser Plan ist keine rechtliche Freigabe.
 
+Die konkreten Kontoschritte für Stripe Tax, Hetzner-Backups und die kontrollierte Testbestellung stehen in [`OWNER-SETUP-BLOCKERS.md`](OWNER-SETUP-BLOCKERS.md).
+
 ## Erledigt, mit Grenzen
 - [x] Registrierung, Anmeldung und Veranstalterkonto.
 - [x] Brevo für Bestätigungsmails und Passwort-Zurücksetzen angebunden; vom Betreiber im echten Postfach getestet.
