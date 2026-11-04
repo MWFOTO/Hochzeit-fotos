@@ -550,6 +550,7 @@ function createApp(options = {}) {
     if(taxEnabled)priceData.product_data.tax_code=productTaxCode;
     const params={
       mode:'payment',
+      integration_identifier:`finalsnap-${Array.from(crypto.randomBytes(8),value=>String.fromCharCode(97+value%26)).join('')}`,
       locale:'de',
       submit_type:'pay',
       customer_email:e.email,

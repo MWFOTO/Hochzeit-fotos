@@ -66,6 +66,7 @@ test('Checkout retries the same album; refund decisions and dispute events are a
   const first=await request('/api/checkout',{user:admin,method:'POST',body:{termsAccepted:true,eventId:'refund-event'}});
   assert.equal(first.response.status,200);assert.equal(created,1);
   assert.equal(checkoutRequests[0].locale,'de');assert.equal(checkoutRequests[0].submit_type,'pay');
+  assert.match(checkoutRequests[0].integration_identifier,/^finalsnap-[a-z]{8}$/);
   assert.match(checkoutRequests[0].custom_text.submit.message,/49,90 € inkl\. 19 % USt\./);
   assert.match(checkoutRequests[0].custom_text.submit.message,/25 GB/);
   assert.equal(checkoutRequests[0].automatic_tax.enabled,true);assert.equal(checkoutRequests[0].billing_address_collection,'required');assert.equal(checkoutRequests[0].tax_id_collection.enabled,true);assert.equal(checkoutRequests[0].invoice_creation.enabled,true);assert.equal(checkoutRequests[0].line_items[0].price_data.tax_behavior,'inclusive');assert.equal(checkoutRequests[0].line_items[0].price_data.product_data.tax_code,'txcd_10103000');assert.equal('payment_method_types' in checkoutRequests[0],false);
