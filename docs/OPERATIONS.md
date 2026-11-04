@@ -33,7 +33,7 @@ Stand: 4. November 2026. FinalSnap ist auf Render Frankfurt live; echte Zahlunge
 
 ## Sicherungen und Wiederherstellung
 
-Vor Verkauf fehlen noch ein eingerichteter Sicherungsplan und ein erfolgreicher Wiederherstellungstest. Für die Freigabe müssen feststehen:
+Vor Verkauf fehlen noch eingerichtete Sicherungen und ein erfolgreicher Wiederherstellungstest. Der konkrete Zielentwurf steht in `docs/BACKUP-RESTORE-PLAN.md`; vorgeschlagene Aufbewahrungsfristen sind noch nicht bestätigt. Für die Freigabe müssen feststehen:
 
 1. ein konsistentes tägliches SQLite-Backup über die SQLite-Backup-Funktion, damit auch WAL-Daten berücksichtigt werden;
 2. eine Sicherung der Fotoobjekte, wenn die zugesagte Wiederherstellung auch Veranstaltungsfotos umfassen soll;

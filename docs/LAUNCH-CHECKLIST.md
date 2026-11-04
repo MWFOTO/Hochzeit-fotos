@@ -32,6 +32,7 @@ Stand: 4. November 2026. Der deutsche Dienst ist live; Stripe bleibt im Testmodu
 - [ ] 10-GB-Render-Disk und Hetzner-Speicherverbrauch in den Anbieter-Dashboards beobachten.
 - [ ] Anbieter- und Datenflüsse für Render, Hetzner, Brevo, Stripe und GitHub vollständig prüfen und dokumentieren.
 - [ ] Unabhängige Datenbank- und Fotosicherungen einrichten und Wiederherstellung testen.
+- [ ] Fristen aus `docs/BACKUP-RESTORE-PLAN.md` festlegen; Sicherungen erst nach Bestätigung der Foto-Nachlaufzeit aktivieren.
 - [ ] Vor größeren Datenbankänderungen einen konsistenten Sicherungs- und Rückweg nachweisen.
 
 ## Angebot – Arbeitsmodell, vor Verkauf noch bestätigen
@@ -52,6 +53,7 @@ Stand: 4. November 2026. Der deutsche Dienst ist live; Stripe bleibt im Testmodu
 - [ ] Auftragsverarbeitungsverträge, Unterauftragnehmer und mögliche Drittlandtransfers prüfen.
 - [ ] Datenschutzerklärung, Nutzungsbedingungen/AGB, Impressum und Verbraucher-Checkout rechtlich prüfen lassen.
 - [ ] Checkout-Vorvertragstexte, Widerrufsablauf und Leistungsbeginn passend zur konkreten Produktklassifikation festlegen.
+- [ ] `docs/LEGAL-CHECKOUT-REVIEW.md` fachkundig prüfen lassen, bevor Checkout-Texte oder Widerrufs-Checkboxen veröffentlicht werden.
 - [ ] Speicherfristen begründen; keine vermeintlich gesetzliche 3-/6-Monatsfrist behaupten.
 - [ ] Löschkonzept für Originale, Vorschaubilder, Tokens, Konten, Logs und Backups erstellen und technisch testen.
 - [ ] Externe Wiederherstellung/Backup- und Provider-Log-Aufbewahrung passend zur 90-Tage-Frist prüfen; App-Löschung allein löscht keine außerhalb der App vorhandenen Kopien.
