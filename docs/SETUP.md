@@ -269,8 +269,8 @@ Backups nach vereinbarter Frist löschen. Restore regelmäßig auf einer Kopie t
   sofort per Brevo versandt. Nicht versandte Meldungen bleiben in einer
   ausstehenden Queue und werden minütlich erneut versucht.
 
-20 MB pro Eingangsdatei, maximal 10 Dateien pro Request, maximal 40 Megapixel
-beim Dekodieren. Disk-Staging begrenzt den RAM-Verbrauch; global werden maximal
+20 MB pro Eingangs- und verarbeiteter Datei, maximal 10 Dateien pro Request,
+maximal 40 Megapixel beim Dekodieren. Disk-Staging begrenzt den RAM-Verbrauch; global werden maximal
 zwei Upload-Requests gleichzeitig zugelassen, pro Event nur einer. Bei weniger
 als 2 GiB freiem Staging-Datenträger werden neue Requests vor Empfang der Dateien
 abgewiesen. Fotoanzahl und Bytes gelten für die neu

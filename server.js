@@ -31,6 +31,7 @@ function retentionUntil(e) {
 }
 const TEST_PHOTO_LIMIT = 25;
 const TEST_STORAGE_BYTES = 250*1024**2;
+const MAX_UPLOAD_FILE_BYTES = 20*1024*1024;
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
 const random = () => crypto.randomBytes(32).toString('hex');
 const fail = (res, status, error) => res.status(status).json({error});
@@ -517,7 +518,7 @@ function createApp(options = {}) {
   }));
   // Disk staging bounds RAM usage. Re-encoding validates content and strips EXIF/GPS.
   const temp=path.join(root,'.tmp');fs.mkdirSync(temp,{recursive:true});
-  const upload=multer({dest:temp,limits:{fileSize:20*1024*1024,files:10,fields:0,parts:10}}).array('photos',10);
+  const upload=multer({dest:temp,limits:{fileSize:MAX_UPLOAD_FILE_BYTES,files:10,fields:0,parts:10}}).array('photos',10);
   const designCoverUpload=multer({dest:temp,limits:{fileSize:8*1024*1024,files:1,fields:0,parts:1}}).single('cover');
   app.get('/api/event/:eventId/design-cover',access,wrap(async(req,res)=>{
     const filename=readDesign(req.event).coverFilename;
@@ -584,7 +585,7 @@ function createApp(options = {}) {
           const id=crypto.randomUUID(), filename=`${id}.jpg`, dest=path.join(dir,filename);
           written.push({id,filename,dest});
           await image.rotate().resize({width:2560,height:2560,fit:'inside',withoutEnlargement:true}).jpeg({quality:82,mozjpeg:true}).toFile(dest);
-          const size=fs.statSync(dest).size;bytes+=size;written[written.length-1].bytes=size;
+          const size=fs.statSync(dest).size;if(size>MAX_UPLOAD_FILE_BYTES)throw new Error('Dieses Foto ist nach der Verarbeitung zu groß. Bitte eine kleinere Datei hochladen.');bytes+=size;written[written.length-1].bytes=size;
           if(bytes>storageLimit) throw new Error('Der Fotospeicher dieses Albums ist ausgeschöpft. Bitte den Veranstalter informieren.');
         }
         if(photoStorage.mode==='s3') {
@@ -823,4 +824,3 @@ if(require.main===module) {
   process.once('SIGTERM',()=>shutdown('SIGTERM'));
   process.once('SIGINT',()=>shutdown('SIGINT'));
 }
-module.exports={createApp,eventDeadline,retentionUntil};
