@@ -13,6 +13,7 @@ const path = require('node:path');
 const { openDatabase } = require('./db');
 const { createPhotoStorage } = require('./photo-storage');
 const { createBackupService } = require('./backup-service');
+const { createOperationsMonitor } = require('./operations-monitor');
 const scrypt = promisify(crypto.scrypt);
 const PLANS = { event:{label:'FinalSnap Fotoalbum',months:3,retentionDays:90,priceCents:4990}, '1m':{label:'1 Monat (alt)',months:1,priceCents:1900,legacy:true}, '3m':{label:'3 Monate (alt)',months:3,priceCents:2900,legacy:true}, '6m':{label:'6 Monate (alt)',months:6,priceCents:3900,legacy:true}, '12m':{label:'12 Monate (alt)',months:12,priceCents:5900,legacy:true} };
 const RETENTION_MS = 90*86400000;
@@ -88,6 +89,7 @@ function createApp(options = {}) {
   if (!Number.isSafeInteger(storageLimit) || storageLimit <= 100 * 1024 ** 2) throw new Error('S3_MAX_STORAGE_BYTES muss größer als 100 MiB sein.');
   const db = openDatabase(cfg.DB_PATH || path.join(__dirname,'events.db'));
   const backupService=createBackupService({config:cfg,db,mailer});
+  const operationsMonitor=createOperationsMonitor({config:cfg,db,mailer});
   // Unpaid draft events from the earlier one-trial-per-account flow can now
   // use the same free 25-photo test as newly created events.
   db.prepare("UPDATE events SET status='trial', trial_used=1 WHERE status='pending' AND owner_id IS NOT NULL AND deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM payments WHERE payments.event_id=events.id)").run();
@@ -772,12 +774,13 @@ function createApp(options = {}) {
   });
   app.use((req,res)=>fail(res,404,'Nicht gefunden.'));
   app.use((err,req,res,next)=>{console.error(err.message);if(!res.headersSent) fail(res,500,'Interner Fehler.');});
-  app.locals.db=db;app.locals.cleanup=cleanup;app.locals.fulfill=fulfill;app.locals.flushPaymentAlerts=flushPaymentAlerts;app.locals.photoStorage=photoStorage;app.locals.backupService=backupService;
+  app.locals.db=db;app.locals.cleanup=cleanup;app.locals.fulfill=fulfill;app.locals.flushPaymentAlerts=flushPaymentAlerts;app.locals.photoStorage=photoStorage;app.locals.backupService=backupService;app.locals.operationsMonitor=operationsMonitor;
   return app;
 }
 if(require.main===module) {
   const app=createApp();
   app.locals.backupService.start();
+  app.locals.operationsMonitor.start();
   Promise.resolve(app.locals.cleanup()).catch(err=>console.error('Löschung fehlgeschlagen:',err.message));
   const disk=fs.statfsSync(path.resolve(process.env.UPLOAD_DIR || path.join(__dirname,'uploads')));
   console.info(app.locals.photoStorage.mode==='s3'?'Temporärer Upload-Speicher verfügbar (MiB):':'Fotospeicher verfügbar (MiB):',Math.floor(Number(disk.bavail)*Number(disk.bsize)/1024**2));
@@ -791,6 +794,7 @@ if(require.main===module) {
     console.info(`${signal}: Beende laufende Anfragen.`);
     clearInterval(cleanupTimer);
     app.locals.backupService.stop();
+    app.locals.operationsMonitor.stop();
     const timeout=setTimeout(()=>{
       console.error('Geordnetes Herunterfahren dauerte zu lange; offene Verbindungen werden geschlossen.');
       server.closeAllConnections?.();

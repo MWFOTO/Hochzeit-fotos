@@ -49,6 +49,9 @@ function openDatabase(filename) {
       event_id TEXT NOT NULL, filename TEXT NOT NULL, created_at INTEGER NOT NULL,
       attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT,
       PRIMARY KEY(event_id,filename));
+    CREATE TABLE IF NOT EXISTS operational_alerts (
+      alert_key TEXT PRIMARY KEY, active INTEGER NOT NULL DEFAULT 0,
+      last_sent_at INTEGER, last_value INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE IF NOT EXISTS webhook_receipts (id TEXT PRIMARY KEY, created_at INTEGER NOT NULL);`);
   const paymentColumns=new Set(db.prepare('PRAGMA table_info(payments)').all().map(x=>x.name));
   if(!paymentColumns.has('stripe_payment_intent_id'))db.exec('ALTER TABLE payments ADD COLUMN stripe_payment_intent_id TEXT');

@@ -19,7 +19,9 @@ Stand: 4. November 2026. FinalSnap ist auf Render Frankfurt live; echte Zahlunge
 
 - `GET /health` ist der schnelle Liveness-Endpunkt für den Prozess.
 - `GET /ready` prüft SQLite, mindestens 100 MiB freien Upload-Speicher und den konfigurierten Fotospeicher. Bei einem Fehler antwortet die App mit HTTP 503, ohne interne Details öffentlich auszugeben.
-- Vor Annahme echter Zahlungen einen externen Erreichbarkeitsmonitor für `/health` und `/ready` mit Alarmkontakt einrichten. Diese Überwachung ist derzeit nicht konfiguriert.
+- Die App prüft alle 15 Minuten den Render-Datenträger und den aus der Fototabelle summierten Hetzner-Speicher. Sie meldet knappen Datenträgerplatz sowie 75-%- und 90-%-Schwellen an `PAYMENT_ALERT_EMAIL` und meldet Erholung. Je Alarm wird höchstens einmal in 24 Stunden erneut benachrichtigt.
+- Der Hetzner-Wert ist eine App-Schätzung aus aktiven Fotometadaten. Er umfasst keine verwaisten Objekte oder Anbieter-Abrechnung. Hetzner-Kostenwarnungen müssen zusätzlich im Hetzner-Konto eingerichtet werden.
+- Vor Annahme echter Zahlungen einen unabhängigen Erreichbarkeitsmonitor für `/health` und `/ready` mit Alarmkontakt einrichten. Diese externe Überwachung ist derzeit nicht konfiguriert.
 - Bei wiederholtem Fehler zuerst Providerstatus und Runtime-Logs ansehen, dann Datenbank, Upload-Datenträger und Object Storage prüfen. Nicht durch mehrfaches Neustarten versuchen, einen Speicher- oder Datenbankfehler zu beheben.
 
 ## Speicherbetrieb
@@ -60,7 +62,7 @@ Supportfälle mit Event-Kurzname, Zeitpunkt, Gerät/Browser und genauer Fehlerme
 
 - Tarif, Standort und Datenpfade regelmäßig in den Anbieter-Konten prüfen und dieses Runbook aktuell halten.
 - Mindestens einen Erreichbarkeitsmonitor mit Benachrichtigung für Ausfälle einrichten.
-- Warnungen für niedrigen Datenträgerspeicher, Annäherung an das 900-GiB-Limit und ungewöhnlichen Anbieter-Verbrauch einrichten.
+- Hetzner-Kosten-/Verbrauchswarnungen im Anbieter-Konto konfigurieren; die FinalSnap-App meldet nur ihre erfasste Fotoauslastung und sieht keine Rechnung.
 - SQLite- und Foto-Backups an einem unabhängigen Ziel einrichten und Wiederherstellung nachweisen.
 - Alarmkontakt, Supportzeiten und Verantwortlichkeit bei Störungen festlegen.
 

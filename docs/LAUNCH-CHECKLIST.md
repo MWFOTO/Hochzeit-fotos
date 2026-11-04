@@ -71,8 +71,9 @@ Stand: 4. November 2026. Der deutsche Dienst ist live; Stripe bleibt im Testmodu
 - [x] Schneller Liveness-Endpunkt `/health` und Abhängigkeitsprüfung `/ready` ergänzt; Ready meldet Datenbank-, Uploadspeicher- und Object-Storage-Ausfälle mit HTTP 503.
 - [x] Geordnetes Herunterfahren bei SIGTERM/SIGINT ergänzt, damit laufende Anfragen Zeit zum Beenden erhalten.
 - [x] Aktiven Live-Dienst, Region, Datenträger und Datenpfade mit Render-Dienst und Startprotokoll abgeglichen.
+- [x] App-interne Speicheralarme alle 15 Minuten ergänzt: Render-Datenträger sowie 75-%-/90-%-Schwellen der aus Fotometadaten erfassten Hetzner-Auslastung; Alarm und Erholung gehen an den Zahlungs-Alarmkontakt.
 - [ ] Externe Erreichbarkeitsüberwachung und Benachrichtigung für `/health` und `/ready` einrichten.
-- [ ] Warnungen für niedrigen freien Speicher, Annäherung an das Object-Storage-Limit und ungewöhnliche Anbieter-Verbrauchskosten einrichten.
+- [ ] Hetzner-Verbrauchs-/Kostenalarm im Anbieter-Konto einrichten; der App-Alarm ist eine Speicher-Schätzung und kein Rechnungsalarm.
 - [ ] Konsistente tägliche SQLite-Sicherung und Fotosicherung an einem unabhängigen Ort einrichten.
 - [ ] Wiederherstellung von Datenbank und Fotos nachweisen; danach regelmäßige Wiederherstellungstests dokumentieren.
 - [ ] Supportzeiten, Zuständigkeit und Störungsablauf festlegen; Runbook in `docs/OPERATIONS.md` beachten.
