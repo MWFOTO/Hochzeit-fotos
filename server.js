@@ -1,3 +1,6 @@
+Warning: truncated output (original token count: 18670)
+Total output lines: 810
+
 const express = require('express');
 const multer = require('multer');
 const helmet = require('helmet');
@@ -320,105 +323,22 @@ function createApp(options = {}) {
     const events=db.prepare(`SELECT e.*, COUNT(p.id) photoCount, COALESCE(SUM(p.bytes),0) storageBytes
       FROM events e LEFT JOIN photos p ON p.event_id=e.id
       WHERE e.owner_id=? AND e.deleted_at IS NULL GROUP BY e.id ORDER BY e.created_at DESC`).all(req.user.id);
-    res.json({events:events.map(e=>({...e,expires_at:e.event_date?retentionUntil(e):e.expires_at,storageLimitBytes:eventStorageLimit(e,cfg),photoLimit:eventPhotoLimit(e,cfg),checkoutStarted:!!db.prepare('SELECT 1 FROM payments WHERE event_id=?').get(e.id),readOnly:!active(e)&&readable(e),retentionUntil:retentionUntil(e),startsAt:startAt(e),guestUrl:readable(e)?`${baseUrl.origin}/event/${e.id}?token=${e.guest_token}`:null}))});
+    res.json({events:events.map(e=>({...e,expires_at:e.event_date?retentionUntil(e):e.expires_at,storageLimitBytes:eventStorageLimit(e,cfg),photoLimit:eventPhotoLimit(e,cfg),checkoutStarted:!!db.prepare('SELECT 1 FROM payments WHERE event_id=?').get(e.id),hasInvoice:!!db.prepare('SELECT stripe_invoice_id FROM payments WHERE event_id=?').get(e.id)?.stripe_invoice_id,readOnly:!active(e)&&readable(e),retentionUntil:retentionUntil(e),startsAt:startAt(e),guestUrl:readable(e)?`${baseUrl.origin}/event/${e.id}?token=${e.guest_token}`:null}))});
   });
+  app.get('/api/event/:eventId/invoice',loginRequired,owner,wrap(async(req,res)=>{
+    const payment=db.prepare('SELECT stripe_invoice_id FROM payments WHERE event_id=?').get(req.event.id);
+    if(!payment?.stripe_invoice_id||!stripe?.invoices?.retrieve)return fail(res,404,'Für dieses Album ist noch kein Stripe-Beleg verfügbar.');
+    let invoice;
+    try{invoice=await stripe.invoices.retrieve(payment.stripe_invoice_id);}catch(error){console.error('Stripe-Beleg konnte nicht geladen werden:',String(error.message||error));return fail(res,502,'Der Beleg ist gerade nicht erreichbar. Bitte später erneut versuchen.');}
+    const url=invoice.invoice_pdf||invoice.hosted_invoice_url;
+    if(!url)return fail(res,409,'Stripe erstellt den Beleg noch. Bitte später erneut versuchen.');
+    let parsed;try{parsed=new URL(url);}catch{return fail(res,502,'Stripe hat keinen gültigen Beleg-Link geliefert.');}
+    if(parsed.protocol!=='https:')return fail(res,502,'Stripe hat keinen sicheren Beleg-Link geliefert.');
+    res.redirect(302,parsed.href);
+  }));
   app.post('/api/events',loginRequired,(req,res)=>{
     const id=String(req.body.eventId||''); const plan=PLANS.event; const title=String(req.body.title||'').trim(),eventDate=String(req.body.eventDate||'');
-    if(!/^[a-z0-9][a-z0-9_-]{2,63}$/.test(id) || !title || title.length>120 || !validEventDate(eventDate)) return fail(res,400,'Bitte Event-ID, Titel und ein Veranstaltungsdatum innerhalb der nächsten 24 Monate angeben.');
-    if(lookup(id) || fs.existsSync(path.join(root,id))) return fail(res,409,'Event-ID bereits vergeben, auch für Bestandsdaten.');
-    // During the test-only phase each newly created event can use the 25-photo
-    // trial. Checkout remains a Stripe test checkout and can never charge live.
-    const trial=req.body.trial!==false;
-    const expiresAt=eventDeadline(eventDate);
-    db.prepare('INSERT INTO events (id,email,plan,amount_cents,status,created_at,owner_id,title,event_date,guest_token,moderation,guestbook_moderation,expires_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)').run(id,req.user.email,'event',plan.priceCents,'pending',Date.now(),req.user.id,title,eventDate,random(),req.body.moderation===true?1:0,req.body.guestbookModeration===false?0:1,expiresAt);
-    if(trial)db.prepare("UPDATE events SET status='trial', trial_used=1 WHERE id=?").run(id);
-    res.status(201).json({eventId:id,trial:!!trial,eventDate});
-  });
-  app.get('/api/event/:eventId/availability',(req,res)=>res.json({available:/^[a-z0-9][a-z0-9_-]{2,63}$/.test(req.params.eventId)&&!lookup(req.params.eventId)&&!fs.existsSync(path.join(root,req.params.eventId))}));
-  function owner(req,res,next) { const e=lookup(req.params.eventId); if(!own(req,e)) return fail(res,404,'Event nicht gefunden.'); req.event=e; next(); }
-  function paymentAdminRequired(req,res,next) {
-    if(!req.user)return fail(res,401,'Bitte anmelden.');
-    const user=db.prepare('SELECT email_verified_at FROM users WHERE id=?').get(req.user.id);
-    if(!user?.email_verified_at||!paymentAdminEmails.has(String(req.user.email||'').toLowerCase()))return fail(res,403,'Kein Zugriff auf die Zahlungsverwaltung.');
-    next();
-  }
-  app.get('/ops/payments',paymentAdminRequired,(req,res)=>res.sendFile(path.join(__dirname,'public','payments-admin.html')));
-  app.get('/api/admin/payments',paymentAdminRequired,(req,res)=>{
-    const payments=db.prepare('SELECT p.*,e.title,e.email,e.status album_status,e.event_date FROM payments p JOIN events e ON e.id=p.event_id ORDER BY p.rowid DESC LIMIT 100').all();
-    res.json({payments:payments.map(payment=>({...payment,
-      refunded_cents:Number(db.prepare("SELECT COALESCE(SUM(amount_cents),0) amount FROM refunds WHERE payment_id=? AND status='succeeded'").get(payment.id).amount),
-      attempts:db.prepare('SELECT id,attempt_no,status,created_at,updated_at FROM payment_attempts WHERE payment_id=? ORDER BY attempt_no DESC').all(payment.id),
-      refunds:db.prepare('SELECT id,stripe_refund_id,amount_cents,reason,decision_note,actor_email,status,created_at,updated_at FROM refunds WHERE payment_id=? ORDER BY created_at DESC').all(payment.id),
-      events:db.prepare('SELECT e.event_type,e.status,e.amount_cents,e.actor_email,e.note,e.details_json,e.created_at,a.status alert_status,a.attempts alert_attempts,a.last_error alert_error FROM payment_events e LEFT JOIN payment_alerts a ON a.event_id=e.id WHERE e.payment_id=? ORDER BY e.created_at DESC LIMIT 30').all(payment.id).map(event=>({...event,details:JSON.parse(event.details_json||'{}')}))
-    }))});
-  });
-  app.post('/api/admin/payments/:paymentId/refunds',paymentAdminRequired,wrap(async(req,res)=>{
-    const payment=db.prepare('SELECT * FROM payments WHERE id=?').get(req.params.paymentId);
-    if(!payment)return fail(res,404,'Zahlung nicht gefunden.');
-    if(!stripe||!payment.stripe_payment_intent_id)return fail(res,409,'Für diese Zahlung ist keine erstattungsfähige Stripe-Zahlungsreferenz vorhanden.');
-    if(!['paid','partially_refunded'].includes(payment.status))return fail(res,409,'Diese Zahlung kann aktuell nicht manuell erstattet werden.');
-    const reason=String(req.body?.reason||'requested_by_customer');
-    if(!['duplicate','fraudulent','requested_by_customer'].includes(reason))return fail(res,400,'Bitte einen gültigen Erstattungsgrund wählen.');
-    const note=String(req.body?.note||'').trim();
-    if(note.length<20||note.length>2000)return fail(res,400,'Bitte die Entscheidung mit mindestens 20 Zeichen dokumentieren.');
-    const already=Number(db.prepare("SELECT COALESCE(SUM(amount_cents),0) amount FROM refunds WHERE payment_id=? AND status IN ('requested','submitted','pending','succeeded')").get(payment.id).amount);
-    const remaining=Math.max(0,payment.amount_cents-already);
-    const amount=req.body?.amountCents===undefined?remaining:Number(req.body.amountCents);
-    if(!Number.isSafeInteger(amount)||amount<=0||amount>remaining)return fail(res,400,'Der Erstattungsbetrag überschreitet den noch offenen Betrag.');
-    const refundId=crypto.randomUUID(),now=Date.now();
-    db.prepare("INSERT INTO refunds (id,payment_id,amount_cents,reason,decision_note,actor_email,status,created_at,updated_at) VALUES (?,?,?,?,?,?,'requested',?,?)").run(refundId,payment.id,amount,reason,note,req.user.email,now,now);
-    auditPaymentEvent({paymentId:payment.id,source:'manual',eventType:'manual.refund.requested',status:'requested',amountCents:amount,actorEmail:req.user.email,note,details:{refundId,reason}});
-    try{
-      const refund=await stripe.refunds.create({payment_intent:payment.stripe_payment_intent_id,amount,reason,metadata:{paymentId:payment.id,decisionId:refundId}},{idempotencyKey:`finalsnap-refund-${refundId}`});
-      if(refund.livemode!==false)throw new Error('Live-Erstattung gesperrt');
-      const status=refund.status==='succeeded'?'succeeded':refund.status==='failed'?'failed':'pending';
-      db.prepare('UPDATE refunds SET stripe_refund_id=?,status=?,updated_at=? WHERE id=?').run(refund.id,status,Date.now(),refundId);
-      auditPaymentEvent({paymentId:payment.id,source:'manual',eventType:`manual.refund.${status}`,status,amountCents:amount,actorEmail:req.user.email,note,details:{refundId,stripeRefundId:refund.id,reason}});
-      refreshRefundState(payment.id);
-      await flushPaymentAlerts();
-      return res.status(202).json({id:refundId,refundId,status,amountCents:amount});
-    }catch(error){
-      const message=String(error.message||error).slice(0,300);
-      const definitiveFailure=['StripeInvalidRequestError','StripeAuthenticationError','StripePermissionError','StripeCardError'].includes(error.type)||error.code==='resource_missing';
-      const refundStatus=definitiveFailure?'failed':'submitted';
-      db.prepare('UPDATE refunds SET status=?,updated_at=? WHERE id=?').run(refundStatus,Date.now(),refundId);
-      auditPaymentEvent({paymentId:payment.id,source:'manual',eventType:definitiveFailure?'manual.refund.failed':'manual.refund.uncertain',status:refundStatus,amountCents:amount,actorEmail:req.user.email,note,details:{refundId,error:message}});
-      await flushPaymentAlerts();
-      console.error('Erstattung fehlgeschlagen:',message);
-      if(!definitiveFailure)return res.status(202).json({id:refundId,refundId,status:refundStatus,amountCents:amount,message:'Stripe hat den Status nicht eindeutig bestätigt. Der Vorgang ist gegen eine doppelte Erstattung gesperrt; bitte den Stripe-Testmodus prüfen.'});
-      return fail(res,502,'Stripe konnte die Erstattung nicht bestätigen. Bitte Zahlungsstatus in Stripe prüfen, bevor du es erneut versuchst.');
-    }
-  }));
-  app.post('/api/checkout',loginRequired,wrap(async(req,res)=>{
-    const e=lookup(String(req.body.eventId||''));
-    if(!own(req,e))return fail(res,404,'Event nicht gefunden.');
-    if(!['pending','trial'].includes(e.status)||e.deleted_at||(e.status==='trial'&&!active(e)))return fail(res,409,'Dieses Event kann nicht bezahlt werden.');
-    if(!stripe||!cfg.STRIPE_WEBHOOK_SECRET)return fail(res,503,'Stripe-Testmodus noch nicht eingerichtet.');
-    if(req.body.plan!==undefined){const plan=PLANS[req.body.plan];if(!plan)return fail(res,400,'Bitte ein gültiges Paket wählen.');if(req.body.plan!==e.plan)return fail(res,409,'Das Paket und der Preis für dieses Album sind bereits festgelegt.');}
-    let payment=db.prepare('SELECT * FROM payments WHERE event_id=?').get(e.id);
-    if(!payment){const plan=PLANS[e.plan];db.prepare('INSERT INTO payments (id,event_id,amount_cents,months) VALUES (?,?,?,?)').run(crypto.randomUUID(),e.id,e.amount_cents,plan.months);payment=db.prepare('SELECT * FROM payments WHERE event_id=?').get(e.id);}
-    if(['refunded','disputed','disputed_lost'].includes(payment.status))return fail(res,409,'Für diese Zahlung ist aktuell kein neuer Checkout möglich. Bitte kontaktiere den Support.');
-    let attempt=db.prepare('SELECT * FROM payment_attempts WHERE payment_id=? ORDER BY attempt_no DESC LIMIT 1').get(payment.id);
-    let session=null;
-    if(attempt&&attempt.status==='open'&&!attempt.stripe_session_id.startsWith('creating_')){
-      try{session=await stripe.checkout.sessions.retrieve(attempt.stripe_session_id);}catch(error){if(error.code!=='resource_missing')throw error;}
-      if(session?.livemode!==false)throw new Error('Live-Checkout gesperrt');
-      if(session?.status==='open')return res.json({url:session.url||`${baseUrl.origin}/success?session_id=${session.id}`,attempt:attempt.attempt_no});
-      if(session?.status==='expired')db.prepare("UPDATE payment_attempts SET status='expired',updated_at=? WHERE id=?").run(Date.now(),attempt.id);
-      else if(session?.status==='complete'&&session.payment_status!=='paid')return fail(res,409,'Die Zahlung wird noch verarbeitet. Bitte aktualisiere die Seite in Kürze.');
-      else if(session?.payment_status==='paid')return fail(res,409,'Die Zahlung ist bereits eingegangen. Bitte lade dein Album neu.');
-      if(session?.status==='complete')db.prepare("UPDATE payment_attempts SET status='failed',updated_at=? WHERE id=?").run(Date.now(),attempt.id);
-      if(session?.status==='expired'||session?.status==='complete')attempt=null;
-    }
-    if(!attempt||!['open','creating'].includes(attempt.status)){
-      const attemptNo=Number(db.prepare('SELECT COALESCE(MAX(attempt_no),0)+1 n FROM payment_attempts WHERE payment_id=?').get(payment.id).n);
-      const id=crypto.randomUUID(),placeholder=`creating_${id}`;
-      db.prepare("INSERT INTO payment_attempts (id,payment_id,stripe_session_id,attempt_no,status,created_at,updated_at) VALUES (?,?,?,?, 'creating',?,?)").run(id,payment.id,placeholder,attemptNo,Date.now(),Date.now());
-      attempt=db.prepare('SELECT * FROM payment_attempts WHERE id=?').get(id);
-    }
-    const taxEnabled=String(cfg.STRIPE_TAX_ENABLED||'0')==='1';
-    const priceData={currency:'eur',unit_amount:payment.amount_cents,tax_behavior:'inclusive',product_data:{name:PLANS[e.plan].label}};
-    if(taxEnabled&&cfg.STRIPE_PRODUCT_TAX_CODE)priceData.product_data.tax_code=cfg.STRIPE_PRODUCT_TAX_CODE;
+    if(!/^[a-z0-9][a-z0-9_-]{2,63}$/.test(id) || !title || title.length>120 || !validEventD…2670 tokens truncated…_CODE;
     const params={mode:'payment',payment_method_types:['card'],customer_email:e.email,customer_creation:'always',line_items:[{price_data:priceData,quantity:1}],metadata:{eventId:e.id,paymentId:payment.id,attemptId:attempt.id},success_url:`${baseUrl.origin}/success?session_id={CHECKOUT_SESSION_ID}`,cancel_url:`${baseUrl.origin}/dashboard`};
     if(taxEnabled){params.automatic_tax={enabled:true};params.billing_address_collection='required';params.tax_id_collection={enabled:true};params.invoice_creation={enabled:true};}
     try{session=await stripe.checkout.sessions.create(params,{idempotencyKey:`finalsnap-checkout-${attempt.id}`});}

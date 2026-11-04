@@ -13,6 +13,7 @@ Stand: 4. November 2026. FinalSnap ist auf Render Frankfurt live; echte Zahlunge
 - Brevo dokumentiert EU-weite Verarbeitung und Datenspeicherung auch in Belgien; das erfüllt keine strikte Deutschland-only-Vorgabe. GitHub als Quellcode-/Build-Dienst und Stripe für spätere Zahlungen benötigen eine eigene Standortprüfung. Bis zur Klärung ist eine vollständige Deutschland-Zusage für alle Dienste nicht belegt.
 - Die App nutzt SQLite und ist auf eine Instanz ausgelegt. Keine zweite Instanz und keine horizontale Skalierung aktivieren, solange die Datenbank nicht umgestellt ist.
 - Zahlungen bleiben technisch auf Stripe-Testmodus gesperrt. `STRIPE_TAX_ENABLED=0`; USt.-Rechnungen wurden im Stripe-Testcheckout noch nicht abgenommen.
+- Sobald Stripe eine Rechnung zur Zahlung erstellt hat, kann der berechtigte Veranstalter sie im Dashboard über „Rechnung / Zahlungsbeleg öffnen“ abrufen. Der Link wird nur für das eigene Album ausgegeben; Verfügbarkeit und PDF mit ausgewiesener USt. sind im Testcheckout noch abzunehmen.
 
 ## Erreichbarkeit und Bereitschaft
 

@@ -15,6 +15,7 @@ const checkoutRequests=[];
 const notifications=[];
 const fake={
   webhooks:signer.webhooks,
+  invoices:{retrieve:async id=>({id,invoice_pdf:'https://invoice.stripe.com/i/test-pdf'})},
   checkout:{sessions:{
     create:async(data,options)=>{
       created++;
@@ -74,6 +75,8 @@ test('Checkout retries the same album; refund decisions and dispute events are a
   session2.status='complete';session2.payment_status='paid';
   assert.equal(await webhook('checkout.session.completed',session2,'evt_paid'),200);
   assert.equal(app.locals.db.prepare('SELECT stripe_invoice_id,stripe_customer_id FROM payments WHERE id=?').get(payment.id).stripe_invoice_id,'in_test_2');
+  const albumInvoices=await request('/api/events',{user:admin});assert.equal(albumInvoices.data.events[0].hasInvoice,true);
+  const invoiceLink=await request('/api/event/refund-event/invoice',{user:admin});assert.equal(invoiceLink.response.status,302);assert.equal(invoiceLink.response.headers.get('location'),'https://invoice.stripe.com/i/test-pdf');
   const token=app.locals.db.prepare('SELECT guest_token FROM events WHERE id=?').get('refund-event').guest_token;
   assert.equal((await request(`/event/refund-event?token=${token}`)).response.status,200);
 
@@ -119,6 +122,7 @@ test('Checkout retries the same album; refund decisions and dispute events are a
   assert.ok(notifications.length>=5);
   assert.ok(notifications.every(message=>message.to==='admin@finalsnap.de'));
   assert.equal(app.locals.db.prepare("SELECT COUNT(*) n FROM payment_alerts WHERE status='pending'").get().n,0);
+  const other=await register('other@finalsnap.de');assert.equal((await request('/api/event/refund-event/invoice',{user:other})).response.status,404);
   const payments=await request('/api/admin/payments',{user:admin});
   assert.equal(payments.response.status,200);assert.equal(payments.data.payments[0].refunds.length,3);
 });
