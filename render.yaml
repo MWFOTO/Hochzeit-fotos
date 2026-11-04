@@ -40,3 +40,5 @@ services:
         sync: false
       - key: BREVO_API_KEY
         sync: false
+      - key: BREVO_SENDER_EMAIL
+        value: info@finalsnap.de
