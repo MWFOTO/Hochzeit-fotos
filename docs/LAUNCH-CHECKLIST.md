@@ -23,7 +23,7 @@ Die konkreten Kontoschritte für Stripe Tax, Hetzner-Backups und die kontrollier
 - [x] Gästefotos sind pro Browser getrennt: Gäste sehen nur eigene Uploads; Veranstalter sehen alle. Gleicher Browser bedeutet dieselbe anonyme Gästesitzung.
 - [x] 90 Tage Upload, Ansicht und Download ab Veranstaltungsdatum; danach automatische Löschung ohne zusätzliche Downloadphase.
 - [x] FinalSnap als Arbeitsmarke, Paketkarten und Übernahme der Auswahl von der Landingpage.
-- [x] 33 automatisierte Tests bestanden vor dem letzten Code-Deploy. Mobile End-to-End- und Lasttests bleiben offen.
+- [x] 34 automatisierte Tests bestehen aktuell, einschließlich Wiederholungsversand der Vertragsbestätigung; `npm audit --omit=dev` meldet 0 bekannte Schwachstellen. Mobile End-to-End- und Lasttests bleiben offen.
 
 ## Als Nächstes: Praxistests und Infrastruktur
 - [ ] Deutsche Steuerregistrierung in Stripe Tax im Testmodus einrichten. Betreiber hat bestätigt, dass sie derzeit fehlt; Live-Modus bleibt gesperrt.
