@@ -1004,4 +1004,4 @@ body[data-design-theme="afterglow"] { --color-bg: #262324; --color-text: #f5f1ef
   .upgrade-panel { padding: 16px; }
   .small, small { font-size: .98rem; }
 }
- .account-danger{margin-top:48px;padding:26px;background:#fff8f7;border:1px solid #f2cdca;border-radius:18px}.account-danger h2{margin-top:0}.account-danger form{display:grid;gap:16px;max-width:560px;margin-top:22px}.account-danger form label{font-weight:700}.account-danger .danger{justify-self:start}
+ .account-danger{margin-top:48px;padding:26px;background:linear-gradient(145deg,#30333a,#282a30);border:1px solid #a94f4c;border-radius:18px;color:var(--color-text)}.account-danger h2{margin-top:0;color:#ffd6d2}.account-danger p{color:var(--color-muted)}.account-danger form{display:grid;gap:16px;max-width:560px;margin-top:22px}.account-danger form label{font-weight:700;color:var(--color-text)}.account-danger input{background:#1d2026;color:var(--color-text);border-color:#ffffff40}.account-danger .danger{justify-self:start;background:#442729;color:#ffd6d2;border-color:#a94f4c}.account-danger .danger:hover{background:#5a3032}
