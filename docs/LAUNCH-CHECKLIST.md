@@ -73,7 +73,7 @@ Stand: 4. November 2026. Der deutsche Dienst ist live; Stripe bleibt im Testmodu
 - [x] Aktiven Live-Dienst, Region, Datenträger und Datenpfade mit Render-Dienst und Startprotokoll abgeglichen.
 - [x] App-interne Speicheralarme alle 15 Minuten ergänzt: Render-Datenträger sowie 75-%-/90-%-Schwellen der aus Fotometadaten erfassten Hetzner-Auslastung; Alarm und Erholung gehen an den Zahlungs-Alarmkontakt.
 - [x] Temporäre Render-Uploads begrenzt: höchstens zwei gleichzeitige Requests, einer je Album; bei weniger als 2 GiB freiem Platz werden neue Uploads vor Dateiannahme pausiert. Veranstalterkonto zeigt Hetzner-Fotospeicher und Render-Uploadpuffer getrennt.
-- [ ] Externe Erreichbarkeitsüberwachung und Benachrichtigung für `/health` und `/ready` einrichten.
+- [ ] Den ersten geplanten externen GitHub-Actions-Lauf für `/health` und `/ready` sowie den Empfang einer Fehlerbenachrichtigung bestätigen; Workflow ist eingerichtet, Ausführung und Benachrichtigungen sind noch nicht verifiziert.
 - [ ] Hetzner-Verbrauchs-/Kostenalarm im Anbieter-Konto einrichten; der App-Alarm ist eine Speicher-Schätzung und kein Rechnungsalarm.
 - [ ] Konsistente tägliche SQLite-Sicherung und Fotosicherung an einem unabhängigen Ort einrichten.
 - [ ] Wiederherstellung von Datenbank und Fotos nachweisen; danach regelmäßige Wiederherstellungstests dokumentieren.
@@ -81,7 +81,7 @@ Stand: 4. November 2026. Der deutsche Dienst ist live; Stripe bleibt im Testmodu
 - [ ] Unabhängige Prüfung von Berechtigungen, Gäste-Tokens, Sessions, Passwort-Reset, E-Mail-Verifizierung und Checkout.
 - [ ] E-Mail-Bestätigung vor sensiblen Aktionen und Missbrauchsschutz für kostenlose Konten festlegen.
 - [ ] Verifizierungs-/Reset-Mails mit Zustellfehlern, Rate Limits und abgelaufenen Links testen.
-- [ ] Upload-Limits und temporären Speicher bei parallelen Events absichern; Disk-Warnung darf nicht alleiniger Schutz sein.
+- [x] Upload-Limits, parallele temporäre Uploads und eine Mindestreserve vor Dateiannahme absichern; Praxistest unter Last bleibt offen.
 - [ ] Schad-/Fremdformate, sehr große Bilder, beschädigte Dateien, EXIF/GPS und unerwartete Dateinamen prüfen.
 - [ ] Abhängigkeiten, Node-Version, Sicherheitsupdates, Secrets, minimale Berechtigungen und Tokenrotation verwalten.
 - [ ] Sicherheitsheader/CSP prüfen; inline Scripts soweit sinnvoll entfernen.
