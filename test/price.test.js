@@ -6,15 +6,16 @@ const path=require('node:path');
 const crypto=require('node:crypto');
 const {createApp}=require('../server');
 
-test('new events and checkout use 49.90 EUR; existing quoted orders keep 34.90 EUR',async()=>{
+test('all new and previously quoted unpaid albums check out at 49.90 EUR',async()=>{
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'finalsnap-price-'));
   const amounts=[];
   const checkoutMessages=[];
+  const sessions=new Map([['cs_stale',{id:'cs_stale',livemode:false,status:'open',amount_total:3490,payment_status:'unpaid',metadata:{customerType:'consumer',earlyStartRequest:'false'},url:'https://checkout.stripe.com/stale'}]]);
   const stripe={checkout:{sessions:{create:async data=>{
     amounts.push(data.line_items[0].price_data.unit_amount);
     checkoutMessages.push(data.custom_text.submit.message);
-    return {id:`cs_price_${amounts.length}`,livemode:false,status:'open',url:'https://checkout.stripe.com/test'};
-  }}}};
+    const session={id:`cs_price_${amounts.length}`,livemode:false,status:'open',payment_status:'unpaid',amount_total:data.line_items[0].price_data.unit_amount,metadata:data.metadata,url:'https://checkout.stripe.com/test'};sessions.set(session.id,session);return session;
+  },retrieve:async id=>({...sessions.get(id)}),expire:async id=>{sessions.set(id,{...sessions.get(id),status:'expired'});}}}};
   const app=createApp({DB_PATH:path.join(root,'events.db'),UPLOAD_DIR:path.join(root,'uploads'),BASE_URL:'http://localhost:3000',STRIPE_WEBHOOK_SECRET:'whsec_test',stripe});
   const db=app.locals.db,token='a'.repeat(64),csrf='b'.repeat(64);
   db.prepare('INSERT INTO users (id,email,password_hash,created_at) VALUES (?,?,?,?)').run('owner','owner@example.test','unused',Date.now());
@@ -31,9 +32,13 @@ test('new events and checkout use 49.90 EUR; existing quoted orders keep 34.90 E
     }
     // Simulate a quote created before the price update.
     db.prepare('UPDATE events SET amount_cents=3490 WHERE id=?').run('existing-price');
+    db.prepare('INSERT INTO payments (id,event_id,amount_cents,months) VALUES (?,?,?,3)').run('old-payment','existing-price',3490);
+    db.prepare('INSERT INTO payment_attempts (id,payment_id,stripe_session_id,attempt_no,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?)').run('old-attempt','old-payment','cs_stale',1,'open',Date.now(),Date.now());
     for(const id of ['new-price','existing-price'])assert.equal((await request('/api/checkout',{termsAccepted:true,eventId:id})).status,200);
-    assert.deepEqual(amounts,[4990,3490]);
-    assert.match(checkoutMessages[0],/49,90 €/);assert.match(checkoutMessages[1],/34,90 €/);assert.match(checkoutMessages[1],/kein echtes Geld eingezogen/);
-    assert.deepEqual(db.prepare('SELECT amount_cents FROM payments ORDER BY amount_cents DESC').all().map(row=>row.amount_cents),[4990,3490]);
+    assert.deepEqual(amounts,[4990,4990]);
+    assert.equal(sessions.get('cs_stale').status,'expired');
+    assert.match(checkoutMessages[0],/49,90 €/);assert.match(checkoutMessages[1],/49,90 €/);assert.match(checkoutMessages[1],/kein echtes Geld eingezogen/);
+    assert.deepEqual(db.prepare('SELECT amount_cents FROM payments ORDER BY amount_cents DESC').all().map(row=>row.amount_cents),[4990,4990]);
+    assert.equal(db.prepare('SELECT amount_cents FROM events WHERE id=?').get('existing-price').amount_cents,4990);
   } finally {await new Promise(resolve=>server.close(resolve));db.close();fs.rmSync(root,{recursive:true,force:true});}
 });

@@ -492,14 +492,14 @@ function createApp(options = {}) {
     const earlyStartAcknowledgedAt=earlyStartNeeded?earlyStartRequestedAt:null;
     if(req.body.plan!==undefined){const plan=PLANS[req.body.plan];if(!plan)return fail(res,400,'Bitte ein gültiges Paket wählen.');if(req.body.plan!==e.plan)return fail(res,409,'Das Paket und der Preis für dieses Album sind bereits festgelegt.');}
     let payment=db.prepare('SELECT * FROM payments WHERE event_id=?').get(e.id);
-    if(!payment){const plan=PLANS[e.plan];db.prepare('INSERT INTO payments (id,event_id,amount_cents,months) VALUES (?,?,?,?)').run(crypto.randomUUID(),e.id,e.amount_cents,plan.months);payment=db.prepare('SELECT * FROM payments WHERE event_id=?').get(e.id);}
+    if(!payment){const plan=PLANS[e.plan];db.prepare('INSERT INTO payments (id,event_id,amount_cents,months) VALUES (?,?,?,?)').run(crypto.randomUUID(),e.id,plan.priceCents,plan.months);payment=db.prepare('SELECT * FROM payments WHERE event_id=?').get(e.id);}
     if(['refunded','disputed','disputed_lost'].includes(payment.status))return fail(res,409,'Für diese Zahlung ist aktuell kein neuer Checkout möglich. Bitte kontaktiere den Support.');
     let attempt=db.prepare('SELECT * FROM payment_attempts WHERE payment_id=? ORDER BY attempt_no DESC LIMIT 1').get(payment.id);
     let session=null;
     if(attempt&&attempt.status==='open'&&!attempt.stripe_session_id.startsWith('creating_')){
       try{session=await stripe.checkout.sessions.retrieve(attempt.stripe_session_id);}catch(error){if(error.code!=='resource_missing')throw error;db.prepare("UPDATE payment_attempts SET status='expired',updated_at=? WHERE id=?").run(Date.now(),attempt.id);attempt=null;}
       if(session&&session.livemode!==false)throw new Error('Live-Checkout gesperrt');
-      if(session?.status==='open'&&session.metadata?.customerType===customerType&&session.metadata?.earlyStartRequest===String(earlyStartNeeded))return res.json({url:session.url||`${baseUrl.origin}/success?session_id=${session.id}`,attempt:attempt.attempt_no});
+      if(session?.status==='open'&&session.amount_total===PLANS[e.plan].priceCents&&payment.amount_cents===PLANS[e.plan].priceCents&&session.metadata?.customerType===customerType&&session.metadata?.earlyStartRequest===String(earlyStartNeeded))return res.json({url:session.url||`${baseUrl.origin}/success?session_id=${session.id}`,attempt:attempt.attempt_no});
       if(session?.status==='open'){
         await stripe.checkout.sessions.expire(session.id);
         db.prepare("UPDATE payment_attempts SET status='expired',updated_at=? WHERE id=?").run(Date.now(),attempt.id);
@@ -510,6 +510,14 @@ function createApp(options = {}) {
       else if(session?.payment_status==='paid')return fail(res,409,'Die Zahlung ist bereits eingegangen. Bitte lade dein Album neu.');
       if(session?.status==='complete')db.prepare("UPDATE payment_attempts SET status='failed',updated_at=? WHERE id=?").run(Date.now(),attempt.id);
       if(session?.status==='expired'||session?.status==='complete')attempt=null;
+    }
+    if(payment.status==='pending'&&payment.amount_cents!==PLANS[e.plan].priceCents){
+      const canonicalPrice=PLANS[e.plan].priceCents;
+      db.transaction(()=>{
+        db.prepare('UPDATE payments SET amount_cents=? WHERE id=? AND status=\'pending\'').run(canonicalPrice,payment.id);
+        db.prepare('UPDATE events SET amount_cents=? WHERE id=? AND status IN (\'pending\',\'trial\')').run(canonicalPrice,e.id);
+      })();
+      payment.amount_cents=canonicalPrice;
     }
     if(!attempt||!['open','creating'].includes(attempt.status)){
       const attemptNo=Number(db.prepare('SELECT COALESCE(MAX(attempt_no),0)+1 n FROM payment_attempts WHERE payment_id=?').get(payment.id).n);
