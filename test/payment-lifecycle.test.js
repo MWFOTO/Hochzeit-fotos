@@ -31,7 +31,7 @@ const fake={
 };
 const app=createApp({
   DB_PATH:path.join(tmp,'events.db'),UPLOAD_DIR:path.join(tmp,'uploads'),BASE_URL:'http://localhost:3000',
-  STRIPE_WEBHOOK_SECRET:signing,STRIPE_TAX_ENABLED:'1',PAYMENT_ADMIN_EMAILS:'admin@finalsnap.de',PAYMENT_ALERT_EMAIL:'admin@finalsnap.de',
+  STRIPE_WEBHOOK_SECRET:signing,STRIPE_TAX_ENABLED:'1',STRIPE_PRODUCT_TAX_CODE:'txcd_10103000',PAYMENT_ADMIN_EMAILS:'admin@finalsnap.de',PAYMENT_ALERT_EMAIL:'admin@finalsnap.de',
   stripe:fake,mailer:async message=>{if(failWithdrawalMail&&message.subject.includes('Eingangsbestätigung deines Widerrufs'))throw new Error('Testfehler: Maildienst vorübergehend nicht erreichbar');notifications.push(message);}
 });
 const server=app.listen(0),origin=`http://127.0.0.1:${server.address().port}`;
@@ -68,7 +68,7 @@ test('Checkout retries the same album; refund decisions and dispute events are a
   assert.equal(checkoutRequests[0].locale,'de');assert.equal(checkoutRequests[0].submit_type,'pay');
   assert.match(checkoutRequests[0].custom_text.submit.message,/49,90 € inkl\. 19 % USt\./);
   assert.match(checkoutRequests[0].custom_text.submit.message,/25 GB/);
-  assert.equal(checkoutRequests[0].automatic_tax.enabled,true);assert.equal(checkoutRequests[0].billing_address_collection,'required');assert.equal(checkoutRequests[0].tax_id_collection.enabled,true);assert.equal(checkoutRequests[0].invoice_creation.enabled,true);assert.equal(checkoutRequests[0].line_items[0].price_data.tax_behavior,'inclusive');
+  assert.equal(checkoutRequests[0].automatic_tax.enabled,true);assert.equal(checkoutRequests[0].billing_address_collection,'required');assert.equal(checkoutRequests[0].tax_id_collection.enabled,true);assert.equal(checkoutRequests[0].invoice_creation.enabled,true);assert.equal(checkoutRequests[0].line_items[0].price_data.tax_behavior,'inclusive');assert.equal(checkoutRequests[0].line_items[0].price_data.product_data.tax_code,'txcd_10103000');assert.equal('payment_method_types' in checkoutRequests[0],false);
   assert.deepEqual(checkoutRequests[0].name_collection,{individual:{enabled:true},business:{enabled:true,optional:true}});
   const payment=app.locals.db.prepare('SELECT * FROM payments WHERE event_id=?').get('refund-event');
   const session1=sessions.get(payment.stripe_session_id);

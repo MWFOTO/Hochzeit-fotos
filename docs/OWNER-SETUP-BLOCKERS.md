@@ -4,13 +4,12 @@ Diese Liste trennt Einrichtungsarbeiten in den Anbieter-Konten von den Änderung
 
 ## 1. Stripe Tax im Testmodus vorbereiten
 
-Die App hat bereits `automatic_tax`, inklusive Steuerverhalten und Rechnungserstellung vorbereitet. In Render muss `STRIPE_TAX_ENABLED` bis zur Testkonfiguration `0` bleiben.
+Das Stripe-Testkonto ist unter dem bestätigten Arbeitskonto eingerichtet; echte Zahlungen bleiben gesperrt.
 
-1. Stripe-Dashboard öffnen und ausdrücklich den **Testmodus** einschalten.
-2. Unter **Steuern / Einstellungen** Geschäftsadresse und Hauptgeschäftssitz prüfen.
-3. Für FinalSnap den passenden Stripe-Produktsteuer-Code festlegen. Die Produktklassifikation bitte nicht raten; mit Steuerberatung beziehungsweise Stripe-Unterlagen abgleichen.
-4. Unter **Steuern / Standorte (Registrierungen)** die bestehende, tatsächlich gültige deutsche Umsatzsteuerregistrierung für den Testmodus hinterlegen. Der Stripe-Eintrag ersetzt keine Registrierung beim Finanzamt. Keine erfundenen Nummern oder Daten eingeben.
-5. Danach bestätigen, dass die Registrierung im **Testmodus** erscheint. Nicht in den Live-Modus wechseln.
+1. Geschäftsadresse und deutsche Regelbesteuerungsregistrierung sind in Stripe **Testmodus** hinterlegt. Der Eintrag ersetzt keine Registrierung beim Finanzamt und hat `livemode=false`.
+2. Die Steuerberechnung wurde für 49,90 € brutto in Gütersloh geprüft: Stripe berechnet 7,97 € enthaltene USt. und lässt den Gesamtpreis bei 49,90 €.
+3. Für den Test ist `txcd_10103000` (SaaS, persönliche Nutzung) als vorläufige Produktkategorie vorgesehen. Vor Verkäufen außerhalb Deutschlands muss die steuerliche Einordnung bestätigt und gegebenenfalls angepasst werden.
+4. Nach dem Code-Deploy `STRIPE_TAX_ENABLED=1` und `STRIPE_PRODUCT_TAX_CODE=txcd_10103000` ausschließlich im FinalSnap-Testbetrieb setzen. Vorher die endgültige USt-IdNr.-Anzeige auf der Stripe-Rechnung sicherstellen.
 
 Stripe berechnet nur für Orte mit hinterlegter Registrierung Steuern. Die [Stripe-Einrichtungsanleitung](https://docs.stripe.com/tax/set-up) erklärt Geschäftsadresse, Produktsteuer-Code, Registrierungen und Aktivierung. Stripe erläutert auch, dass ein Tax-Registrierungseintrag Stripe über eine bestehende Registrierung informiert, sie aber nicht selbst bei der Behörde vornimmt ([API-Dokumentation](https://docs.stripe.com/api/tax/registrations)).
 

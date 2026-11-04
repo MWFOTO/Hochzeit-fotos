@@ -180,18 +180,20 @@ Keine CORS-Freigabe nötig. Der Anbieter darf nicht Querystrings mit Gasttokens 
 
 ### Testmodus für Brutto-USt. und Belege
 
-`STRIPE_TAX_ENABLED=0` lässt die automatische Steuerberechnung ausdrücklich aus.
-Für einen echten Checkout-Test zuerst in Stripe „Testmodus“ einschalten und unter
-Tax die Unternehmensadresse sowie eine aktive deutsche Steuerregistrierung
-hinterlegen. Unter Tax/Products die zutreffende Produkt-Steuerkategorie festlegen;
-bei Code-Konfiguration dazu `STRIPE_PRODUCT_TAX_CODE` mit dem von der
-Steuerberatung bestätigten Stripe-Steuercode befüllen. Die Kategorie nicht aus
-einer allgemeinen SaaS-Vermutung ableiten.
+Im Stripe-Testmodus sind nun die Unternehmensadresse und die deutsche
+Regelbesteuerungs-Registrierung eingetragen. Für die FinalSnap-Webapp ist
+`txcd_10103000` (SaaS, persönliche Nutzung) als vorläufige Produktkategorie
+gesetzt; sie wird im Testmodus für Deutschland geprüft. Vor Verkäufen außerhalb
+Deutschlands oder einer Änderung des Produkts muss die Kategorie fachlich
+bestätigt werden.
 
-Danach `STRIPE_TAX_ENABLED=1` im Render-Service setzen und manuell deployen.
-`server.js` schaltet dann Checkout-Steuer inkl. im 49,90-€-Preis,
-Pflicht-Rechnungsanschrift, USt-IdNr.-Erfassung, Name der Privatperson bzw.
-des optionalen Unternehmens und Rechnungserstellung ein. Der Checkout wird
+`STRIPE_TAX_ENABLED=1` aktiviert automatische Steuerberechnung. Der Checkout
+blockiert mit einer verständlichen Meldung, falls
+`STRIPE_PRODUCT_TAX_CODE` fehlt. Rechnungsanschrift, Steuer-ID-Abfrage,
+Kunden-/Firmennamen und Stripe-Rechnung werden auch dann angefordert, wenn die
+Steuerberechnung ausgeschaltet ist. Für echte Testkäufe im Render-Service beide
+Variablen setzen und manuell deployen; Stripe muss in diesem Service weiterhin
+im Testmodus laufen. Der Checkout wird
 auf Deutsch mit einer Zahlungsschaltfläche vom Typ `pay` und einer
 Bestellzusammenfassung mit Bruttopreis, Leistungsumfang, Dauer und Anbieter
 angelegt. Die tatsächlich gerenderte Schaltfläche und Zusammenfassung müssen

@@ -545,14 +545,19 @@ function createApp(options = {}) {
     }
     const taxEnabled=String(cfg.STRIPE_TAX_ENABLED||'0')==='1';
     const priceData={currency:'eur',unit_amount:payment.amount_cents,tax_behavior:'inclusive',product_data:{name:PLANS[e.plan].label}};
-    if(taxEnabled&&cfg.STRIPE_PRODUCT_TAX_CODE)priceData.product_data.tax_code=cfg.STRIPE_PRODUCT_TAX_CODE;
+    const productTaxCode=String(cfg.STRIPE_PRODUCT_TAX_CODE||'').trim();
+    if(taxEnabled&&!productTaxCode)return fail(res,503,'Die Steuerkategorie für den Test-Checkout ist noch nicht eingerichtet.');
+    if(taxEnabled)priceData.product_data.tax_code=productTaxCode;
     const params={
       mode:'payment',
       locale:'de',
       submit_type:'pay',
-      payment_method_types:['card'],
       customer_email:e.email,
       customer_creation:'always',
+      billing_address_collection:'required',
+      tax_id_collection:{enabled:true},
+      name_collection:{individual:{enabled:true},business:{enabled:true,optional:true}},
+      invoice_creation:{enabled:true},
       line_items:[{price_data:priceData,quantity:1}],
       custom_text:{submit:{message:'Einmalig 49,90 € inkl. 19 % USt. pro Veranstaltung. Bis zu 25 GB Fotos; Upload, Ansicht und Download für 90 Tage ab Veranstaltungsdatum. Anbieter: Matthias Wendland Fotografie (Einzelunternehmen), Gütersloh.'}},
       metadata:{eventId:e.id,paymentId:payment.id,attemptId:attempt.id,customerType,earlyStartRequest:String(earlyStartNeeded),earlyStartAcknowledged:String(earlyStartNeeded),termsAccepted:'true',termsVersion:TERMS_VERSION},
@@ -561,10 +566,6 @@ function createApp(options = {}) {
     };
     if(taxEnabled){
       params.automatic_tax={enabled:true};
-      params.billing_address_collection='required';
-      params.tax_id_collection={enabled:true};
-      params.name_collection={individual:{enabled:true},business:{enabled:true,optional:true}};
-      params.invoice_creation={enabled:true};
     }
     try{session=await stripe.checkout.sessions.create(params,{idempotencyKey:`finalsnap-checkout-${attempt.id}`});}
     catch(error){console.error('Stripe-Testcheckout fehlgeschlagen:',error.type||error.code||'Stripe-Fehler');return fail(res,502,'Der Test-Checkout konnte gerade nicht geöffnet werden. Es wurde keine Zahlung bestätigt. Bitte versuche es erneut.');}
