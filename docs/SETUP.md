@@ -52,6 +52,8 @@ Ein einzelner Prozess/eine Instanz; kein Node-Cluster und keine horizontale Skal
 Datenträger ist während Build/Pre-deploy nicht verfügbar: Import dort nicht ausführen.
 Zusätzlich prüft `/ready` Datenbank, Upload-Datenträger und Object Storage. Für externe Alarmierung `/ready` überwachen; eine solche Überwachung ist nicht automatisch eingerichtet.
 
+Nach erfolgreicher Stripe-Zahlung wird eine Vertragsbestätigung mit dem bei Bestellung geltenden Bedingungstext und der Widerrufsinformation an die Konto-E-Mail gestellt. Der Versand wird persistent wiederholt, bis er erfolgreich ist. Vor Verkaufsfreigabe im Stripe- und Brevo-Testbetrieb verifizieren, dass die Nachricht zugestellt wird und im Postfach gespeichert werden kann. Steuerberechnung/Rechnung über Stripe Tax separat testen; `STRIPE_TAX_ENABLED` bleibt aus, bis die deutsche Steuerregistrierung im Stripe-Testmodus eingerichtet und bestätigt wurde.
+
 ## Zielbetrieb Deutschland: Render Frankfurt plus Hetzner Object Storage
 
 Der deutsche Dienst `finalsnap-deutschland` ist unter `https://finalsnap.de` live.

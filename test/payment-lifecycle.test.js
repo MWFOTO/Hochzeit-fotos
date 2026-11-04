@@ -57,7 +57,7 @@ test('Checkout retries the same album; refund decisions and dispute events are a
   assert.equal((await request('/ops/payments',{user:admin})).response.status,200);
   const eventDate=new Date(Date.now()+30*86400000).toISOString().slice(0,10);
   assert.equal((await request('/api/events',{user:admin,method:'POST',body:{eventId:'refund-event',title:'Refund test album',eventDate,trial:false}})).response.status,201);
-  const first=await request('/api/checkout',{user:admin,method:'POST',body:{eventId:'refund-event'}});
+  const first=await request('/api/checkout',{user:admin,method:'POST',body:{termsAccepted:true,eventId:'refund-event'}});
   assert.equal(first.response.status,200);assert.equal(created,1);
   assert.equal(checkoutRequests[0].locale,'de');assert.equal(checkoutRequests[0].submit_type,'pay');
   assert.match(checkoutRequests[0].custom_text.submit.message,/49,90 € inkl\. 19 % USt\./);
@@ -66,13 +66,13 @@ test('Checkout retries the same album; refund decisions and dispute events are a
   assert.deepEqual(checkoutRequests[0].name_collection,{individual:{enabled:true},business:{enabled:true,optional:true}});
   const payment=app.locals.db.prepare('SELECT * FROM payments WHERE event_id=?').get('refund-event');
   const session1=sessions.get(payment.stripe_session_id);
-  const repeated=await request('/api/checkout',{user:admin,method:'POST',body:{eventId:'refund-event'}});
+  const repeated=await request('/api/checkout',{user:admin,method:'POST',body:{termsAccepted:true,eventId:'refund-event'}});
   assert.equal(repeated.response.status,200);assert.equal(created,1);assert.equal(repeated.data.url,first.data.url);
   session1.status='expired';
   assert.equal(await webhook('checkout.session.expired',session1,'evt_expired'),200);
   const retryState=await request(`/api/checkout/${session1.id}`,{user:admin});
   assert.equal(retryState.data.status,'retry_available');assert.equal(retryState.data.retryAvailable,true);
-  const second=await request('/api/checkout',{user:admin,method:'POST',body:{eventId:'refund-event'}});
+  const second=await request('/api/checkout',{user:admin,method:'POST',body:{termsAccepted:true,eventId:'refund-event'}});
   assert.equal(second.response.status,200);assert.equal(second.data.attempt,2);assert.equal(created,2);
   const session2=sessions.get(app.locals.db.prepare('SELECT stripe_session_id FROM payments WHERE id=?').get(payment.id).stripe_session_id);
   assert.notEqual(session1.id,session2.id);
@@ -129,4 +129,21 @@ test('Checkout retries the same album; refund decisions and dispute events are a
   const other=await register('other@finalsnap.de');assert.equal((await request('/api/event/refund-event/invoice',{user:other})).response.status,404);
   const payments=await request('/api/admin/payments',{user:admin});
   assert.equal(payments.response.status,200);assert.equal(payments.data.payments[0].refunds.length,3);
+});
+
+test('Consumer early-start consent is required, persisted, and included in the test checkout',async()=>{
+  const buyer=await register('early-start@finalsnap.de');
+  const eventDate=new Date(Date.now()+5*86400000).toISOString().slice(0,10);
+  assert.equal((await request('/api/events',{user:buyer,method:'POST',body:{eventId:'early-start',title:'Early start test',eventDate,trial:false}})).response.status,201);
+  const missingConsent=await request('/api/checkout',{user:buyer,method:'POST',body:{termsAccepted:true,eventId:'early-start'}});
+  assert.equal(missingConsent.response.status,400);
+  assert.equal((await request('/api/checkout',{user:buyer,method:'POST',body:{termsAccepted:true,eventId:'early-start',customerType:'consumer',earlyStartRequest:true,earlyStartAcknowledged:true}})).response.status,200);
+  const payment=app.locals.db.prepare('SELECT * FROM payments WHERE event_id=?').get('early-start');
+  assert.equal(payment.customer_type,'consumer');
+  assert.ok(payment.early_start_requested_at);assert.ok(payment.early_start_acknowledged_at);
+  const session=sessions.get(payment.stripe_session_id);
+  assert.equal(session.metadata.earlyStartRequest,'true');assert.equal(session.metadata.earlyStartAcknowledged,'true');
+  const withdrawal=await request('/widerruf');assert.equal(withdrawal.response.status,200);assert.match(withdrawal.data,/Muster-Widerrufsformular/);
+  const terms=await request('/bedingungen');assert.equal(terms.response.status,200);assert.match(terms.data,/49,90 Euro einschließlich der gesetzlichen Umsatzsteuer/);
+  assert.ok(payment.terms_accepted_at);assert.equal(payment.terms_version,'2026-11-04');
 });

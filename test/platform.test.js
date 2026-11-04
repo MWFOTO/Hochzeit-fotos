@@ -55,10 +55,10 @@ test('Multiple events, ownership and pending payment gate',async()=>{
   assert.equal((await request('/api/events',{method:'POST',user:other,body:{eventId:'birthday',title:'Collision',eventDate,plan:'event'}})).status,409);
   assert.equal((await request('/event/birthday')).status,402);
   assert.equal((await request('/api/event/birthday/qr',{user})).status,402);
-  assert.equal((await request('/api/checkout',{method:'POST',user:other,body:{eventId:'birthday'}})).status,404);
+  assert.equal((await request('/api/checkout',{method:'POST',user:other,body:{termsAccepted:true,eventId:'birthday'}})).status,404);
 });
 test('Checkout idempotency, signature, unpaid/amount/live rejection and delayed payment',async()=>{
-  for(let i=0;i<2;i++)assert.equal((await request('/api/checkout',{method:'POST',user,body:{eventId:'birthday'}})).status,200);
+  for(let i=0;i<2;i++)assert.equal((await request('/api/checkout',{method:'POST',user,body:{termsAccepted:true,eventId:'birthday'}})).status,200);
   assert.equal(creations,1);paidSession=[...sessions.values()][0];
   assert.equal(await webhook(paidSession,{signature:false}),400);
   assert.equal(await webhook(paidSession),200);assert.equal(app.locals.db.prepare('SELECT status FROM events WHERE id=?').get('birthday').status,'pending');
@@ -66,6 +66,10 @@ test('Checkout idempotency, signature, unpaid/amount/live rejection and delayed 
   assert.equal(await webhook({...paid,amount_total:1}),500);
   assert.equal(await webhook({...paid,livemode:true}),500);
   assert.equal(await webhook(paid,{type:'checkout.session.async_payment_succeeded',id:'evt_paid'}),200);
+  const confirmation=app.locals.db.prepare('SELECT * FROM contract_confirmations WHERE payment_id=(SELECT id FROM payments WHERE event_id=?)').get('birthday');
+  assert.equal(confirmation.status,'sent');
+  const contractMail=sentMail.find(message=>message.subject.includes('Vertragsbestätigung'));
+  assert.ok(contractMail);assert.match(contractMail.text,/49,90 EUR/);assert.match(contractMail.text,/Widerrufsinformation/);assert.match(contractMail.text,/Muster-Widerrufsformular/);
   const expiry=app.locals.db.prepare('SELECT expires_at FROM events WHERE id=?').get('birthday').expires_at;
   assert.equal(await webhook(paid,{id:'evt_paid'}),200);assert.equal(await webhook(paid,{id:'evt_second'}),200);
   assert.equal(app.locals.db.prepare('SELECT expires_at FROM events WHERE id=?').get('birthday').expires_at,expiry);
@@ -194,7 +198,7 @@ test('Sessions persist across application restart and logout invalidates them',a
 test('Account deletion verifies password, removes albums and separates retained payment records',async()=>{
   const account=await register('delete-account@example.com');
   for(const eventId of ['delete-free','delete-open','delete-paid']) assert.equal((await request('/api/events',{method:'POST',user:account,body:{eventId,title:'Private Event',eventDate,plan:'event',trial:false}})).status,201);
-  const openCheckout=await request('/api/checkout',{method:'POST',user:account,body:{eventId:'delete-open'}});assert.equal(openCheckout.status,200);
+  const openCheckout=await request('/api/checkout',{method:'POST',user:account,body:{termsAccepted:true,eventId:'delete-open'}});assert.equal(openCheckout.status,200);
   const openPaymentId=app.locals.db.prepare('SELECT id FROM payments WHERE event_id=?').get('delete-open').id;
   const openSessionId=app.locals.db.prepare('SELECT stripe_session_id FROM payments WHERE id=?').get(openPaymentId).stripe_session_id;
   app.locals.db.prepare("INSERT INTO payments (id,event_id,amount_cents,months,status) VALUES (?,?,?,?,?)").run('paid-record','delete-paid',4990,3,'paid');
@@ -233,7 +237,7 @@ test('Free trial quota, compression, counters and upgrade preserve photos and gu
   event=(await request('/api/events',{user:trialUser})).data.events[0];assert.equal(event.photoCount,25);assert.equal(event.upload_successes,4);assert.equal(event.upload_failures,1);
   assert.equal((await request('/api/event/trial-event/qr',{user:trialUser})).status,200);
   const second=await request('/api/events',{method:'POST',user:trialUser,body:{eventId:'second-trial',title:'Second',eventDate,plan:'event'}});assert.equal(second.data.trial,true);
-  assert.equal((await request('/api/checkout',{method:'POST',user:trialUser,body:{eventId:'trial-event'}})).status,200);
+  assert.equal((await request('/api/checkout',{method:'POST',user:trialUser,body:{termsAccepted:true,eventId:'trial-event'}})).status,200);
   const row=app.locals.db.prepare('SELECT stripe_session_id FROM payments WHERE event_id=?').get('trial-event');const session=sessions.get(row.stripe_session_id);session.payment_status='paid';
   assert.equal(await webhook(session),200);
   event=(await request('/api/events',{user:trialUser})).data.events.find(e=>e.id==='trial-event');assert.equal(event.status,'paid');assert.equal(event.photoCount,25);assert.equal(event.guest_token,trialToken);
@@ -281,15 +285,15 @@ test('Verification and password recovery pages serve their executable scripts',a
 
 test('Checkout rejects client-side plan and price changes and charges the stored quote',async()=>{
  const stranger=await register('packages-other@example.com');const u=await register('packages@example.com');assert.equal((await request('/register?plan=6m',{user:u})).res.headers.get('location'),'/dashboard?plan=6m');assert.equal((await request('/register?plan=invalid',{user:u})).res.headers.get('location'),'/dashboard');await request('/api/events',{method:'POST',user:u,body:{eventId:'package-test',title:'Packages',eventDate,plan:'event'}});
- assert.equal((await request('/api/checkout',{method:'POST',user:stranger,body:{eventId:'package-test',plan:'6m'}})).status,404);
- assert.equal((await request('/api/checkout',{method:'POST',user:u,body:{eventId:'package-test',plan:'wrong'}})).status,400);
- assert.equal((await request('/api/checkout',{method:'POST',user:u,body:{eventId:'package-test',plan:'6m',amount_cents:1}})).status,409);
+ assert.equal((await request('/api/checkout',{method:'POST',user:stranger,body:{termsAccepted:true,eventId:'package-test',plan:'6m'}})).status,404);
+ assert.equal((await request('/api/checkout',{method:'POST',user:u,body:{termsAccepted:true,eventId:'package-test',plan:'wrong'}})).status,400);
+ assert.equal((await request('/api/checkout',{method:'POST',user:u,body:{termsAccepted:true,eventId:'package-test',plan:'6m',amount_cents:1}})).status,409);
  assert.equal(app.locals.db.prepare('SELECT COUNT(*) n FROM payments WHERE event_id=?').get('package-test').n,0);
- assert.equal((await request('/api/checkout',{method:'POST',user:u,body:{eventId:'package-test',plan:'event',amount_cents:1}})).status,200);
+ assert.equal((await request('/api/checkout',{method:'POST',user:u,body:{termsAccepted:true,eventId:'package-test',plan:'event',amount_cents:1}})).status,200);
  const payment=app.locals.db.prepare('SELECT * FROM payments WHERE event_id=?').get('package-test');assert.equal(payment.amount_cents,4990);assert.equal(payment.months,3);
  assert.equal(sessions.get(payment.stripe_session_id).amount_total,4990);
- assert.equal((await request('/api/checkout',{method:'POST',user:u,body:{eventId:'package-test',plan:'1m'}})).status,409);
- assert.equal((await request('/api/checkout',{method:'POST',user:u,body:{eventId:'package-test',plan:'event'}})).status,200);
+ assert.equal((await request('/api/checkout',{method:'POST',user:u,body:{termsAccepted:true,eventId:'package-test',plan:'1m'}})).status,409);
+ assert.equal((await request('/api/checkout',{method:'POST',user:u,body:{termsAccepted:true,eventId:'package-test',plan:'event'}})).status,200);
  const session=sessions.get(payment.stripe_session_id);session.payment_status='paid';assert.equal(await webhook(session),200);
  const event=(await request('/api/events',{user:u})).data.events[0];assert.equal(event.plan,'event');assert.equal(event.status,'paid');assert.equal(event.amount_cents,4990);assert.ok(event.expires_at>Date.now()+110*86400000);assert.ok(event.expires_at<Date.now()+130*86400000);
 });

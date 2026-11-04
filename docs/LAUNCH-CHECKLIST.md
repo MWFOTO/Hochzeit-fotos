@@ -16,6 +16,7 @@ Stand: 4. November 2026. Der deutsche Dienst ist live; Stripe bleibt im Testmodu
 - [x] Aktiver Dienst `finalsnap-deutschland` in Frankfurt; `/health` und `/ready` geprüft.
 - [x] Fotospeicher über Hetzner Object Storage in Nürnberg konfiguriert; Render-Disk enthält SQLite und temporäre Uploads.
 - [x] Checkout-Wiederholungen, dokumentierte manuelle Erstattungen sowie Refund-/Streitfall-Protokollierung und Meldungen implementiert.
+- [x] Versionierte Leistungsbedingungen, protokollierte Checkout-Annahme, Verbraucher-Widerrufsseite mit Musterformular und E-Mail-Vertragsbestätigung mit wiederholbarem Versand implementiert.
 - [x] Öffentliche Preisangabe: 49,90 € Endpreis inkl. 19 % USt.; Pakettext nennt 25 GB und 90 Tage ab Veranstaltungsdatum.
 - [x] Gästefotos sind pro Browser getrennt: Gäste sehen nur eigene Uploads; Veranstalter sehen alle. Gleicher Browser bedeutet dieselbe anonyme Gästesitzung.
 - [x] 90 Tage Upload, Ansicht und Download ab Veranstaltungsdatum; danach automatische Löschung ohne zusätzliche Downloadphase.
@@ -29,6 +30,7 @@ Stand: 4. November 2026. Der deutsche Dienst ist live; Stripe bleibt im Testmodu
 - [ ] Im Stripe-Testmodus Privat- und Geschäftskauf aus FinalSnap durchführen; Rechnungs-PDF, ausgewiesene 19 % USt., Endpreis 49,90 € und Rechnungslink im Veranstalterkonto prüfen.
 - [ ] Den echten Stripe-Testcheckout visuell prüfen: deutsche Zahlungsschaltfläche mit eindeutigem Zahlungsversprechen, Name/Unternehmensname und hervorgehobene Pflichtangaben unmittelbar vor der Bestellung.
 - [ ] Vertragsbestätigung mit Vertragsbedingungen und Widerrufsinformation auf dauerhaftem Datenträger zustellen und Empfang praktisch prüfen.
+- [ ] Die neue Vertragsbestätigung im Testkonto zustellen lassen und prüfen, ob sie vollständig, lesbar und speicherbar ist; die Datenschutzhinweise für den Belegversand und die Aufbewahrung final abstimmen.
 - [ ] Stripe-Einstellung für automatische Zahlungsbelege prüfen. Stripe versendet keine automatischen Testbelege; den Testbeleg manuell im Stripe-Dashboard auslösen und den Live-E-Mailversand vor Freigabe prüfen.
 - [ ] Stripe-Testerstattung und Teststreitfall auslösen; Status, Albumzugang, Protokoll und Alarmmail prüfen.
 - [ ] Anzahl, Durchschnittsgröße und Gesamtvolumen der Fotos, Uploadfehler und Supportbedarf auswerten.

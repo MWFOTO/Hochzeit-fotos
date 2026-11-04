@@ -29,7 +29,7 @@ test('new events and checkout use 49.90 EUR; existing quoted orders keep 34.90 E
     }
     // Simulate a quote created before the price update.
     db.prepare('UPDATE events SET amount_cents=3490 WHERE id=?').run('existing-price');
-    for(const id of ['new-price','existing-price'])assert.equal((await request('/api/checkout',{eventId:id})).status,200);
+    for(const id of ['new-price','existing-price'])assert.equal((await request('/api/checkout',{termsAccepted:true,eventId:id})).status,200);
     assert.deepEqual(amounts,[4990,3490]);
     assert.deepEqual(db.prepare('SELECT amount_cents FROM payments ORDER BY amount_cents DESC').all().map(row=>row.amount_cents),[4990,3490]);
   } finally {await new Promise(resolve=>server.close(resolve));db.close();fs.rmSync(root,{recursive:true,force:true});}

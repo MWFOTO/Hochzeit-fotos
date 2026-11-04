@@ -22,7 +22,9 @@ function openDatabase(filename) {
     CREATE TABLE IF NOT EXISTS payments (id TEXT PRIMARY KEY,
       event_id TEXT NOT NULL REFERENCES events(id), stripe_session_id TEXT UNIQUE,
       amount_cents INTEGER NOT NULL, months INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
-      stripe_payment_intent_id TEXT, stripe_invoice_id TEXT, stripe_customer_id TEXT, refunded_at INTEGER);
+      stripe_payment_intent_id TEXT, stripe_invoice_id TEXT, stripe_customer_id TEXT, refunded_at INTEGER,
+      customer_type TEXT NOT NULL DEFAULT 'consumer', early_start_requested_at INTEGER,
+      early_start_acknowledged_at INTEGER, terms_accepted_at INTEGER, terms_version TEXT);
     CREATE TABLE IF NOT EXISTS payment_attempts (
       id TEXT PRIMARY KEY, payment_id TEXT NOT NULL REFERENCES payments(id) ON DELETE CASCADE,
       stripe_session_id TEXT NOT NULL UNIQUE, attempt_no INTEGER NOT NULL,
@@ -41,6 +43,10 @@ function openDatabase(filename) {
     CREATE TABLE IF NOT EXISTS payment_alerts (
       event_id TEXT PRIMARY KEY REFERENCES payment_events(id), status TEXT NOT NULL DEFAULT 'pending',
       attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, created_at INTEGER NOT NULL, sent_at INTEGER);
+    CREATE TABLE IF NOT EXISTS contract_confirmations (
+      payment_id TEXT PRIMARY KEY REFERENCES payments(id) ON DELETE CASCADE,
+      recipient TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
+      last_error TEXT, created_at INTEGER NOT NULL, sent_at INTEGER);
     CREATE TABLE IF NOT EXISTS backup_runs (
       id TEXT PRIMARY KEY, started_at INTEGER NOT NULL, completed_at INTEGER,
       status TEXT NOT NULL, db_object_key TEXT, photo_objects INTEGER, photo_bytes INTEGER,
@@ -58,6 +64,11 @@ function openDatabase(filename) {
   if(!paymentColumns.has('stripe_invoice_id'))db.exec('ALTER TABLE payments ADD COLUMN stripe_invoice_id TEXT');
   if(!paymentColumns.has('stripe_customer_id'))db.exec('ALTER TABLE payments ADD COLUMN stripe_customer_id TEXT');
   if(!paymentColumns.has('refunded_at'))db.exec('ALTER TABLE payments ADD COLUMN refunded_at INTEGER');
+  if(!paymentColumns.has('customer_type'))db.exec("ALTER TABLE payments ADD COLUMN customer_type TEXT NOT NULL DEFAULT 'consumer'");
+  if(!paymentColumns.has('early_start_requested_at'))db.exec('ALTER TABLE payments ADD COLUMN early_start_requested_at INTEGER');
+  if(!paymentColumns.has('early_start_acknowledged_at'))db.exec('ALTER TABLE payments ADD COLUMN early_start_acknowledged_at INTEGER');
+  if(!paymentColumns.has('terms_accepted_at'))db.exec('ALTER TABLE payments ADD COLUMN terms_accepted_at INTEGER');
+  if(!paymentColumns.has('terms_version'))db.exec('ALTER TABLE payments ADD COLUMN terms_version TEXT');
   db.prepare(`INSERT OR IGNORE INTO payment_attempts (id,payment_id,stripe_session_id,attempt_no,status,created_at,updated_at)
     SELECT 'legacy-'||p.id,p.id,p.stripe_session_id,1,CASE WHEN p.status='paid' THEN 'paid' ELSE 'open' END,e.created_at,e.created_at
     FROM payments p JOIN events e ON e.id=p.event_id WHERE p.stripe_session_id IS NOT NULL`).run();

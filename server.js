@@ -17,6 +17,7 @@ const { createOperationsMonitor } = require('./operations-monitor');
 const { createUploadCapacity, GiB, MiB, MIN_UPLOAD_FREE_BYTES, uploadDiskWarningThreshold } = require('./upload-capacity');
 const scrypt = promisify(crypto.scrypt);
 const PLANS = { event:{label:'FinalSnap Fotoalbum',months:3,retentionDays:90,priceCents:4990}, '1m':{label:'1 Monat (alt)',months:1,priceCents:1900,legacy:true}, '3m':{label:'3 Monate (alt)',months:3,priceCents:2900,legacy:true}, '6m':{label:'6 Monate (alt)',months:6,priceCents:3900,legacy:true}, '12m':{label:'12 Monate (alt)',months:12,priceCents:5900,legacy:true} };
+const TERMS_VERSION = '2026-11-04';
 const RETENTION_MS = 90*86400000;
 // Event deadlines use calendar days in Europe/Berlin, including DST changes.
 function eventDeadline(date) {
@@ -161,6 +162,53 @@ function createApp(options = {}) {
       }
     }
   }
+  async function flushContractConfirmations() {
+    const pending=db.prepare("SELECT c.*,p.amount_cents,p.customer_type,p.early_start_requested_at,p.early_start_acknowledged_at,p.terms_version,e.id album_id,e.title,e.event_date,e.email FROM contract_confirmations c JOIN payments p ON p.id=c.payment_id JOIN events e ON e.id=p.event_id WHERE c.status='pending' ORDER BY c.created_at LIMIT 20").all();
+    for(const confirmation of pending){
+      try{
+        if(!mailer)throw new Error('Brevo-Versand ist nicht eingerichtet.');
+        const body=[
+          'Vertragsbestätigung – FinalSnap Fotoalbum',
+          '',
+          'Dein Vertrag ist nach bestätigtem Zahlungseingang zustande gekommen.',
+          `Anbieter: Matthias Wendland – Matthias Wendland Fotografie, Kupferweg 10, 33334 Gütersloh, Deutschland; info@finalsnap.de.`,
+          `Produkt: FinalSnap Fotoalbum für „${confirmation.title}“ (${confirmation.album_id}).`,
+          `Preis: einmalig ${(confirmation.amount_cents/100).toFixed(2).replace('.',',')} EUR einschließlich 19 % deutscher Umsatzsteuer.`,
+          `Kundentyp bei Bestellung: ${confirmation.customer_type==='business'?'Geschäftskunde':'Verbraucher'}.`,
+          `Leistungsbeginn: ${confirmation.event_date||'mit Freischaltung'}. Leistungszeitraum: bis zu 90 Tage ab Veranstaltungsdatum, für Upload, Ansicht und Download.`,
+          'Leistungsumfang: bis zu 25 GB verarbeitete Fotos je Veranstaltung; Uploads werden auf höchstens 2.560 Pixel längste Kante verkleinert und als JPEG komprimiert; Originaldateien und Videos sind nicht enthalten. Nach Ende des Albumzeitraums endet der Zugang und Fotos sowie Gästebucheinträge werden nach dem beschriebenen Löschablauf entfernt.',
+          '',
+          'VERTRAGSBEDINGUNGEN – Fassung '+(confirmation.terms_version||TERMS_VERSION),
+          'Anbieter: Matthias Wendland – Matthias Wendland Fotografie, Kupferweg 10, 33334 Gütersloh, Deutschland; info@finalsnap.de.',
+          '1. Geltung: Diese Bedingungen gelten für das kostenpflichtige FinalSnap-Fotoalbum. Verbraucher und Unternehmen können buchen. Unternehmen handeln bei einer Geschäftskundenbuchung im Rahmen ihrer gewerblichen oder selbstständigen Tätigkeit. Zwingende Verbraucherrechte bleiben unberührt.',
+          '2. Vertrag und Preis: Ein Fotoalbum je Veranstaltung kostet einmalig 49,90 Euro einschließlich der gesetzlichen Umsatzsteuer. Es gibt keine laufende Abonnementgebühr. Der Vertrag kommt mit bestätigter Zahlung und Freischaltung zustande.',
+          '3. Leistung: Das Album beginnt am angegebenen Veranstaltungsdatum und ist ab diesem Datum 90 Tage für Upload, Ansicht und Download verfügbar. Danach endet der Zugang; Albumfotos und Gästebucheinträge werden nach dem vorgesehenen Löschablauf entfernt. Eine zusätzliche Downloadphase ist nicht enthalten. Bis zu 25 vorab hochgeladene Testfotos bleiben bei Buchung erhalten und zählen zum Speicherplatz. Je Veranstaltung stehen bis zu 25 GB für verarbeitete Fotos zur Verfügung. Uploads werden auf höchstens 2.560 Pixel längste Kante verkleinert und als JPEG komprimiert; Originaldateien und Videos sind nicht enthalten.',
+          '4. Nutzung: Der Veranstalter verwaltet das Album und teilt Gästen Link oder QR-Code. Er ist dafür verantwortlich, Zugänge nur berechtigten Gästen zu geben, Gäste geeignet zu informieren und nur Inhalte mit den erforderlichen Rechten zu teilen. Unzulässige Inhalte können gemeldet und entfernt werden.',
+          '5. Verfügbarkeit und Support: Für die Nutzung sind Internetverbindung, geeignetes Gerät und aktueller Browser erforderlich. Wir bemühen uns um zuverlässigen Betrieb, schulden aber keine ununterbrochene oder jederzeit fehlerfreie Verfügbarkeit. Wartung und Störungen können den Dienst beeinträchtigen. Support: info@finalsnap.de. Gesetzliche Rechte bleiben bestehen.',
+          '6. Zahlung und Erstattung: Die einmalige Zahlung erfolgt über Stripe. Nach erfolgreicher Zahlung wird der Albumdienst freigeschaltet. Ein Zahlungsbeleg oder eine Rechnung wird bereitgestellt, sobald die erforderlichen Rechnungsangaben erhoben wurden. Gesetzliche Erstattungsansprüche bleiben unberührt. Eine freiwillige vollständige Erstattung beendet nach ihrer Bestätigung den Albumzugang; zwingende Rechte haben Vorrang.',
+          '7. Datenschutz und Löschung: Einzelheiten zur Verarbeitung und zu Dienstleistern stehen unter '+baseUrl.origin+'/datenschutz. Die Albumlaufzeit steht in Abschnitt 3. Gesetzliche Aufbewahrungspflichten für Zahlungs- und Buchungsunterlagen bleiben unberührt.',
+          '8. Recht: Es gilt deutsches Recht. Bei Verbrauchern gilt diese Rechtswahl nur, soweit dadurch nicht der Schutz zwingender Bestimmungen ihres gewöhnlichen Aufenthaltsstaates entzogen wird.',
+          '',
+          'WIDERRUFSBELEHRUNG FÜR VERBRAUCHER',
+          'Sie können binnen vierzehn Tagen ab Vertragsschluss ohne Angabe von Gründen widerrufen. Zur Ausübung müssen Sie Matthias Wendland – Matthias Wendland Fotografie, Kupferweg 10, 33334 Gütersloh, Deutschland, info@finalsnap.de, mittels einer eindeutigen Erklärung (zum Beispiel Brief oder E-Mail) über Ihren Entschluss informieren. Zur Fristwahrung genügt die rechtzeitige Absendung.',
+          'Im Fall des Widerrufs erstatten wir alle erhaltenen Zahlungen unverzüglich und spätestens binnen vierzehn Tagen ab Eingang Ihrer Mitteilung mit demselben Zahlungsmittel, sofern nichts anderes vereinbart wurde. Für die Rückzahlung berechnen wir kein Entgelt.',
+          'Wenn Sie ausdrücklich verlangen, dass der entgeltliche Dienst während der Widerrufsfrist beginnt, kann bei einem späteren Widerruf angemessener Wertersatz für bis dahin erbrachte Leistungen anfallen, sofern die gesetzlichen Voraussetzungen erfüllt sind. Das Widerrufsrecht bei einer Dienstleistung erlischt erst mit vollständiger Vertragserfüllung und nur, wenn Sie dem vorzeitigen Beginn ausdrücklich zugestimmt und Ihre Kenntnis vom Erlöschen bei vollständiger Erfüllung bestätigt haben. Das vorzeitige Verlangen und die Bestätigung werden nur eingeholt, wenn der Albumdienst in der Widerrufsfrist beginnen soll.',
+          'Muster-Widerrufsformular: An Matthias Wendland – Matthias Wendland Fotografie, Kupferweg 10, 33334 Gütersloh, Deutschland, info@finalsnap.de: Hiermit widerrufe ich den Vertrag über das FinalSnap-Fotoalbum für die Veranstaltung __________. Bestellt am __________. Name __________. Anschrift __________. Datum __________. Unterschrift (nur bei Papiermitteilung) __________.',
+          'Die Widerrufsinformation und das Musterformular stehen zusätzlich unter '+baseUrl.origin+'/widerruf',
+          confirmation.early_start_requested_at&&confirmation.early_start_acknowledged_at?'Bei deiner Bestellung wurden ein ausdrückliches Verlangen nach vorzeitigem Leistungsbeginn und die Bestätigung der Widerrufsfolgen mit Zeitstempel gespeichert.':'Für diese Bestellung wurde kein vorzeitiger Leistungsbeginn innerhalb der Widerrufsfrist angefordert.',
+          '',
+          'Muster-Widerrufsformular (für Verbraucher): An Matthias Wendland – Matthias Wendland Fotografie, Kupferweg 10, 33334 Gütersloh, info@finalsnap.de. Hiermit widerrufe ich den Vertrag über das FinalSnap Fotoalbum für die Veranstaltung __________. Bestellt am __________. Name __________. Anschrift __________. Datum __________.',
+          '',
+          'Bitte bewahre diese E-Mail als Vertragsbestätigung auf. Fragen: info@finalsnap.de.'
+        ].join('\n');
+        await mailer({to:confirmation.recipient,subject:'Deine Vertragsbestätigung und Widerrufsinformation · FinalSnap',text:body});
+        db.prepare("UPDATE contract_confirmations SET status='sent',recipient='',attempts=attempts+1,last_error=NULL,sent_at=? WHERE payment_id=?").run(Date.now(),confirmation.payment_id);
+      }catch(error){
+        db.prepare("UPDATE contract_confirmations SET attempts=attempts+1,last_error=? WHERE payment_id=?").run(String(error.message||error).slice(0,300),confirmation.payment_id);
+        console.error('Vertragsbestätigung konnte nicht versendet werden:',String(error.message||error));
+      }
+    }
+  }
   function refreshRefundState(paymentId) {
     const payment=db.prepare('SELECT * FROM payments WHERE id=?').get(paymentId);
     const refunded=Number(db.prepare("SELECT COALESCE(SUM(amount_cents),0) amount FROM refunds WHERE payment_id=? AND status='succeeded'").get(paymentId).amount);
@@ -191,13 +239,15 @@ function createApp(options = {}) {
       db.prepare('INSERT INTO webhook_receipts VALUES (?,?)').run(notification.id,now);
       const attempt=db.prepare('SELECT * FROM payment_attempts WHERE stripe_session_id=?').get(object.id);
       if(checkoutTypes.has(type)){
-        if(object.currency!=='eur'||object.amount_total!==payment.amount_cents||object.mode!=='payment'||object.metadata?.paymentId!==payment.id||object.metadata?.eventId!==payment.event_id)throw new Error('Zahlungsdaten stimmen nicht überein');
+        const metadata=object.metadata||{};
+        const consentMatches=(metadata.customerType||'consumer')===payment.customer_type&&(metadata.earlyStartRequest||'false')===String(!!payment.early_start_requested_at)&&(metadata.earlyStartAcknowledged||'false')===String(!!payment.early_start_acknowledged_at)&&(metadata.termsAccepted||'false')===String(!!payment.terms_accepted_at)&&(metadata.termsVersion||'')===(payment.terms_version||'');
+        if(object.currency!=='eur'||object.amount_total!==payment.amount_cents||object.mode!=='payment'||metadata.paymentId!==payment.id||metadata.eventId!==payment.event_id||!consentMatches)throw new Error('Zahlungsdaten stimmen nicht überein');
         if(attempt)db.prepare('UPDATE payment_attempts SET status=?,updated_at=? WHERE id=?').run(type==='checkout.session.expired'?'expired':type==='checkout.session.async_payment_failed'?'failed':object.payment_status==='paid'?'paid':'complete',now,attempt.id);
         if(object.payment_intent){const pi=typeof object.payment_intent==='string'?object.payment_intent:object.payment_intent.id;db.prepare('UPDATE payments SET stripe_payment_intent_id=? WHERE id=?').run(pi,payment.id);}
         if(object.invoice||object.customer){const invoice=typeof object.invoice==='string'?object.invoice:object.invoice?.id;const customer=typeof object.customer==='string'?object.customer:object.customer?.id;db.prepare('UPDATE payments SET stripe_invoice_id=COALESCE(?,stripe_invoice_id),stripe_customer_id=COALESCE(?,stripe_customer_id) WHERE id=?').run(invoice,customer,payment.id);}
         if(['checkout.session.completed','checkout.session.async_payment_succeeded'].includes(type)&&object.payment_status==='paid'&&payment.status==='pending'){
           const e=lookup(payment.event_id);
-          if(['pending','trial'].includes(e.status)&&!e.deleted_at){const eventEnd=e.event_date?eventDeadline(e.event_date):e.expires_at||now+payment.months*30*86400000;db.prepare("UPDATE events SET status='paid',expires_at=? WHERE id=?").run(eventEnd,e.id);db.prepare("UPDATE payments SET status='paid' WHERE id=?").run(payment.id);}
+          if(['pending','trial'].includes(e.status)&&!e.deleted_at){const eventEnd=e.event_date?eventDeadline(e.event_date):e.expires_at||now+payment.months*30*86400000;db.prepare("UPDATE events SET status='paid',expires_at=? WHERE id=?").run(eventEnd,e.id);db.prepare("UPDATE payments SET status='paid' WHERE id=?").run(payment.id);db.prepare("INSERT OR IGNORE INTO contract_confirmations (payment_id,recipient,status,attempts,created_at) VALUES (?,?,'pending',0,?)").run(payment.id,e.email,now);}
         }
       }else if(type.startsWith('refund.')||type==='charge.refunded'){
         const refund=type==='charge.refunded'?null:object;
@@ -229,7 +279,7 @@ function createApp(options = {}) {
     let event;
     try { event = stripe.webhooks.constructEvent(req.body,req.headers['stripe-signature'],cfg.STRIPE_WEBHOOK_SECRET); }
     catch { return fail(res,400,'Ungültige Webhook-Signatur.'); }
-    try { fulfill(event); await flushPaymentAlerts(); res.json({received:true}); }
+    try { fulfill(event); await flushContractConfirmations(); await flushPaymentAlerts(); res.json({received:true}); }
     catch(err) { console.error('Webhook:',err.message); fail(res,500,'Zahlungsbestätigung konnte nicht verarbeitet werden.'); }
   });
   app.use(express.json({limit:'32kb'}));
@@ -329,7 +379,7 @@ function createApp(options = {}) {
     const events=db.prepare(`SELECT e.*, COUNT(p.id) photoCount, COALESCE(SUM(p.bytes),0) storageBytes
       FROM events e LEFT JOIN photos p ON p.event_id=e.id
       WHERE e.owner_id=? AND e.deleted_at IS NULL GROUP BY e.id ORDER BY e.created_at DESC`).all(req.user.id);
-    res.json({events:events.map(e=>({...e,expires_at:e.event_date?retentionUntil(e):e.expires_at,storageLimitBytes:eventStorageLimit(e,cfg),photoLimit:eventPhotoLimit(e,cfg),checkoutStarted:!!db.prepare('SELECT 1 FROM payments WHERE event_id=?').get(e.id),hasInvoice:!!db.prepare('SELECT stripe_invoice_id FROM payments WHERE event_id=?').get(e.id)?.stripe_invoice_id,readOnly:!active(e)&&readable(e),retentionUntil:retentionUntil(e),startsAt:startAt(e),guestUrl:readable(e)?`${baseUrl.origin}/event/${e.id}?token=${e.guest_token}`:null}))});
+    res.json({events:events.map(e=>{const payment=db.prepare('SELECT customer_type,early_start_requested_at,early_start_acknowledged_at,terms_accepted_at,terms_version,stripe_invoice_id FROM payments WHERE event_id=?').get(e.id);return {...e,expires_at:e.event_date?retentionUntil(e):e.expires_at,storageLimitBytes:eventStorageLimit(e,cfg),photoLimit:eventPhotoLimit(e,cfg),checkoutStarted:!!payment,customerType:payment?.customer_type||null,earlyStartRequested:!!payment?.early_start_requested_at,earlyStartAcknowledged:!!payment?.early_start_acknowledged_at,termsAccepted:!!payment?.terms_accepted_at,termsVersion:payment?.terms_version||null,hasInvoice:!!payment?.stripe_invoice_id,readOnly:!active(e)&&readable(e),retentionUntil:retentionUntil(e),startsAt:startAt(e),guestUrl:readable(e)?`${baseUrl.origin}/event/${e.id}?token=${e.guest_token}`:null};})});
   });
   app.get('/api/event/:eventId/invoice',loginRequired,owner,wrap(async(req,res)=>{
     const payment=db.prepare('SELECT stripe_invoice_id FROM payments WHERE event_id=?').get(req.event.id);
@@ -414,6 +464,12 @@ function createApp(options = {}) {
     if(!own(req,e))return fail(res,404,'Event nicht gefunden.');
     if(!['pending','trial'].includes(e.status)||e.deleted_at||(e.status==='trial'&&!active(e)))return fail(res,409,'Dieses Event kann nicht bezahlt werden.');
     if(!stripe||!cfg.STRIPE_WEBHOOK_SECRET)return fail(res,503,'Stripe-Testmodus noch nicht eingerichtet.');
+    if(req.body.termsAccepted!==true)return fail(res,400,'Bitte bestätige vor dem Checkout die Leistungsbedingungen.');
+    const customerType=['consumer','business'].includes(req.body.customerType)?req.body.customerType:'consumer';
+    const earlyStartNeeded=customerType==='consumer'&&!!e.event_date&&startAt(e)<Date.now()+14*86400000;
+    if(earlyStartNeeded&&(req.body.earlyStartRequest!==true||req.body.earlyStartAcknowledged!==true))return fail(res,400,'Bitte bestätige den möglichen vorzeitigen Leistungsbeginn und die Hinweise zum Widerruf.');
+    const earlyStartRequestedAt=earlyStartNeeded?Date.now():null;
+    const earlyStartAcknowledgedAt=earlyStartNeeded?earlyStartRequestedAt:null;
     if(req.body.plan!==undefined){const plan=PLANS[req.body.plan];if(!plan)return fail(res,400,'Bitte ein gültiges Paket wählen.');if(req.body.plan!==e.plan)return fail(res,409,'Das Paket und der Preis für dieses Album sind bereits festgelegt.');}
     let payment=db.prepare('SELECT * FROM payments WHERE event_id=?').get(e.id);
     if(!payment){const plan=PLANS[e.plan];db.prepare('INSERT INTO payments (id,event_id,amount_cents,months) VALUES (?,?,?,?)').run(crypto.randomUUID(),e.id,e.amount_cents,plan.months);payment=db.prepare('SELECT * FROM payments WHERE event_id=?').get(e.id);}
@@ -421,9 +477,14 @@ function createApp(options = {}) {
     let attempt=db.prepare('SELECT * FROM payment_attempts WHERE payment_id=? ORDER BY attempt_no DESC LIMIT 1').get(payment.id);
     let session=null;
     if(attempt&&attempt.status==='open'&&!attempt.stripe_session_id.startsWith('creating_')){
-      try{session=await stripe.checkout.sessions.retrieve(attempt.stripe_session_id);}catch(error){if(error.code!=='resource_missing')throw error;}
-      if(session?.livemode!==false)throw new Error('Live-Checkout gesperrt');
-      if(session?.status==='open')return res.json({url:session.url||`${baseUrl.origin}/success?session_id=${session.id}`,attempt:attempt.attempt_no});
+      try{session=await stripe.checkout.sessions.retrieve(attempt.stripe_session_id);}catch(error){if(error.code!=='resource_missing')throw error;db.prepare("UPDATE payment_attempts SET status='expired',updated_at=? WHERE id=?").run(Date.now(),attempt.id);attempt=null;}
+      if(session&&session.livemode!==false)throw new Error('Live-Checkout gesperrt');
+      if(session?.status==='open'&&session.metadata?.customerType===customerType&&session.metadata?.earlyStartRequest===String(earlyStartNeeded))return res.json({url:session.url||`${baseUrl.origin}/success?session_id=${session.id}`,attempt:attempt.attempt_no});
+      if(session?.status==='open'){
+        await stripe.checkout.sessions.expire(session.id);
+        db.prepare("UPDATE payment_attempts SET status='expired',updated_at=? WHERE id=?").run(Date.now(),attempt.id);
+        attempt=null;
+      }
       if(session?.status==='expired')db.prepare("UPDATE payment_attempts SET status='expired',updated_at=? WHERE id=?").run(Date.now(),attempt.id);
       else if(session?.status==='complete'&&session.payment_status!=='paid')return fail(res,409,'Die Zahlung wird noch verarbeitet. Bitte aktualisiere die Seite in Kürze.');
       else if(session?.payment_status==='paid')return fail(res,409,'Die Zahlung ist bereits eingegangen. Bitte lade dein Album neu.');
@@ -448,7 +509,7 @@ function createApp(options = {}) {
       customer_creation:'always',
       line_items:[{price_data:priceData,quantity:1}],
       custom_text:{submit:{message:'Einmalig 49,90 € inkl. 19 % USt. pro Veranstaltung. Bis zu 25 GB Fotos; Upload, Ansicht und Download für 90 Tage ab Veranstaltungsdatum. Anbieter: Matthias Wendland Fotografie (Einzelunternehmen), Gütersloh.'}},
-      metadata:{eventId:e.id,paymentId:payment.id,attemptId:attempt.id},
+      metadata:{eventId:e.id,paymentId:payment.id,attemptId:attempt.id,customerType,earlyStartRequest:String(earlyStartNeeded),earlyStartAcknowledged:String(earlyStartNeeded),termsAccepted:'true',termsVersion:TERMS_VERSION},
       success_url:`${baseUrl.origin}/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url:`${baseUrl.origin}/dashboard`
     };
@@ -464,6 +525,7 @@ function createApp(options = {}) {
     if(session.livemode!==false){console.error('Checkout mit Live-Modus abgewiesen.');return fail(res,503,'Der Checkout wurde aus Sicherheitsgründen blockiert. FinalSnap akzeptiert derzeit nur Stripe-Testzahlungen.');}
     const now=Date.now();
     db.transaction(()=>{
+      db.prepare('UPDATE payments SET customer_type=?,early_start_requested_at=?,early_start_acknowledged_at=?,terms_accepted_at=?,terms_version=? WHERE id=?').run(customerType,earlyStartRequestedAt,earlyStartAcknowledgedAt,now,TERMS_VERSION,payment.id);
       db.prepare("UPDATE payment_attempts SET stripe_session_id=?,status='open',updated_at=? WHERE id=?").run(session.id,now,attempt.id);
       db.prepare('UPDATE payments SET stripe_session_id=? WHERE id=?').run(session.id,payment.id);
       db.prepare('UPDATE events SET stripe_session_id=? WHERE id=?').run(session.id,e.id);
@@ -760,11 +822,13 @@ function createApp(options = {}) {
   app.get('/verify-email',(req,res)=>res.sendFile(path.join(pub,'verify-email.html')));
   app.get('/impressum',(req,res)=>res.sendFile(path.join(pub,'impressum.html')));
   app.get('/datenschutz',(req,res)=>res.sendFile(path.join(pub,'datenschutz.html')));
+  app.get('/widerruf',(req,res)=>res.sendFile(path.join(pub,'widerruf.html')));
+  app.get('/bedingungen',(req,res)=>res.sendFile(path.join(pub,'bedingungen.html')));
   app.get('/register',(req,res)=>req.user?res.redirect(['event','1m','3m','6m'].includes(req.query.plan)?`/dashboard?plan=${encodeURIComponent(req.query.plan)}`:'/dashboard'):res.sendFile(path.join(pub,'login.html')));
   app.get('/login',(req,res)=>res.sendFile(path.join(pub,'login.html')));
   app.get('/dashboard',(req,res)=>req.user?res.sendFile(path.join(pub,'dashboard.html')):res.redirect('/login'));
   app.get('/success',(req,res)=>req.user?res.sendFile(path.join(pub,'success.html')):res.redirect('/login'));
-  app.locals.paymentAlertTimer=setInterval(()=>flushPaymentAlerts().catch(error=>console.error('Zahlungsalarme konnten nicht verarbeitet werden:',error.message)),60000);app.locals.paymentAlertTimer.unref();
+  app.locals.paymentAlertTimer=setInterval(()=>{flushPaymentAlerts().catch(error=>console.error('Zahlungsalarme konnten nicht verarbeitet werden:',error.message));flushContractConfirmations().catch(error=>console.error('Vertragsbestätigungen konnten nicht verarbeitet werden:',error.message));},60000);app.locals.paymentAlertTimer.unref();
   app.get('/event/:eventId/admin',loginRequired,owner,(req,res)=>res.redirect('/dashboard'));
   app.get('/event/:eventId/design',loginRequired,owner,(req,res)=>{
     if(!readable(req.event))return res.redirect(`/dashboard?event=${encodeURIComponent(req.event.id)}`);
@@ -804,7 +868,7 @@ function createApp(options = {}) {
   });
   app.use((req,res)=>fail(res,404,'Nicht gefunden.'));
   app.use((err,req,res,next)=>{console.error(err.message);if(!res.headersSent) fail(res,500,'Interner Fehler.');});
-  app.locals.db=db;app.locals.cleanup=cleanup;app.locals.fulfill=fulfill;app.locals.flushPaymentAlerts=flushPaymentAlerts;app.locals.photoStorage=photoStorage;app.locals.backupService=backupService;app.locals.operationsMonitor=operationsMonitor;
+  app.locals.db=db;app.locals.cleanup=cleanup;app.locals.fulfill=fulfill;app.locals.flushPaymentAlerts=flushPaymentAlerts;app.locals.flushContractConfirmations=flushContractConfirmations;app.locals.photoStorage=photoStorage;app.locals.backupService=backupService;app.locals.operationsMonitor=operationsMonitor;
   return app;
 }
 if(require.main===module) {
