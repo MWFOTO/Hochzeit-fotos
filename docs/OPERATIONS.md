@@ -61,7 +61,7 @@ Supportfälle mit Event-Kurzname, Zeitpunkt, Gerät/Browser und genauer Fehlerme
 ## Noch einzurichten
 
 - Tarif, Standort und Datenpfade regelmäßig in den Anbieter-Konten prüfen und dieses Runbook aktuell halten.
-- Mindestens einen Erreichbarkeitsmonitor mit Benachrichtigung für Ausfälle einrichten.
+- Geplanten GitHub-Actions-Monitor erfolgreich laufen lassen und Fehlerbenachrichtigungen im Betreiberkonto aktivieren und bestätigen.
 - Hetzner-Kosten-/Verbrauchswarnungen im Anbieter-Konto konfigurieren; die FinalSnap-App meldet nur ihre erfasste Fotoauslastung und sieht keine Rechnung.
 - SQLite- und Foto-Backups an einem unabhängigen Ziel einrichten und Wiederherstellung nachweisen.
 - Alarmkontakt, Supportzeiten und Verantwortlichkeit bei Störungen festlegen.
