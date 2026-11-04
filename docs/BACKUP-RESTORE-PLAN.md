@@ -17,6 +17,14 @@ Stand: 4. November 2026. Zielentwurf; Sicherungen und Wiederherstellung sind noc
 4. **Überwachung:** Erfolg, Zeitpunkt, Größe und Ergebnis jeder Sicherung protokollieren. Bei fehlender oder fehlgeschlagener Tageskopie einen Alarm auslösen.
 5. **Wiederherstellung:** Vor Annahme echter Zahlungen einmal Datenbank und Fotos in einer isolierten Testumgebung wiederherstellen und Gast-/Veranstalterzugriff, Albumzuordnung und Fotoanzeige nachvollziehen. Danach monatlich sowie vor größeren Datenbankänderungen wiederholen.
 
+## Umsetzung mit der bestehenden Render-Architektur
+
+Render-Cronjobs können keine Persistent Disk einhängen. Ein Cronjob kann deshalb `/data/events.db` nicht direkt konsistent sichern. Für die bestehende SQLite-Installation muss der Sicherungslauf in der laufenden App-Instanz ausgeführt werden oder ein geschützter App-Endpunkt muss den Lauf auslösen. Die App ist aktuell auf eine Instanz ausgelegt; eine zweite Instanz darf nicht parallel auf die SQLite-Datei zugreifen.
+
+Für Fotos ist ein eigener, privater Hetzner-Bucket mit separatem Zugang und eigenem SSE-C-Schlüssel vorgesehen. Ein täglicher Abgleich kann aktive Fotos in den Sicherungs-Bucket spiegeln. Damit regulär gelöschte Fotos nicht sofort aus der Sicherung verschwinden und zugleich die Nachlaufzeit begrenzt bleibt, braucht der Bucket aktiviertes Versioning und eine Lifecycle-Regel für nicht aktuelle Versionen. Vor dem Einsatz müssen Ablauf und Frist im Hetzner-Dashboard kontrolliert werden. Der Sicherungs-Bucket sollte in der anderen deutschen Hetzner-Region liegen; das schützt vor einzelnen Standortproblemen, aber nicht vor einem Ausfall oder Zugriff auf dasselbe Hetzner-Konto.
+
+Ein Tageslauf gilt erst dann als erfolgreich, wenn sowohl die SQLite-Momentaufnahme hochgeladen und geprüft als auch der Fotoabgleich abgeschlossen ist. Die App soll Laufzeit, Objektzahlen, Datenmenge und Ergebnis protokollieren und bei Fehlern `info@finalsnap.de` benachrichtigen. Das ersetzt keinen unabhängigen Erreichbarkeitsmonitor.
+
 ## Fristen, die vor Aktivierung festgelegt werden müssen
 
 - Vorschlag: tägliche Sicherungen der Betriebsdatenbank 30 Tage aufbewahren.
@@ -36,5 +44,5 @@ Stand: 4. November 2026. Zielentwurf; Sicherungen und Wiederherstellung sind noc
 ## Vor der Umsetzung entscheiden
 
 1. Die vorgeschlagenen Fristen von 30 Tagen (Datenbank) und 7 Tagen nach aktiver Fotolöschung bestätigen oder ändern.
-2. Einen separaten, privaten Sicherungs-Bucket in Falkenstein (`fsn1`) oder Nürnberg (`nbg1`) anlegen und eigene Zugangsdaten erzeugen.
+2. Einen separaten, privaten Sicherungs-Bucket in Falkenstein (`fsn1`) oder Nürnberg (`nbg1`) anlegen, Versioning und die begrenzte Lifecycle-Regel setzen sowie eigene Zugangsdaten und einen separaten SSE-C-Schlüssel erzeugen.
 3. Den monatlichen Wiederherstellungstest und die Benachrichtigung an `info@finalsnap.de` festlegen.
