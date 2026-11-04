@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#17191d">
+  <title>FinalSnap · Dein Feier-Design</title>
+  <link rel="stylesheet" href="/design-editor.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#" aria-label="FinalSnap Startseite"><span class="brand-mark">ϟ</span><span>Final<span class="brand-light">Snap</span></span></a>
+    <div class="topbar-note"><span class="status-dot"></span> Design-Editor <span class="preview-tag">Dein Event</span></div>
+    <a class="text-button" href="/dashboard">Zur Veranstaltungsübersicht</a>
+  </header>
+
+  <main class="workspace">
+    <section class="editor" aria-labelledby="pageTitle">
+      <div class="intro" id="step-design">
+        <span class="eyebrow">DEIN EVENT · DEIN LOOK</span>
+        <h1 id="pageTitle">Gestalte euer<br><span>gemeinsames Album.</span></h1>
+        <p>Ein paar Handgriffe – und eure Galerie fühlt sich schon vor dem ersten Foto nach eurer Feier an.</p>
+      </div>
+
+      <nav class="progress" aria-label="Ablauf in drei Schritten"><a class="progress-step active" href="#step-design"><b>1</b> Event & Design</a><i></i><a class="progress-step" href="#step-qr"><b>2</b> QR-Code</a><i></i><a class="progress-step" href="#step-download"><b>3</b> Download</a></nav>
+
+      <form id="designForm" class="wizard-step" aria-label="Schritt 1: Event und Design">
+        <section class="form-section">
+          <div class="section-heading"><span class="section-number">01</span><div><h2>Der Name eurer Feier</h2><p>So heißt euer Album für alle Gäste.</p></div></div>
+          <label class="field-label" for="eventTitle">Albumtitel</label>
+          <input id="eventTitle" name="eventTitle" maxlength="80" value="Mara & Jonas feiern" autocomplete="off">
+          <label class="field-label occasion-label" for="occasion">Anlass</label>
+          <select id="occasion" name="occasion"><option value="wedding">Hochzeit</option><option value="birthday">Geburtstag</option><option value="summer">Sommerfest</option><option value="company">Firmenfeier</option><option value="jubilee">Jubiläum</option><option value="graduation">Abschlussfeier</option><option value="other">Anderer Anlass</option></select>
+          <label class="field-label date-label" for="eventDate">Datum <span>optional</span></label>
+          <input id="eventDate" name="eventDate" type="date" value="2027-08-22" readonly>
+          <small>Das Datum wird aus deinen Veranstaltungsdaten übernommen.</small>
+        </section>
+
+        <section class="form-section">
+          <div class="section-heading"><span class="section-number">02</span><div><h2>Wählt euren Stil</h2><p>Die Vorschau passt sich direkt an.</p></div></div>
+          <div class="template-grid" role="group" aria-label="Designvorlage auswählen">
+            <button class="template-card selected" type="button" data-template="afterglow" aria-pressed="true"><span class="swatch swatch-afterglow"><span>✦</span><i></i></span><span class="template-name">Afterglow</span><span class="template-sub">Warm & lebendig</span></button>
+            <button class="template-card" type="button" data-template="midnight" aria-pressed="false"><span class="swatch swatch-midnight"><span>✧</span><i></i></span><span class="template-name">Mitternacht</span><span class="template-sub">Dunkel & modern</span></button>
+            <button class="template-card" type="button" data-template="garden" aria-pressed="false"><span class="swatch swatch-garden"><span>❋</span><i></i></span><span class="template-name">Gartenfest</span><span class="template-sub">Leicht & natürlich</span></button>
+          </div>
+          <div class="color-row"><label class="field-label" for="accentColor">Akzentfarbe</label><div class="color-picker"><input id="accentColor" type="color" value="#e99a69" aria-label="Akzentfarbe auswählen"><span id="colorLabel">Pfirsich</span></div></div>
+          <div class="font-row"><label class="field-label" for="fontStyle">Schriftstil</label><select id="fontStyle"><option value="classic">Elegant · Georgia</option><option value="palatino">Zeitlos · Palatino</option><option value="modern">Klar · Arial</option><option value="verdana">Lesbar · Verdana</option><option value="relaxed">Locker · Trebuchet</option><option value="typewriter">Schreibmaschine · Courier</option></select></div>
+        </section>
+
+        <section class="form-section upload-section">
+          <div class="section-heading"><span class="section-number">03</span><div><h2>Eigenes Motiv hinzufügen</h2><p>Zum Beispiel ein Foto, Monogramm oder eine Einladung.</p></div></div>
+          <label class="upload-drop" for="coverUpload"><span class="upload-icon">↥</span><span><strong>Bild auswählen</strong><small>PNG, JPG oder WEBP · Vorschau auf diesem Gerät</small></span><span class="upload-arrow">＋</span></label>
+          <input class="visually-hidden" id="coverUpload" type="file" accept="image/png,image/jpeg,image/webp">
+          <p class="upload-filename" id="uploadFilename" aria-live="polite">Noch kein eigenes Motiv ausgewählt</p>
+        </section>
+        <section class="ai-brief-section">
+          <div><span class="ai-label">OPTIONAL · KI-WERKZEUGE</span><h2>Eine Idee für dein Motiv</h2><p>Erstelle mit Anlass und Stil einen Brief für Canva oder dein KI-Bildwerkzeug. Das fertige Bild kannst du oben hochladen.</p></div>
+          <button id="copyAiBrief" type="button" class="ai-brief-button"><span>✦</span> Design-Brief kopieren</button>
+          <div class="tool-links" aria-label="Externe Designwerkzeuge"><span>Tools mit kostenlosem Einstieg · Nutzungslimits gelten:</span><a href="https://chatgpt.com/" target="_blank" rel="noopener noreferrer">ChatGPT</a><a href="https://express.adobe.com/" target="_blank" rel="noopener noreferrer">Adobe Express</a><a href="https://www.canva.com/" target="_blank" rel="noopener noreferrer">Canva</a></div>
+          <p id="aiBriefStatus" class="ai-brief-status" aria-live="polite">Kein KI-API-Schlüssel nötig. Das Motiv erstellst du in deinem gewählten Tool.</p>
+          <textarea id="aiBriefText" class="ai-brief-text" readonly hidden aria-label="Kopierbarer Design-Brief"></textarea>
+        </section>
+        <div class="save-row"><button type="submit" class="save-button"><span>Entwurf speichern</span><span aria-hidden="true">→</span></button><p id="saveStatus" role="status" aria-live="polite">Änderungen werden für dieses Event gespeichert.</p></div>
+        <a class="next-step-button" href="#step-qr">Weiter: QR-Code verbinden <span>→</span></a>
+      </form>
+
+      <section class="download-section qr-step" id="step-qr" aria-labelledby="qrStepTitle">
+        <div class="section-heading"><span class="section-number">02</span><div><h2 id="qrStepTitle">QR-Code mit dem Event verbinden</h2><p>Setzt den QR aus eurem FinalSnap-Konto ein.</p></div></div>
+        <div class="qr-connect-card"><div class="qr-connect-code"><img id="eventQrCode" alt="QR-Code zur Gästegalerie" hidden><span id="qrLoading">…</span></div><div><strong>Dieser QR führt zu eurer Gästegalerie</strong><p id="qrFileStatus" class="qr-file-status" aria-live="polite">Event und QR-Code werden geladen …</p></div></div>
+        <a class="next-step-button" href="#step-download">Weiter: Druckformat wählen <span>→</span></a>
+      </section>
+
+      <section class="download-section print-step" id="step-download" aria-labelledby="downloadTitle">
+        <div class="section-heading"><span class="section-number">03</span><div><h2 id="downloadTitle">Download & Druck</h2><p>Wählt ein Format für Tisch oder Eingang.</p></div></div>
+        <div class="format-grid" role="group" aria-label="Druckformat wählen">
+          <button class="format-card selected" type="button" data-format="tent" aria-pressed="true"><span class="format-art art-tent"><i></i><b>QR</b></span><strong>Tischaufsteller</strong><small>A4 · zum Falten</small></button>
+          <button class="format-card" type="button" data-format="card" aria-pressed="false"><span class="format-art art-card"><i></i><b>QR</b></span><strong>QR-Karte</strong><small>A6 · zum Auslegen</small></button>
+          <button class="format-card" type="button" data-format="poster" aria-pressed="false"><span class="format-art art-poster"><i></i><b>QR</b></span><strong>Willkommensposter</strong><small>A4 · Hochformat</small></button>
+        </div>
+        <div class="download-actions"><button id="pdfButton" type="button" class="download-button primary-download"><span class="download-symbol">↓</span><span><strong>Als PDF drucken</strong><small>Öffnet den Druckdialog · dort „Als PDF sichern“ wählen</small></span></button><button id="pngButton" type="button" class="download-button"><span class="download-symbol">▧</span><span><strong>PNG herunterladen</strong><small>Bilddatei für digitales Teilen</small></span></button></div>
+        <p class="download-status" id="downloadStatus" role="status" aria-live="polite">Der QR-Code wird direkt aus deinem Event geladen.</p>
+      </section>
+    </section>
+
+    <aside class="preview-area" aria-label="Live-Vorschau">
+      <div class="preview-header"><div><span class="eyebrow">LIVE-VORSCHAU</span><h2>So sehen es eure Gäste</h2></div><span class="device-switch"><span class="switch-dot"></span> Handy</span></div>
+      <div class="preview-stage">
+        <div class="phone" id="phonePreview">
+          <div class="phone-frame"><div class="phone-island"></div><div class="phone-screen">
+            <div class="phone-status"><span>9:41</span><span>● ● ●</span></div>
+            <div class="guest-gallery">
+              <div class="gallery-brand"><span class="mini-mark">F</span> FINALSNAP</div>
+              <div class="cover-photo" id="coverPhoto"><div class="cover-shade"></div><span class="cover-kicker" id="previewOccasion">UNSERE HOCHZEIT</span><h3 id="previewTitle">Mara & Jonas feiern</h3><p id="previewDate">22. AUGUST 2027</p><span class="cover-sparkle">✦</span></div>
+              <div class="gallery-caption"><div><strong>Momente, die bleiben.</strong><small>Von euch allen zusammen.</small></div><span class="guest-count">✧</span></div>
+              <div class="photo-grid">
+                <figure><img src="/event-wedding.jpg" alt="Beispielbild: Hochzeit"/><figcaption>Hochzeit</figcaption></figure>
+                <figure><img src="/event-birthday.jpg" alt="Beispielbild: Geburtstag"/><figcaption>Geburtstag</figcaption></figure>
+                <figure><img src="/event-summer.jpg" alt="Beispielbild: Sommerfest"/><figcaption>Sommerfest</figcaption></figure>
+                <figure><img src="/event-company.jpg" alt="Beispielbild: Firmenfeier"/><figcaption>Firmenfeier</figcaption></figure>
+              </div>
+              <div class="phone-upload"><span>＋</span> Foto hinzufügen</div>
+            </div>
+            <div class="phone-home"></div>
+          </div></div>
+        </div>
+        <div class="preview-halo halo-one"></div><div class="preview-halo halo-two"></div>
+        <div class="preview-caption"><span class="caption-line"></span><span>Dein Design. Direkt auf dem Handy.</span></div>
+      </div>
+      <div class="qr-card">
+        <div class="qr-icon" id="qrPreview"><span>⌗</span><img id="qrPreviewImage" alt="Ausgewählter Event-QR-Code" hidden></div>
+        <div class="qr-copy"><strong>Dein persönlicher Gäste-QR</strong><p>Der aktuelle QR-Code wird automatisch mit dem Design und den Druckdateien verbunden.</p></div>
+        <span class="qr-next">→</span>
+      </div>
+      <p class="prototype-note">Dein Design und Titelmotiv werden bei diesem Event gespeichert. Gäste öffnen die Galerie weiterhin direkt mit dem QR-Code.</p>
+    </aside>
+  </main>
+  <script src="/design-editor.js"></script>
+</body>
+</html>

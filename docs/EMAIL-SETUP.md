@@ -1,6 +1,6 @@
 # Automatische Kontomails
 
-BREVO_API_KEY aktiviert den Brevo-API-Adapter. BREVO_SENDER_EMAIL und BREVO_SENDER_NAME sind optional; Standard ist info@matthiaswendlandfotografie.com. Schlüssel nur im Hosting hinterlegen, nie im Repository.
+BREVO_API_KEY aktiviert den Brevo-API-Adapter. BREVO_SENDER_EMAIL und BREVO_SENDER_NAME sind optional; Standard ist info@finalsnap.de. FinalSnap nutzt info@finalsnap.de als Absender. Schlüssel nur im Hosting hinterlegen, nie im Repository.
 
 Registrierung verschickt eine kombinierte Willkommens- und Bestätigungsmail. Bestehende Konten können die Bestätigung im Dashboard anfordern. Passwort vergessen verschickt einen Rücksetzlink. Keine Newsletter oder Kontaktimporte.
 

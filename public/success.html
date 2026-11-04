@@ -7,9 +7,9 @@
   <link rel="stylesheet" href="/style.css" />
   <style>
     .success-page {
-      max-width: 440px;
+      max-width: 640px;
       margin: 0 auto;
-      padding: 48px 20px;
+      padding: 48px clamp(24px, 5vw, 48px);
       text-align: center;
     }
     .success-icon {
@@ -55,69 +55,20 @@
   </style>
 </head>
 <body>
+  <header class="site-header"><a class="brand" href="/" aria-label="FinalSnap Startseite"><span class="brand-mark">ϟ</span><span>FinalSnap</span></a></header>
   <main class="success-page">
     <div class="success-icon">🎉</div>
     <h1>Zahlungsstatus prüfen</h1>
     <p id="status-text">Wird geprüft …</p>
 
     <div class="link-list" id="link-list" style="display:none;"></div>
+    <a class="button primary" id="retry-link" href="/dashboard" hidden>Zurück zum Album und Zahlung erneut versuchen</a>
     <p class="pending-msg" id="pending-msg" style="display:none;">
       Die Zahlungsbestätigung kann ein paar Sekunden dauern. Diese Seite aktualisiert
       sich automatisch, sobald alles bereit ist.
     </p>
   </main>
 
-  <script>
-    const params = new URLSearchParams(window.location.search);
-    const sessionId = params.get('session_id');
-    const statusText = document.getElementById('status-text');
-    const linkList = document.getElementById('link-list');
-    const pendingMsg = document.getElementById('pending-msg');
-
-    async function checkStatus() {
-      if (!sessionId) {
-        statusText.textContent = 'Keine Bestellung gefunden.';
-        return;
-      }
-      try {
-        const res = await fetch(`/api/checkout/${encodeURIComponent(sessionId)}`);
-        const data = await res.json();
-
-        if (!res.ok) {
-          statusText.textContent = 'Bestellung nicht gefunden.';
-          return;
-        }
-
-        if (data.status === 'paid') {
-          const base = window.location.origin;
-          const eventId = data.eventId;
-          statusText.textContent = `Euer Event "${eventId}" ist aktiv!`;
-          pendingMsg.style.display = 'none';
-          linkList.style.display = 'block';
-          linkList.replaceChildren();
-          const dashboard = document.createElement('a');
-          dashboard.href = '/dashboard'; dashboard.textContent = 'Zum Dashboard: Gästelinks, QR-Code und Fotos verwalten';
-          linkList.append(dashboard);
-        } else {
-          pendingMsg.style.display = 'block';
-          setTimeout(checkStatus, 2000); // in 2 Sekunden erneut prüfen
-        }
-      } catch (err) {
-        statusText.textContent = 'Verbindung fehlgeschlagen.';
-      }
-    }
-
-    function linkCard(title, desc, url) {
-      return `
-        <div class="link-card">
-          <div class="link-title">${title}</div>
-          <div class="link-desc">${desc}</div>
-          <a class="link-url" href="${url}" target="_blank">${url}</a>
-        </div>
-      `;
-    }
-
-    checkStatus();
-  </script>
-<footer class="legal-footer"><a href="/impressum">Impressum</a> · <a href="mailto:info@matthiaswendlandfotografie.de">Kontakt</a></footer></body>
+  <script src="/success.js"></script>
+<footer class="legal-footer"><a href="/impressum">Impressum</a> · <a href="/datenschutz">Datenschutz</a> · <a href="mailto:info@finalsnap.de">Kontakt</a></footer></body>
 </html>

@@ -1,4 +1,5 @@
 (() => {
+  const TERMS_VERSION='2026-11-04-2';
   let csrf;
   const message = document.getElementById('message');
   const report = error => {message.textContent = error.message;};
@@ -13,8 +14,10 @@
   const login=document.getElementById('login-form');
   if(login) {
     const registering=location.pathname==='/register';
+    document.body.classList.toggle('login-page', !registering);
     const selectedPlan=new URLSearchParams(location.search).get('plan');
-    if(['1m','3m','6m'].includes(selectedPlan)){document.getElementById('auth-description').textContent='Deine Paketauswahl wird übernommen. Die erste Veranstaltung kannst du kostenlos testen.';const switchLink=document.querySelector('#auth-switch a');if(switchLink)switchLink.href=`/${registering?'login':'register'}?plan=${encodeURIComponent(selectedPlan)}`;}
+    if(new URLSearchParams(location.search).get('deleted')==='1')message.textContent='Dein FinalSnap-Konto und deine Alben wurden gelöscht. Eine erneute Anmeldung ist nicht mehr möglich.';
+    if(selectedPlan==='event'){document.getElementById('auth-description').textContent='Deine Paketauswahl wird übernommen. Jede neue Veranstaltung kannst du mit bis zu 25 Fotos kostenlos testen.';const switchLink=document.querySelector('#auth-switch a');if(switchLink)switchLink.href=`/${registering?'login':'register'}?plan=${encodeURIComponent(selectedPlan)}`;}
     const password=document.getElementById('password');
     const confirmation=document.getElementById('password-confirm');
     if(registering){
@@ -25,18 +28,18 @@
       document.getElementById('confirm-label').hidden=false;confirmation.required=true;
       password.autocomplete='new-password';
       document.getElementById('auth-submit').textContent='Konto erstellen & Event anlegen';
-      const switcher=document.getElementById('auth-switch');switcher.replaceChildren(document.createTextNode('Schon ein Konto? '));const a=document.createElement('a');a.href=selectedPlan&&['1m','3m','6m'].includes(selectedPlan)?`/login?plan=${encodeURIComponent(selectedPlan)}`:'/login';a.textContent='Anmelden';switcher.append(a);
+      const switcher=document.getElementById('auth-switch');switcher.replaceChildren(document.createTextNode('Schon ein Konto? '));const a=document.createElement('a');a.href=selectedPlan==='event'?`/login?plan=${encodeURIComponent(selectedPlan)}`:'/login';a.textContent='Anmelden';switcher.append(a);
     }
     login.onsubmit=async e=>{
       e.preventDefault();
       if(registering && password.value!==confirmation.value){report(new Error('Die Passwörter stimmen nicht überein.'));confirmation.focus();return;}
       const button=document.getElementById('auth-submit');button.disabled=true;
-      try{await api(`/api/auth/${registering?'register':'login'}`,'POST',{email:document.getElementById('email').value,password:password.value});const event=new URLSearchParams(location.search).get('event');location.href=event?`/dashboard?event=${encodeURIComponent(event)}`:selectedPlan&&['1m','3m','6m'].includes(selectedPlan)?`/dashboard?plan=${encodeURIComponent(selectedPlan)}`:'/dashboard';}catch(err){report(err);button.disabled=false;}
+      try{await api(`/api/auth/${registering?'register':'login'}`,'POST',{email:document.getElementById('email').value,password:password.value});const event=new URLSearchParams(location.search).get('event');location.href=event?`/dashboard?event=${encodeURIComponent(event)}`:selectedPlan==='event'?`/dashboard?plan=${encodeURIComponent(selectedPlan)}`:'/dashboard';}catch(err){report(err);button.disabled=false;}
     };return;
   }
 
   const element=(tag,text)=>{const el=document.createElement(tag);if(text)el.textContent=text;return el;};
-  const button=(parent,label,action)=>{const el=element('button',label);el.onclick=()=>Promise.resolve(action()).catch(report);parent.append(el);return el;};
+  const button=(parent,label,action)=>{const el=element('button',label);el.className='secondary';el.onclick=()=>Promise.resolve(action()).catch(report);parent.append(el);return el;};
   const link=(parent,label,url)=>{const el=element('a',label);el.href=url;el.className='button secondary';parent.append(el);};
   let availablePlans={};
   let activeEvent=null;
@@ -64,34 +67,62 @@
     const {events}=await api('/api/events');if(activeEvent&&!events.some(e=>e.id===activeEvent))activeEvent=null;document.querySelector('.create-panel').hidden=!!activeEvent;const section=document.getElementById('events');section.replaceChildren();
     if(!events.length){section.append(element('p','Dein erstes Album wartet auf dich. Erstelle oben eine Veranstaltung.'));document.querySelector('.create-panel').open=true;}
     for(const event of events) {
-      const card=element('article');card.className='event-card';const heading=element('div');heading.className='page-heading';const badge=element('span',event.status==='trial'?'Kostenlos testen':event.status==='pilot'?'Geschlossener Praxistest':event.status==='paid'?'Aktiv':event.status==='pending'?'Zahlung offen':'Abgelaufen');badge.className='status-pill '+(event.status==='pending'?'pending':'');heading.append(element('h2',event.title),badge);card.append(heading,element('p',`${event.id}${event.expires_at?` · Verfügbar bis ${new Date(event.expires_at).toLocaleString('de-DE')}`:''}`));card.lastChild.className='event-meta';
-      const stats=element('p',`${event.photoCount} von ${event.photoLimit} Fotos · ${(event.storageBytes/1024**2).toFixed(1)} MB von ${(event.storageLimitBytes/1024**2).toFixed(0)} MB belegt`);stats.id=`stats-${event.id}`;card.append(element('p',`Uploads: ${event.upload_successes} erfolgreich · ${event.upload_failures} fehlgeschlagen`));if(event.status==='pilot')card.append(element('p','Kostenloser Praxistest ohne Zahlung. Nach dem angegebenen Ablaufdatum wird das Album im nächsten Löschlauf entfernt. Bereits heruntergeladene Kopien bleiben davon unberührt.'));if(event.status==='trial')card.append(element('p','25 Fotos kostenlos für 14 Tage. Ohne Kreditkarte. Nach bestätigter Zahlung bleiben Fotos und QR-Code erhalten.'));card.append(stats);const meter=element('progress');meter.max=event.storageLimitBytes;meter.value=event.storageBytes;meter.setAttribute('aria-label','Belegter Fotospeicher');card.append(meter);
+      const card=element('article');card.className='event-card';const heading=element('div');heading.className='page-heading';const badge=element('span',event.paymentStatus==='disputed'?'Zahlungsstreitfall · Zugang vorerst aktiv':event.status==='refunded'&&event.paymentStatus==='disputed_lost'?'Streitfall verloren · Zugang beendet':event.status==='refunded'?'Erstattet · Zugang beendet':event.readOnly?'Downloadphase':event.status==='trial'?'Kostenlos testen':event.status==='pilot'?'Geschlossener Praxistest':event.status==='paid'?(event.startsAt>Date.now()?'Start geplant':'Aktiv'):event.status==='pending'?'Zahlung offen':'Abgelaufen');badge.className='status-pill '+(event.status==='pending'||event.paymentStatus==='disputed'?'pending':'');heading.append(element('h2',event.title),badge);card.append(heading);if(activeEvent===event.id){const back=element('a','← Zur Veranstaltungsübersicht');back.href='/dashboard';back.className='button secondary event-back';back.onclick=e=>{e.preventDefault();activeEvent=null;history.replaceState(null,'','/dashboard');document.getElementById('photo-manager').hidden=true;load();};card.append(back);}card.append(element('p',`${event.id}${event.event_date?` · Start ${new Date(event.startsAt).toLocaleDateString('de-DE')}`:''}${event.expires_at?` · Online bis ${new Date(event.expires_at).toLocaleDateString('de-DE')}${event.retentionUntil&&event.retentionUntil!==event.expires_at?` · Downloads bis ${new Date(event.retentionUntil).toLocaleDateString('de-DE')}`:''}`:''}`));card.lastChild.className='event-meta';if(event.paymentStatus==='disputed')card.append(element('p','Der Zahlungsstreitfall wird geprüft. Der Albumzugang bleibt bis zur Entscheidung bestehen.'));if(event.status==='refunded')card.append(element('p',event.paymentStatus==='disputed_lost'?`Die Bank hat den Streitfall zu Gunsten des Karteninhabers entschieden; der Albumzugang wurde beendet. Fotos werden spätestens am ${new Date(event.retentionUntil||event.expires_at).toLocaleDateString('de-DE')} gemäß der Album-Aufbewahrungsfrist gelöscht.`:`Der Vollrefund ist bestätigt; der Gäste- und Veranstalterzugang wurde beendet. Die gespeicherten Fotos werden spätestens am ${new Date(event.retentionUntil||event.expires_at).toLocaleDateString('de-DE')} gemäß der Album-Aufbewahrungsfrist gelöscht.`));if(event.hasInvoice){const invoiceLink=element('a','Rechnung / Zahlungsbeleg öffnen');invoiceLink.href=`/api/event/${encodeURIComponent(event.id)}/invoice`;invoiceLink.target='_blank';invoiceLink.rel='noopener';invoiceLink.className='button secondary';card.append(invoiceLink);}
+      const stats=element('p',event.photoLimit===null?`${(event.storageBytes/1024**3).toFixed(2)} GB von ${(event.storageLimitBytes/1024**3).toFixed(1)} GB Fotospeicher belegt · keine feste Fotoanzahl`:event.status==='pilot'?`${event.photoCount} von ${event.photoLimit} Fotos · ${(event.storageBytes/1024**2).toFixed(1)} MB belegt`:`${event.photoCount} von 25 Testfotos · ${(event.storageBytes/1024**2).toFixed(1)} MB belegt`);stats.id=`stats-${event.id}`;card.append(element('p',`Uploads: ${event.upload_successes} erfolgreich · ${event.upload_failures} fehlgeschlagen`));if(event.readOnly)card.append(element('p',`Die Uploadzeit ist beendet. Deine Fotos bleiben bis ${new Date(event.retentionUntil).toLocaleDateString('de-DE')} zum Ansehen und Herunterladen verfügbar; danach werden sie gelöscht.`));if(event.status==='pilot'&&!event.readOnly)card.append(element('p','Kostenloser Praxistest ohne Zahlung. Maßgeblich ist das angezeigte Ablaufdatum; bei Veranstaltungen mit Datum gibt es keine zusätzliche Downloadphase.'));if(event.status==='trial'&&!event.readOnly)card.append(element('p',`Bis zu 25 Fotos kostenlos testen – dafür ist keine Zahlung nötig. Das vollständige Paket startet am ${new Date(event.startsAt).toLocaleDateString('de-DE')}; ohne Buchung bleibt es beim Testkontingent.`));if(event.status==='paid'&&event.startsAt>Date.now())card.append(element('p',`Testmodus bis ${new Date(event.startsAt).toLocaleDateString('de-DE')}: bis zu 25 Fotos. Ab dem Veranstaltungsdatum gilt das vollständige Speicherpaket.`));card.append(stats);const meter=element('progress');meter.max=event.storageLimitBytes;meter.value=event.storageBytes;meter.setAttribute('aria-label','Belegter Fotospeicher');card.append(meter);
       const open=button(card,'Veranstaltung verwalten',()=>{activeEvent=event.id;history.replaceState(null,'',`/dashboard?event=${encodeURIComponent(event.id)}`);load();});open.className='primary event-open';
+      if(event.customerType==='consumer'&&event.paymentConcludedAt){
+        const withdrawal=element('section');withdrawal.className='event-section withdrawal-action';withdrawal.append(element('h3','Verbraucher-Widerruf'));
+        if(event.withdrawalSubmittedAt){withdrawal.append(element('p',`Dein Widerruf ist am ${new Date(event.withdrawalSubmittedAt).toLocaleString('de-DE',{dateStyle:'long',timeStyle:'short'})} eingegangen.`));withdrawal.append(element('p',event.withdrawalConfirmationStatus==='sent'?'Die Eingangsbestätigung wurde an deine Konto-E-Mail gesandt.':'Die Eingangsbestätigung ist gespeichert; der E-Mail-Versand wird erneut versucht.'));}
+        else {
+          const prepare=button(withdrawal,'Vertrag widerrufen',()=>{prepare.hidden=true;form.hidden=false;name.focus();});prepare.className='primary withdrawal-start';
+          const form=element('form');form.hidden=true;form.className='withdrawal-form';
+          form.append(element('p',`Vertrag: FinalSnap Fotoalbum „${event.title}“ (${event.id}). Die Eingangsbestätigung geht an ${event.email}.`));
+          const nameLabel=element('label','Vollständiger Name');const name=element('input');name.name='customerName';name.autocomplete='name';name.required=true;name.maxLength=160;nameLabel.append(name);form.append(nameLabel);
+          const emailLabel=element('label');emailLabel.className='check-label';const emailConfirmed=element('input');emailConfirmed.type='checkbox';emailConfirmed.required=true;emailLabel.append(emailConfirmed,element('span',` Ich bestätige ${event.email} als E-Mail-Adresse für die Eingangsbestätigung.`));form.append(emailLabel);
+          const submit=element('button','Widerruf bestätigen');submit.type='submit';submit.className='danger';form.append(submit);
+          form.onsubmit=async e=>{e.preventDefault();submit.disabled=true;try{const result=await api(`/api/events/${encodeURIComponent(event.id)}/withdrawal`,'POST',{customerName:name.value,emailConfirmed:emailConfirmed.checked});message.textContent=result.message;await load();}catch(error){report(error);submit.disabled=false;}};
+          withdrawal.append(form);
+        }
+        card.append(withdrawal);
+      }
       const tabs=element('nav');tabs.className='actions event-tabs';tabs.setAttribute('aria-label','Veranstaltungsbereiche');card.append(tabs);
       const panels=[];
       const showPanel=index=>{panels.forEach((panel,i)=>panel.hidden=i!==index);tabs.querySelectorAll('button').forEach((b,i)=>b.setAttribute('aria-pressed',String(i===index)));document.getElementById('photo-manager').hidden=index!==0;if(index===0)return manage(event);};
-      if(['pending','trial'].includes(event.status)){
-        const chooser=element('details');chooser.className='upgrade-panel';chooser.open=activeEvent===event.id;chooser.append(element('summary','Paket auswählen & Album erweitern'));
-        chooser.append(element('p','Fotos, QR-Code und Gästelink bleiben erhalten. Die Laufzeit beginnt nach bestätigter Zahlung. Aktuell ausschließlich Testzahlungen.'));
+      if(['pending','trial'].includes(event.status)&&!event.readOnly){
+        const chooser=element('details');chooser.className='upgrade-panel';chooser.open=activeEvent===event.id;chooser.append(element('summary','Paket & Buchung'));
+        chooser.append(element('p','Kostenlos testen braucht keine Zahlung: Bis zu 25 Fotos kannst du direkt über „Fotos verwalten“ hochladen. Der Endpreis beträgt 49,90 € inkl. 19 % USt. für Privat- und Geschäftskunden. „Testzahlung starten“ öffnet den Stripe-Testcheckout; es wird kein echtes Geld eingezogen.'));
+        const buyerLabel=element('label','Kauf als');const buyerType=element('select');for(const [value,label] of [['consumer','Privatkunde'],['business','Geschäftskunde']]){const option=element('option',label);option.value=value;buyerType.append(option);}buyerType.value=event.customerType||'consumer';buyerLabel.append(buyerType);chooser.append(buyerLabel);
+        const termsLabel=element('label');termsLabel.className='check-label';const termsAcceptance=element('input');termsAcceptance.type='checkbox';termsAcceptance.checked=event.termsAccepted&&event.termsVersion===TERMS_VERSION;const termsText=document.createTextNode(' Ich habe die ');const termsLink=element('a','Leistungsbedingungen');termsLink.href='/bedingungen';termsLink.target='_blank';termsLink.rel='noopener';termsLabel.append(termsAcceptance,termsText,termsLink,document.createTextNode(' gelesen und akzeptiere sie.'));
+        const earlyStartRequired=!!event.startsAt&&event.startsAt<Date.now()+14*86400000;
+        const earlyStartRequestLabel=element('label');earlyStartRequestLabel.className='check-label';const earlyStartRequest=element('input');earlyStartRequest.type='checkbox';earlyStartRequest.checked=event.earlyStartRequested;earlyStartRequestLabel.append(earlyStartRequest,document.createTextNode(' Ich verlange ausdrücklich, dass FinalSnap mit dem entgeltlichen Albumdienst vor Ablauf der 14-tägigen Widerrufsfrist beginnt, wenn mein Veranstaltungsdatum innerhalb dieser Frist liegt.'));
+        const earlyStartAcknowledgementLabel=element('label');earlyStartAcknowledgementLabel.className='check-label';const earlyStartAcknowledgement=element('input');earlyStartAcknowledgement.type='checkbox';earlyStartAcknowledgement.checked=event.earlyStartAcknowledged;earlyStartAcknowledgementLabel.append(earlyStartAcknowledgement,document.createTextNode(' Ich bestätige, dass ich bei einem Widerruf angemessenen Wertersatz für bereits erbrachte Leistungen schulden kann und mein Widerrufsrecht erst mit vollständiger Erbringung des Dienstes erlischt.'));
+        const withdrawalInfo=element('p');withdrawalInfo.className='small';withdrawalInfo.append(document.createTextNode('Widerrufsinformation: '));const withdrawalLink=element('a','Widerrufsrecht und Musterformular');withdrawalLink.href='/widerruf';withdrawalLink.target='_blank';withdrawalLink.rel='noopener';withdrawalInfo.append(withdrawalLink);
+        const consentMessage=element('p');consentMessage.setAttribute('role','status');consentMessage.setAttribute('aria-live','polite');
+        const updateEarlyStartVisibility=()=>{const visible=buyerType.value==='consumer'&&earlyStartRequired;earlyStartRequestLabel.hidden=!visible;earlyStartAcknowledgementLabel.hidden=!visible;withdrawalInfo.hidden=buyerType.value!=='consumer';};buyerType.addEventListener('change',updateEarlyStartVisibility);updateEarlyStartVisibility();
+        chooser.append(termsLabel,earlyStartRequestLabel,earlyStartAcknowledgementLabel,withdrawalInfo,consentMessage);
         const grid=element('div');grid.className='plan-grid';chooser.append(grid);
         for(const [key,plan] of Object.entries(availablePlans)){
           if(plan.legacy&&event.plan!==key)continue;
-          const item=element('div');item.className='plan-card';item.append(element('h3',plan.label),element('p',new Intl.NumberFormat('de-DE',{style:'currency',currency:'EUR'}).format(plan.priceCents/100)),element('p',`Bis zu ${plan.photoLimit} Fotos innerhalb von ${plan.storageLimitMB} MB. Galerie, QR-Code, Diashow und Gesamtdownload enthalten.`));
-          const choose=button(item,event.checkoutStarted&&event.plan===key?'Testzahlung fortsetzen':`${plan.label} auswählen`,async()=>{choose.disabled=true;try{const data=await api('/api/checkout','POST',{eventId:event.id,plan:key});location.href=data.url;}finally{choose.disabled=false;}});choose.className='primary';choose.disabled=event.checkoutStarted&&event.plan!==key;grid.append(item);
+          const item=element('div');item.className='plan-card';const priceLabel=new Intl.NumberFormat('de-DE',{style:'currency',currency:'EUR'}).format(plan.priceCents/100);item.append(element('h3',plan.label),element('p',priceLabel),element('p','inkl. 19 % USt. · Endpreis für Privat- und Geschäftskunden'),element('p',`Keine feste Fotoanzahl · bis zu ${plan.storageLimitGB.toLocaleString('de-DE',{maximumFractionDigits:1})} GB Fotospeicher. QR-Code, Gästebuch, Fotoaufgaben, Diashow und Downloads enthalten.`));
+          const actionLabel=`${event.checkoutStarted&&event.plan===key?'Testzahlung fortsetzen':'Testzahlung starten'} · ${priceLabel} inkl. USt.`;const choose=button(item,actionLabel,async()=>{if(!termsAcceptance.checked){consentMessage.textContent='Bitte lies und akzeptiere vor der Bestellung die Leistungsbedingungen.';termsAcceptance.focus();return;}const needsConsent=buyerType.value==='consumer'&&earlyStartRequired;if(needsConsent&&(!earlyStartRequest.checked||!earlyStartAcknowledgement.checked)){consentMessage.textContent='Bitte bestätige beide Hinweise zum vorzeitigen Leistungsbeginn und Widerruf, bevor du fortfährst.';return;}choose.disabled=true;try{const data=await api('/api/checkout','POST',{eventId:event.id,plan:key,customerType:buyerType.value,termsAccepted:termsAcceptance.checked,earlyStartRequest:needsConsent&&earlyStartRequest.checked,earlyStartAcknowledged:needsConsent&&earlyStartAcknowledgement.checked});if(!data.url)throw new Error('Der Test-Checkout hat keinen Link zurückgegeben. Bitte später erneut versuchen.');location.href=data.url;}finally{choose.disabled=false;}});choose.className='primary';choose.disabled=event.checkoutStarted&&event.plan!==key;grid.append(item);
         }
-        if(event.checkoutStarted)chooser.append(element('p','Die begonnene Testzahlung ist an das ausgewählte Paket gebunden.'));
+        if(event.checkoutStarted)chooser.append(element('p','Die begonnene Testzahlung ist an das einmalige FinalSnap-Fotoalbum gebunden.'));
         card.append(chooser);
       }
       if(event.guestUrl) {
         const photosSection=element('div');photosSection.className='event-section';photosSection.append(element('h3','Fotos & Live-Diashow'));card.append(photosSection);const photoActions=element('div');photoActions.className='actions';photosSection.append(photoActions);
         const accessSection=element('div');accessSection.className='event-section';accessSection.append(element('h3','QR-Code & Gästezugang'));card.append(accessSection);const accessActions=element('div');accessActions.className='actions';accessSection.append(accessActions);
-        const settings=element('details');settings.className='event-section event-settings';settings.open=true;settings.append(element('summary','Einstellungen & Freigabe'));card.append(settings);const settingsActions=element('div');settingsActions.className='actions';settings.append(element('p',event.moderation?'Neue Fotos warten auf deine Freigabe.':'Neue Fotos sind sofort für eure Gäste sichtbar.'),settingsActions);
+        const settings=element('details');settings.className='event-section event-settings';settings.open=true;settings.append(element('summary','Einstellungen & Freigabe'));card.append(settings);const settingsActions=element('div');settingsActions.className='actions';settings.append(element('p',event.readOnly?'Die Uploadzeit ist beendet. Gäste können die vorhandenen Fotos noch bis zum Ende der Downloadphase ansehen.':event.moderation?'Neue Fotos warten auf deine Freigabe.':'Gäste sehen auf ihrem Gerät nur ihre eigenen Uploads.'),settingsActions);if(event.event_date&&event.startsAt>Date.now()){const dateLabel=element('label','Veranstaltungsdatum ändern');const dateField=element('input');dateField.type='date';dateField.value=event.event_date;dateField.min=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Berlin'}).format(new Date());dateLabel.append(dateField);settingsActions.append(dateLabel);button(settingsActions,'Datum speichern',async()=>{await api(`/api/event/${event.id}`,'PATCH',{eventDate:dateField.value});message.textContent='Veranstaltungsdatum gespeichert. Der Albumzeitraum wurde angepasst.';await load();});}
         panels.push(photosSection,accessSection,settings);
         ['Fotos','Gästezugang','Einstellungen'].forEach((label,i)=>button(tabs,label,()=>showPanel(i)));
         button(accessActions,'Gästelink kopieren',async()=>{try{await navigator.clipboard.writeText(event.guestUrl);message.textContent='Gästelink kopiert.';}catch{const input=element('input');input.value=event.guestUrl;input.readOnly=true;accessSection.append(input);input.select();message.textContent='Bitte den markierten Gästelink kopieren.';}});
         link(accessActions,'Gästeansicht öffnen',event.guestUrl);
         link(photoActions,'Galerie öffnen',event.guestUrl.replace('?','/gallery?'));
         link(photoActions,'Live-Diashow',event.guestUrl.replace('?','/slideshow?'));
+        link(photoActions,'Fotoaufgaben',event.guestUrl.replace('?','/games?'));
+        link(photoActions,'Gästebuch ansehen',event.guestUrl.replace('?','/guestbook?'));
+        link(accessActions,'Gästebuch verwalten',`/event/${encodeURIComponent(event.id)}/guestbook`);
+        link(photoActions,'Design-Editor & QR-Druck',`/event/${encodeURIComponent(event.id)}/design`);
         link(accessActions,'QR-Code herunterladen',`/api/event/${event.id}/qr`);
         button(accessActions,'QR-Karte drucken',async()=>{
           const blob=await (await fetch(`/api/event/${event.id}/qr`)).blob();
@@ -102,26 +133,58 @@
         link(photoActions,'Alle Fotos herunterladen',`/api/event/${event.id}/download`);
         button(photoActions,'Fotos verwalten',()=>manage(event)).className='primary';
         button(settingsActions,event.moderation?'Automatische Freigabe aktivieren':'Manuelle Freigabe aktivieren',async()=>{await api(`/api/event/${event.id}`,'PATCH',{moderation:!event.moderation});await load();});
+        button(settingsActions,event.guestbook_moderation?'Gästebuch: Freigabe ausschalten':'Gästebuch: Freigabe einschalten',async()=>{await api(`/api/event/${event.id}`,'PATCH',{guestbookModeration:!event.guestbook_moderation});await load();});
         button(settingsActions,'Gästelink erneuern',async()=>{if(confirm('Alte Links und QR-Codes werden dadurch ungültig. Fortfahren?')){await api(`/api/event/${event.id}/rotate-token`,'POST');await load();}});
       }
       const danger=element('details');danger.className='event-section event-settings';danger.append(element('summary','Veranstaltung löschen'));card.append(danger);
       button(danger,'Event und Fotos löschen',async()=>{if(confirm('Event und alle Fotos endgültig löschen?')){await api(`/api/event/${event.id}`,'DELETE');document.getElementById('photo-manager').hidden=true;await load();}}).className='danger';
       section.append(card);
       if(activeEvent){card.hidden=event.id!==activeEvent;open.hidden=true;if(event.id===activeEvent){tabs.hidden=false;if(event.guestUrl)await showPanel(0);else document.getElementById('photo-manager').hidden=true;}}else{tabs.hidden=true;panels.forEach(panel=>panel.hidden=true);danger.hidden=true;}
-      if(activeEvent===event.id){button(card,'Zur Veranstaltungsübersicht',()=>{activeEvent=null;history.replaceState(null,'','/dashboard');document.getElementById('photo-manager').hidden=true;load();}).className='secondary';}
 
     }
   }
   document.getElementById('close-manager').onclick=()=>{activeEvent=null;history.replaceState(null,'','/dashboard');document.getElementById('photo-manager').hidden=true;load().catch(report);};
   activeEvent=new URLSearchParams(location.search).get('event');
   document.getElementById('logout').onclick=()=>api('/api/auth/logout','POST').then(()=>location.href='/login').catch(report);
+  const deleteAccountForm=document.getElementById('delete-account-form');
+  deleteAccountForm.onsubmit=async e=>{
+    e.preventDefault();
+    if(document.getElementById('delete-account-confirm').value!=='KONTO LÖSCHEN'){report(new Error('Bitte „KONTO LÖSCHEN“ genau so eingeben.'));return;}
+    const submit=deleteAccountForm.querySelector('button');submit.disabled=true;
+    try{await api('/api/auth/account','DELETE',{password:document.getElementById('delete-account-password').value,confirm:'KONTO LÖSCHEN'});location.href='/login?deleted=1';}
+    catch(err){report(err);submit.disabled=false;}
+  };
   const eventIdInput=document.getElementById('event-id');
   const normalizeEventId=value=>value.trim().toLowerCase().replace(/ä/g,'ae').replace(/ö/g,'oe').replace(/ü/g,'ue').replace(/ß/g,'ss').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9_-]+/g,'-').replace(/^[-_]+|[-_]+$/g,'');
   eventIdInput.addEventListener('blur',()=>{eventIdInput.value=normalizeEventId(eventIdInput.value);});
+  const eventDateInput=document.getElementById('event-date');
+  const timelinePreview=document.getElementById('event-timeline-preview');
+  const shiftDate=(value,months=0,days=0)=>{
+    const [year,month,day]=value.split('-').map(Number);
+    const monthStart=new Date(Date.UTC(year,month-1+months,1));
+    const lastDay=new Date(Date.UTC(monthStart.getUTCFullYear(),monthStart.getUTCMonth()+1,0)).getUTCDate();
+    const shifted=new Date(Date.UTC(monthStart.getUTCFullYear(),monthStart.getUTCMonth(),Math.min(day,lastDay)+days));
+    return shifted.toISOString().slice(0,10);
+  };
+  const displayDate=value=>new Intl.DateTimeFormat('de-DE',{dateStyle:'long',timeZone:'UTC'}).format(new Date(`${value}T12:00:00Z`));
+  const updateTimelinePreview=()=>{
+    if(!timelinePreview)return;
+    timelinePreview.replaceChildren(element('strong','So läuft dein Album'));
+    if(!eventDateInput.value){timelinePreview.append(element('p','Wähle ein Veranstaltungsdatum, um den Zeitplan zu sehen.'));return;}
+    const start=eventDateInput.value,end=shiftDate(start,0,90),list=element('ul');
+    list.append(element('li',`Vor der Feier: bis zu 25 kostenlose Testfotos.`));
+    list.append(element('li',`Ab ${displayDate(start)}: Der Veranstaltungszeitraum beginnt; bei Buchung gilt das vollständige Speicherpaket.`));
+    list.append(element('li',`Bis ${displayDate(end)}: Fotos hochladen, ansehen und herunterladen – 90 Tage ab Veranstaltungsdatum.`));
+    list.append(element('li',`Am ${displayDate(end)} werden die Fotos automatisch gelöscht. Bitte vorher herunterladen.`));
+    timelinePreview.append(list);
+  };
+  eventDateInput.addEventListener('input',updateTimelinePreview);
+  eventDateInput.addEventListener('change',updateTimelinePreview);
+  updateTimelinePreview();
   document.getElementById('event-form').onsubmit=async e=>{
-    e.preventDefault();eventIdInput.value=normalizeEventId(eventIdInput.value);if(!/^[a-z0-9][a-z0-9_-]{2,63}$/.test(eventIdInput.value)){message.textContent='Bitte einen Kurznamen mit mindestens 3 Buchstaben oder Zahlen eingeben.';message.scrollIntoView({block:'center'});eventIdInput.focus();return;}try{await api('/api/events','POST',{title:document.getElementById('title').value,eventId:document.getElementById('event-id').value,plan:document.getElementById('plan').value,moderation:document.getElementById('moderation').checked});message.textContent='Veranstaltung erstellt. Öffne die Verwaltung für deinen Gästezugang und den aktuellen Status.';e.target.reset();await load();message.scrollIntoView({block:'center',behavior:'smooth'});}catch(err){report(err);message.scrollIntoView({block:'center',behavior:'smooth'});}
+    e.preventDefault();eventIdInput.value=normalizeEventId(eventIdInput.value);if(!/^[a-z0-9][a-z0-9_-]{2,63}$/.test(eventIdInput.value)){message.textContent='Bitte einen Kurznamen mit mindestens 3 Buchstaben oder Zahlen eingeben.';message.scrollIntoView({block:'center'});eventIdInput.focus();return;}try{const created=await api('/api/events','POST',{title:document.getElementById('title').value,eventId:document.getElementById('event-id').value,plan:'event',eventDate:document.getElementById('event-date').value,moderation:document.getElementById('moderation').checked,guestbookModeration:document.getElementById('guestbook-moderation').checked});activeEvent=created.eventId;history.replaceState(null,'',`/dashboard?event=${encodeURIComponent(activeEvent)}`);message.textContent='Veranstaltung erstellt. Du kannst jetzt kostenlos mit bis zu 25 Fotos testen.';e.target.reset();document.getElementById('guestbook-moderation').checked=true;await load();message.scrollIntoView({block:'center',behavior:'smooth'});}catch(err){report(err);message.scrollIntoView({block:'center',behavior:'smooth'});}
   };
   (async()=>{
-    try{const account=await api('/api/auth/me');if(account.emailDeliveryAvailable&&!account.emailVerified){const notice=element('div');notice.className='test-notice';notice.append(element('p','Bitte bestätige deine E-Mail-Adresse über den Link in deiner Mail.'));button(notice,'Bestätigungsmail erneut senden',async()=>{await api('/api/auth/request-verification','POST');message.textContent='Bestätigungsmail angefordert. Bitte auch im Spamordner nachsehen.';});document.getElementById('events').before(notice);}const storage=await api('/api/storage');if(storage.warning)message.textContent=storage.uploadsPaused?'Fotospeicher voll: Uploads sind vorübergehend pausiert.':'Der Fotospeicher wird knapp. Bitte vor weiteren Tests Speicher freigeben.';const diskNote=element('p',`Gesamter Fotospeicher: ${(storage.freeBytes/1024**2).toFixed(0)} MB frei von ${(storage.totalBytes/1024**2).toFixed(0)} MB. Alle Veranstaltungen teilen diesen Speicher; 100 MB bleiben als Betriebsreserve.`);diskNote.className='small';document.getElementById('events').before(diskNote);const plans=await api('/api/plans');availablePlans=plans;for(const [key,plan] of Object.entries(plans)){if(plan.legacy)continue;const option=element('option',`${plan.label} · ${(plan.priceCents/100).toFixed(2)} €`);option.value=key;document.getElementById('plan').append(option);}const chosen=new URLSearchParams(location.search).get('plan');if(plans[chosen]&&!plans[chosen].legacy){document.getElementById('plan').value=chosen;document.querySelector('.create-panel').open=true;message.textContent=`Ausgewählt: ${plans[chosen].label}. Erstelle deine Veranstaltung; bezahlt wird erst beim Upgrade.`;}await load();}catch(err){report(err);}
+    try{const account=await api('/api/auth/me');if(account.emailDeliveryAvailable&&!account.emailVerified){const notice=element('div');notice.className='test-notice';notice.append(element('p','Bitte bestätige deine E-Mail-Adresse über den Link in deiner Mail.'));button(notice,'Bestätigungsmail erneut senden',async()=>{await api('/api/auth/request-verification','POST');message.textContent='Bestätigungsmail angefordert. Bitte auch im Spamordner nachsehen.';});document.getElementById('events').before(notice);}const storage=await api('/api/storage');if(storage.warning)message.textContent=storage.uploadsPaused?'Uploads sind wegen des knappen temporären Speichers vorübergehend pausiert. Bitte in einigen Minuten erneut versuchen.':'Der Speicher wird knapp. Bitte vor weiteren Uploads Speicherbelegung prüfen.';const photoUsed=storage.usedBytes??storage.totalBytes-storage.freeBytes;const photoLabel=storage.location==='object-storage'?'Hetzner-Fotospeicher':'Fotospeicher auf der App-Disk';const diskNote=element('p',`${photoLabel}: ${(photoUsed/1024**3).toFixed(2)} GB von ${(storage.totalBytes/1024**3).toFixed(1)} GB belegt. Temporärer Render-Uploadpuffer: ${(storage.uploadDisk.freeBytes/1024**3).toFixed(2)} GB frei; bei weniger als ${(storage.uploadDisk.minimumFreeBytes/1024**3).toFixed(0)} GB pausiert FinalSnap neue Uploads.`);diskNote.className='small';document.getElementById('events').before(diskNote);const plans=await api('/api/plans');availablePlans=plans;const dateInput=document.getElementById('event-date');const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Berlin'}).format(new Date());dateInput.min=today;const maxDate=new Date(`${today}T12:00:00Z`);maxDate.setUTCMonth(maxDate.getUTCMonth()+24);dateInput.max=maxDate.toISOString().slice(0,10);if(new URLSearchParams(location.search).get('plan')==='event')document.querySelector('.create-panel').open=true;await load();}catch(err){report(err);}
   })();
 })();

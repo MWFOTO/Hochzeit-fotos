@@ -10,28 +10,38 @@ const {openDatabase}=require('../db');
 const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'event-platform-'));
 const signing='whsec_local_test_only';
 const signer=new Stripe('sk_test_local_test_only');
+const eventDate=new Date(Date.now()+30*86400000).toISOString().slice(0,10);
+let registrationIp=1;
 let creations=0;
+let simulatedUploadFreeBytes=10*1024**3;
 const sessions=new Map();
 const fake={webhooks:signer.webhooks,checkout:{sessions:{create:async(data,options)=>{
   creations++;const session={id:'cs_test_'+options.idempotencyKey,livemode:false,status:'open',payment_status:'unpaid',mode:data.mode,metadata:data.metadata,currency:'eur',amount_total:data.line_items[0].price_data.unit_amount,url:'https://checkout.stripe.com/test'};sessions.set(session.id,session);return session;
-},retrieve:async id=>sessions.get(id)}}};
+},retrieve:async id=>sessions.get(id),expire:async id=>{const session=sessions.get(id);session.status='expired';return session;}}}};
 const sentMail=[];
-const app=createApp({mailer:async message=>sentMail.push(message),DB_PATH:path.join(tmp,'events.db'),UPLOAD_DIR:path.join(tmp,'uploads'),BASE_URL:'http://localhost:3000',STRIPE_WEBHOOK_SECRET:signing,stripe:fake,MAX_EVENT_PHOTOS:2});
+let failNextContractConfirmation=false;
+const app=createApp({mailer:async message=>{if(message.subject.includes('Vertragsbestätigung')&&failNextContractConfirmation){failNextContractConfirmation=false;throw new Error('temporary delivery failure');}sentMail.push(message);},DB_PATH:path.join(tmp,'events.db'),UPLOAD_DIR:path.join(tmp,'uploads'),BASE_URL:'http://localhost:3000',STRIPE_WEBHOOK_SECRET:signing,stripe:fake,MAX_EVENT_PHOTOS:2,TRUST_PROXY:'1',uploadCapacityStatfs:()=>({bavail:simulatedUploadFreeBytes,bsize:1})});
 const server=app.listen(0);
 const origin=`http://127.0.0.1:${server.address().port}`;
 after(()=>{server.close();app.locals.db.close();fs.rmSync(tmp,{recursive:true,force:true});});
-async function request(url,{user,body,method='GET',headers={},form}={}) {
-  const res=await fetch(origin+url,{method,headers:{...(user?{Cookie:user.cookie,'X-CSRF-Token':user.csrf}:{}),...(method!=='GET'?{Origin:'http://localhost:3000'}:{}),...(body?{'Content-Type':'application/json'}:{}),...headers},body:form || (body?JSON.stringify(body):undefined),redirect:'manual'});
+async function request(url,{user,guest,body,method='GET',headers={},form}={}) {
+  const res=await fetch(origin+url,{method,headers:{...(user?{Cookie:user.cookie,'X-CSRF-Token':user.csrf}:{}),...(guest?.cookie?{Cookie:guest.cookie}:{}),...(method!=='GET'?{Origin:'http://localhost:3000'}:{}),...(body?{'Content-Type':'application/json'}:{}),...headers},body:form || (body?JSON.stringify(body):undefined),redirect:'manual'});
+  if(guest){const cookie=res.headers.get('set-cookie');if(cookie)guest.cookie=cookie.split(';')[0];}
   return {status:res.status,res,data:res.headers.get('content-type')?.includes('application/json')?await res.json():await res.arrayBuffer()};
 }
-async function register(email) {const r=await request('/api/auth/register',{method:'POST',body:{email,password:'a-good-long-password'}});assert.equal(r.status,200);return {cookie:r.res.headers.get('set-cookie').split(';')[0],csrf:r.data.csrf,id:r.data.user.id};}
+async function register(email) {const r=await request('/api/auth/register',{method:'POST',headers:{'X-Forwarded-For':`192.0.2.${registrationIp++}`},body:{email,password:'a-good-long-password'}});assert.equal(r.status,200);return {cookie:r.res.headers.get('set-cookie').split(';')[0],csrf:r.data.csrf,id:r.data.user.id};}
 async function webhook(session,{type='checkout.session.completed',id='evt_'+Math.random(),signature=true}={}) {
   const payload=JSON.stringify({id,type,livemode:false,data:{object:session}});
   const header=signature?signer.webhooks.generateTestHeaderString({payload,secret:signing}):'invalid';
   const res=await fetch(origin+'/api/stripe/webhook',{method:'POST',headers:{'Content-Type':'application/json','stripe-signature':header},body:payload});return res.status;
 }
 let user,other,paidSession,token,photo;
+const guestA={},guestB={};
 test('Registration, login, session, CSRF and protected dashboard',async()=>{
+  const landing=await request('/');assert.equal(landing.status,200);
+  const policy=landing.res.headers.get('content-security-policy');assert.match(policy,/script-src 'self'/);assert.doesNotMatch(policy,/script-src[^;]*unsafe-inline/);
+  assert.match(Buffer.from(landing.data).toString(),/src="\/landing\.js"/);
+  for(const file of ['landing.js','success.js','gallery-init.js','admin.js'])assert.equal((await request(`/${file}`)).status,200);
   assert.equal((await request('/dashboard')).status,302);
   user=await register('owner@example.com');other=await register('other@example.com');
   assert.equal((await request('/api/auth/login',{method:'POST',body:{email:'owner@example.com',password:'wrong-password'}})).status,401);
@@ -41,72 +51,121 @@ test('Registration, login, session, CSRF and protected dashboard',async()=>{
   assert.equal((await request('/dashboard',{user})).status,200);
 });
 test('Multiple events, ownership and pending payment gate',async()=>{
-  for(const eventId of ['birthday','company'])assert.equal((await request('/api/events',{method:'POST',user,body:{eventId,title:'Test Event',plan:'1m',trial:false,...(eventId==='birthday'?{moderation:true}:{})}})).status,201);
-  assert.equal((await request('/api/events',{user})).data.events.length,2);
-  assert.equal((await request('/api/events',{method:'POST',user:other,body:{eventId:'birthday',title:'Collision',plan:'1m'}})).status,409);
+  for(const eventId of ['birthday','company'])assert.equal((await request('/api/events',{method:'POST',user,body:{eventId,title:'Test Event',eventDate,plan:'event',trial:false,...(eventId==='birthday'?{moderation:true}:{})}})).status,201);
+  const ownerEvents=(await request('/api/events',{user})).data.events;assert.equal(ownerEvents.length,2);assert.ok(ownerEvents.every(event=>event.guestbook_moderation===1));
+  assert.equal((await request('/api/events',{method:'POST',user:other,body:{eventId:'birthday',title:'Collision',eventDate,plan:'event'}})).status,409);
   assert.equal((await request('/event/birthday')).status,402);
   assert.equal((await request('/api/event/birthday/qr',{user})).status,402);
-  assert.equal((await request('/api/checkout',{method:'POST',user:other,body:{eventId:'birthday'}})).status,404);
+  assert.equal((await request('/api/checkout',{method:'POST',user:other,body:{termsAccepted:true,eventId:'birthday'}})).status,404);
 });
 test('Checkout idempotency, signature, unpaid/amount/live rejection and delayed payment',async()=>{
-  for(let i=0;i<2;i++)assert.equal((await request('/api/checkout',{method:'POST',user,body:{eventId:'birthday'}})).status,200);
+  for(let i=0;i<2;i++)assert.equal((await request('/api/checkout',{method:'POST',user,body:{termsAccepted:true,eventId:'birthday'}})).status,200);
   assert.equal(creations,1);paidSession=[...sessions.values()][0];
   assert.equal(await webhook(paidSession,{signature:false}),400);
   assert.equal(await webhook(paidSession),200);assert.equal(app.locals.db.prepare('SELECT status FROM events WHERE id=?').get('birthday').status,'pending');
   const paid={...paidSession,payment_status:'paid'};
   assert.equal(await webhook({...paid,amount_total:1}),500);
   assert.equal(await webhook({...paid,livemode:true}),500);
+  failNextContractConfirmation=true;
   assert.equal(await webhook(paid,{type:'checkout.session.async_payment_succeeded',id:'evt_paid'}),200);
+  const confirmation=app.locals.db.prepare('SELECT * FROM contract_confirmations WHERE payment_id=(SELECT id FROM payments WHERE event_id=?)').get('birthday');
+  assert.equal(confirmation.status,'pending');assert.equal(confirmation.attempts,1);assert.ok(confirmation.recipient);
+  await app.locals.flushContractConfirmations();
+  const deliveredConfirmation=app.locals.db.prepare('SELECT * FROM contract_confirmations WHERE payment_id=?').get(confirmation.payment_id);
+  assert.equal(deliveredConfirmation.status,'sent');assert.equal(deliveredConfirmation.attempts,2);assert.equal(deliveredConfirmation.recipient,'');
+  const contractMail=sentMail.find(message=>message.subject.includes('Vertragsbestätigung'));
+  assert.ok(contractMail);assert.match(contractMail.text,/49,90 EUR/);assert.match(contractMail.text,/Widerrufsinformation/);assert.match(contractMail.text,/Muster-Widerrufsformular/);
   const expiry=app.locals.db.prepare('SELECT expires_at FROM events WHERE id=?').get('birthday').expires_at;
   assert.equal(await webhook(paid,{id:'evt_paid'}),200);assert.equal(await webhook(paid,{id:'evt_second'}),200);
   assert.equal(app.locals.db.prepare('SELECT expires_at FROM events WHERE id=?').get('birthday').expires_at,expiry);
   assert.equal((await request(`/api/checkout/${paid.id}`,{user:other})).status,404);
   token=app.locals.db.prepare('SELECT guest_token FROM events WHERE id=?').get('birthday').guest_token;
   assert.equal((await request('/event/birthday')).status,403);
-  const guestLanding=await request(`/event/birthday?token=${token}`);
+  const guestLanding=await request(`/event/birthday?token=${token}`,{guest:guestA});
   assert.equal(guestLanding.status,200);
   assert.match(Buffer.from(guestLanding.data).toString(),/id="upload-link"/);
-  const uploadPage=await request(`/event/birthday/upload?token=${token}`);
+  const uploadPage=await request(`/event/birthday/upload?token=${token}`,{guest:guestA});
   assert.equal(uploadPage.status,200);
   assert.match(Buffer.from(uploadPage.data).toString(),/id="file-input"/);
   assert.equal((await request('/photographer.webp')).status,200);
   assert.equal((await request('/public/server.js')).status,404);assert.equal((await request('/server.js')).status,404);
   assert.equal((await request('/upload.html')).status,404);
 });
-async function upload(buffer,name='photo.jpg') {const form=new FormData();form.append('photos',new Blob([buffer],{type:'image/jpeg'}),name);return request(`/api/event/birthday/upload?token=${token}`,{method:'POST',form});}
+async function upload(buffer,name='photo.jpg',guest=guestA) {const form=new FormData();form.append('photos',new Blob([buffer],{type:'image/jpeg'}),name);return request(`/api/event/birthday/upload?token=${token}`,{method:'POST',form,guest});}
 test('Content validation, guest upload, moderation, protected files, QR, quota and ZIP',async()=>{
-  assert.equal((await upload(Buffer.from('<script>evil</script>'))).status,400);
   const image=await sharp({create:{width:20,height:20,channels:3,background:'red'}}).jpeg().toBuffer();
+  simulatedUploadFreeBytes=1024**3;
+  const paused=await upload(image);assert.equal(paused.status,503);assert.match(paused.data.error,/temporäre Uploadspeicher/);
+  assert.equal(fs.readdirSync(path.join(tmp,'uploads','.tmp')).length,0);
+  simulatedUploadFreeBytes=10*1024**3;
+  assert.equal((await upload(Buffer.from('<script>evil</script>'))).status,400);
   assert.equal((await upload(image)).status,200);
-  assert.equal((await request(`/api/event/birthday/photos?token=${token}`)).data.photos.length,0);
+  assert.equal((await request(`/api/event/birthday/photos?token=${token}`,{guest:guestA})).data.photos.length,0);
   const stats=(await request('/api/events',{user})).data.events.find(e=>e.id==='birthday');
-  assert.equal(stats.photoCount,1);assert.ok(stats.storageBytes>0);assert.equal(stats.storageLimitBytes,2*1024**3);
+  assert.equal(stats.photoCount,1);assert.ok(stats.storageBytes>0);assert.equal(stats.storageLimitBytes,250*1024**2);
   assert.equal((await request('/api/events',{user:other})).data.events.length,0);
   photo=(await request('/api/event/birthday/photos?manage=1',{user})).data.photos[0];
   assert.equal((await request(photo.url)).status,403);
-  assert.equal((await request(photo.url+`?token=${token}`)).status,404);
+  assert.equal((await request(photo.url+`?token=${token}`,{guest:guestB})).status,404);
   assert.equal((await request(`/api/event/birthday/photos/${photo.id}`,{method:'PATCH',user:other,body:{approved:true}})).status,404);
   assert.equal((await request(`/api/event/birthday/photos/${photo.id}`,{method:'PATCH',user,body:{approved:true}})).status,200);
-  assert.equal((await request(photo.url+`?token=${token}`)).status,200);
+  assert.equal((await request(photo.url+`?token=${token}`,{guest:guestA})).status,200);
   const meta=await sharp(Buffer.from((await request(photo.url,{user})).data)).metadata();assert.equal(meta.exif,undefined);
-  assert.equal((await request(`/api/event/birthday/download?token=${token}`)).status,200);
+  assert.equal((await request(`/api/event/birthday/download?token=${token}`,{guest:guestA})).status,200);
+  assert.equal((await request(`/api/event/birthday/download?token=${token}`,{guest:guestB})).status,404);
+  assert.equal((await request(`/api/event/birthday/photos?token=${token}`,{guest:guestA})).data.photos.length,1);
+  assert.equal((await request(`/api/event/birthday/photos?token=${token}`,{guest:guestB})).data.photos.length,0);
+  assert.equal((await request(`/api/event/birthday/info?token=${token}`,{guest:guestA})).data.photoCount,1);
+  assert.equal((await request(`/api/event/birthday/info?token=${token}`,{guest:guestB})).data.photoCount,0);
   const qr=await request('/api/event/birthday/qr',{user});assert.equal(qr.status,200);assert.equal((await sharp(Buffer.from(qr.data)).metadata()).width,1200);
   assert.equal(app.locals.db.prepare('SELECT moderation FROM events WHERE id=?').get('company').moderation,0);
   assert.equal((await request('/api/event/birthday',{method:'PATCH',user,body:{moderation:false}})).status,200);
   assert.equal((await upload(image)).status,200);
-  assert.equal((await request(`/api/event/birthday/photos?token=${token}`)).data.photos.length,2);
-  assert.equal((await upload(image)).status,400);
+  assert.equal((await request(`/api/event/birthday/photos?token=${token}`,{guest:guestA})).data.photos.length,2);
+  assert.equal((await request(`/api/event/birthday/photos?token=${token}`,{guest:guestB})).data.photos.length,0);
+  assert.equal((await upload(image)).status,200);
   assert.equal(fs.readdirSync(path.join(tmp,'uploads','.tmp')).length,0);
   assert.equal((await request(`/api/event/birthday/photos/${photo.id}`,{method:'DELETE',user})).status,200);
   assert.equal((await request(photo.url,{user})).status,404);
 });
+test('Guestbook moderation, shared approved notes, ownership and feature pages',async()=>{
+  assert.equal((await request(`/event/birthday/games?token=${token}`,{guest:guestA})).status,200);
+  assert.equal((await request(`/event/birthday/guestbook?token=${token}`,{guest:guestA})).status,200);
+  assert.equal((await request('/games.js')).status,200);
+  assert.equal((await request('/guestbook.js')).status,200);
+  let info=await request(`/api/event/birthday/info?token=${token}`,{guest:guestA});assert.equal(info.data.guestbookModeration,true);
+  const created=await request(`/api/event/birthday/guestbook?token=${token}`,{method:'POST',guest:guestA,body:{name:'Alex',message:'Ein schöner Tag!'}});
+  assert.equal(created.status,201);assert.equal(created.data.pending,true);
+  assert.equal((await request(`/api/event/birthday/guestbook?token=${token}`,{guest:guestB})).data.entries.length,0);
+  const ownerEntries=(await request('/api/event/birthday/guestbook',{user})).data.entries;assert.equal(ownerEntries.length,1);assert.equal(ownerEntries[0].approved,0);
+  assert.equal((await request(`/api/event/birthday/guestbook/${ownerEntries[0].id}`,{method:'PATCH',user:other,body:{approved:true}})).status,404);
+  assert.equal((await request(`/api/event/birthday/guestbook/${ownerEntries[0].id}`,{method:'PATCH',user,body:{approved:true}})).status,200);
+  assert.equal((await request(`/api/event/birthday/guestbook?token=${token}`,{guest:guestB})).data.entries[0].message,'Ein schöner Tag!');
+  assert.equal((await request('/api/event/birthday',{method:'PATCH',user,body:{guestbookModeration:false}})).status,200);
+  const instant=await request(`/api/event/birthday/guestbook?token=${token}`,{method:'POST',guest:guestB,body:{name:'',message:'Danke an alle!'}});assert.equal(instant.data.pending,false);
+  assert.equal((await request(`/api/event/birthday/guestbook?token=${token}`,{guest:guestA})).data.entries.length,2);
+  assert.equal((await request(`/api/event/birthday/guestbook/${ownerEntries[0].id}`,{method:'PATCH',user,body:{approved:false}})).status,200);
+  assert.equal((await request(`/api/event/birthday/guestbook?token=${token}`,{guest:guestA})).data.entries.length,1);
+  assert.equal((await request(`/api/event/birthday/guestbook?token=${token}`,{method:'POST',guest:guestA,body:{name:'X'.repeat(41),message:'Zu lang'}})).status,400);
+  assert.equal((await request(`/api/event/birthday/guestbook?token=${token}`,{method:'POST',guest:guestA,body:{name:'Alex',message:'x'.repeat(501)}})).status,400);
+  assert.equal((await request(`/api/event/birthday/guestbook/${ownerEntries[0].id}`,{method:'DELETE',user})).status,200);
+  assert.equal((await request(`/api/event/birthday/guestbook?token=${token}`,{method:'POST',guest:guestA,body:{name:'Alex',message:'Wird nach der Feier entfernt.'}})).status,201);
+});
 test('Rotating guest links, expiry and automatic deletion',async()=>{
   assert.equal((await request('/api/event/birthday/rotate-token',{method:'POST',user})).status,200);
   assert.equal((await request(`/event/birthday?token=${token}`)).status,403);
+  const rotatedToken=app.locals.db.prepare('SELECT guest_token FROM events WHERE id=?').get('birthday').guest_token;
   app.locals.db.prepare('UPDATE events SET expires_at=? WHERE id=?').run(Date.now()-1,'birthday');
-  assert.equal((await request('/api/event/birthday/photos',{user})).status,402);
+  const retained=await request(`/api/event/birthday/info?token=${rotatedToken}`,{guest:guestA});
+  assert.equal(retained.status,402);
+  const form=new FormData();form.append('photos',new Blob([await sharp({create:{width:10,height:10,channels:3,background:'green'}}).jpeg().toBuffer()],{type:'image/jpeg'}),'retention.jpg');
+  assert.equal((await request(`/api/event/birthday/upload?token=${rotatedToken}`,{method:'POST',form,guest:guestA})).status,402);
+  assert.equal((await request('/api/event/birthday/qr',{user})).status,402);
+  app.locals.db.prepare('UPDATE events SET expires_at=? WHERE id=?').run(Date.now()-91*86400000,'birthday');
   app.locals.cleanup();assert.equal(fs.existsSync(path.join(tmp,'uploads','birthday')),false);
   assert.equal(app.locals.db.prepare('SELECT COUNT(*) n FROM photos').get().n,0);
+  assert.equal(app.locals.db.prepare('SELECT COUNT(*) n FROM guestbook_entries WHERE event_id=?').get('birthday').n,0);
+  assert.equal((await request(`/api/event/birthday/info?token=${rotatedToken}`,{guest:guestA})).status,402);
 });
 test('Live key blocked and old SQLite schema migrated without overwriting rows',()=>{
   assert.throws(()=>createApp({STRIPE_SECRET_KEY:'sk_live_forbidden'}),/Testschlüssel/);
@@ -141,9 +200,36 @@ test('Sessions persist across application restart and logout invalidates them',a
   assert.equal((await request('/api/auth/me',{user:other})).status,401);
 });
 
+test('Account deletion verifies password, removes albums and separates retained payment records',async()=>{
+  const account=await register('delete-account@example.com');
+  for(const eventId of ['delete-free','delete-open','delete-paid']) assert.equal((await request('/api/events',{method:'POST',user:account,body:{eventId,title:'Private Event',eventDate,plan:'event',trial:false}})).status,201);
+  const openCheckout=await request('/api/checkout',{method:'POST',user:account,body:{termsAccepted:true,eventId:'delete-open'}});assert.equal(openCheckout.status,200);
+  const openPaymentId=app.locals.db.prepare('SELECT id FROM payments WHERE event_id=?').get('delete-open').id;
+  const openSessionId=app.locals.db.prepare('SELECT stripe_session_id FROM payments WHERE id=?').get(openPaymentId).stripe_session_id;
+  app.locals.db.prepare("INSERT INTO payments (id,event_id,amount_cents,months,status) VALUES (?,?,?,?,?)").run('paid-record','delete-paid',4990,3,'paid');
+  const photoFile=path.join(tmp,'uploads','delete-free','guest.jpg');fs.mkdirSync(path.dirname(photoFile),{recursive:true});fs.writeFileSync(photoFile,'guest photo');
+  app.locals.db.prepare('INSERT INTO photos (id,event_id,filename,bytes,approved,created_at) VALUES (?,?,?,?,?,?)').run('delete-photo','delete-free','guest.jpg',11,1,Date.now());
+  app.locals.db.prepare('INSERT INTO guestbook_entries (id,event_id,guest_name,message,approved,created_at) VALUES (?,?,?,?,?,?)').run('delete-entry','delete-free','Guest','A private message',1,Date.now());
+  assert.equal((await request('/api/auth/account',{method:'DELETE',user:account,body:{password:'wrong-password',confirm:'KONTO LÖSCHEN'}})).status,401);
+  assert.equal((await request('/api/auth/account',{method:'DELETE',user:account,body:{password:'a-good-long-password',confirm:'DELETE'}})).status,400);
+  const deleted=await request('/api/auth/account',{method:'DELETE',user:account,body:{password:'a-good-long-password',confirm:'KONTO LÖSCHEN'}});assert.equal(deleted.status,200);assert.equal(deleted.data.deletedEvents,3);assert.equal(deleted.data.retainedPayments,1);
+  assert.equal(sessions.get(openSessionId).status,'expired');
+  assert.equal(app.locals.db.prepare('SELECT COUNT(*) n FROM users WHERE id=?').get(account.id).n,0);
+  assert.equal(app.locals.db.prepare('SELECT COUNT(*) n FROM sessions WHERE user_id=?').get(account.id).n,0);
+  assert.equal(app.locals.db.prepare('SELECT COUNT(*) n FROM photos WHERE event_id=?').get('delete-free').n,0);
+  assert.equal(app.locals.db.prepare('SELECT COUNT(*) n FROM guestbook_entries WHERE event_id=?').get('delete-free').n,0);
+  assert.equal(fs.existsSync(path.dirname(photoFile)),false);
+  assert.equal(app.locals.db.prepare('SELECT COUNT(*) n FROM events WHERE owner_id=?').get(account.id).n,0);
+  assert.equal(app.locals.db.prepare('SELECT COUNT(*) n FROM events WHERE id=?').get('delete-open').n,0);
+  const retained=app.locals.db.prepare('SELECT * FROM events WHERE id=?').get('delete-paid');assert.equal(retained.owner_id,null);assert.equal(retained.email,null);assert.equal(retained.title,'Gelöschtes Album');assert.equal(retained.guest_token,null);
+  assert.equal(app.locals.db.prepare('SELECT COUNT(*) n FROM payments WHERE event_id=?').get('delete-paid').n,1);
+  assert.equal(app.locals.db.prepare('SELECT COUNT(*) n FROM payments WHERE event_id=?').get('delete-open').n,0);
+  assert.equal((await request('/api/auth/me',{user:account})).status,401);
+});
+
 test('Free trial quota, compression, counters and upgrade preserve photos and guest link',async()=>{
   const trialUser=await register('trial@example.com');
-  const created=await request('/api/events',{method:'POST',user:trialUser,body:{eventId:'trial-event',title:'Trial',plan:'1m'}});assert.equal(created.data.trial,true);
+  const created=await request('/api/events',{method:'POST',user:trialUser,body:{eventId:'trial-event',title:'Trial',eventDate,plan:'event'}});assert.equal(created.data.trial,true);
   let event=(await request('/api/events',{user:trialUser})).data.events[0];assert.equal(event.status,'trial');assert.equal(event.photoLimit,25);assert.ok(event.guestUrl);
   const trialToken=new URL(event.guestUrl).searchParams.get('token');
   const small=await sharp({create:{width:30,height:20,channels:3,background:'blue'}}).jpeg().toBuffer();
@@ -155,12 +241,12 @@ test('Free trial quota, compression, counters and upgrade preserve photos and gu
   assert.equal((await send(10)).status,200);assert.equal((await send(10)).status,200);assert.equal((await send(4)).status,200);assert.equal((await send(1)).status,400);
   event=(await request('/api/events',{user:trialUser})).data.events[0];assert.equal(event.photoCount,25);assert.equal(event.upload_successes,4);assert.equal(event.upload_failures,1);
   assert.equal((await request('/api/event/trial-event/qr',{user:trialUser})).status,200);
-  const second=await request('/api/events',{method:'POST',user:trialUser,body:{eventId:'second-trial',title:'Second',plan:'1m'}});assert.equal(second.data.trial,false);
-  assert.equal((await request('/api/checkout',{method:'POST',user:trialUser,body:{eventId:'trial-event'}})).status,200);
+  const second=await request('/api/events',{method:'POST',user:trialUser,body:{eventId:'second-trial',title:'Second',eventDate,plan:'event'}});assert.equal(second.data.trial,true);
+  assert.equal((await request('/api/checkout',{method:'POST',user:trialUser,body:{termsAccepted:true,eventId:'trial-event'}})).status,200);
   const row=app.locals.db.prepare('SELECT stripe_session_id FROM payments WHERE event_id=?').get('trial-event');const session=sessions.get(row.stripe_session_id);session.payment_status='paid';
   assert.equal(await webhook(session),200);
   event=(await request('/api/events',{user:trialUser})).data.events.find(e=>e.id==='trial-event');assert.equal(event.status,'paid');assert.equal(event.photoCount,25);assert.equal(event.guest_token,trialToken);
-  assert.equal((await request('/api/storage',{user:trialUser})).status,200);assert.equal((await request('/api/storage')).status,401);
+  const storageStatus=await request('/api/storage',{user:trialUser});assert.equal(storageStatus.status,200);assert.equal(storageStatus.data.location,'server-disk');assert.equal(storageStatus.data.uploadDisk.minimumFreeBytes,2*1024**3);assert.equal(typeof storageStatus.data.uploadDisk.freeBytes,'number');assert.equal((await request('/api/storage')).status,401);
 });
 
 test('Email verification uses expiring single-use tokens without plaintext storage',async()=>{
@@ -179,7 +265,7 @@ test('Email verification uses expiring single-use tokens without plaintext stora
 test('Login page retrieves CSRF for an existing browser session before signing in',async()=>{
  const vm=require('node:vm');const nodes=new Map();const get=id=>{if(!nodes.has(id))nodes.set(id,{value:id==='password'?'a-good-long-password':id==='email'?'test@example.com':'',hidden:true});return nodes.get(id);};
  const calls=[];const location={pathname:'/login',search:''};
- vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../public/account.js'),'utf8'),{document:{getElementById:get},location,URLSearchParams,fetch:async(url,options)=>{calls.push({url,options});return {ok:true,json:async()=>url==='/api/auth/me'?{csrf:'existing-session-token'}:{}};}});
+ vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../public/account.js'),'utf8'),{document:{getElementById:get,body:{classList:{toggle(){}}}},location,URLSearchParams,fetch:async(url,options)=>{calls.push({url,options});return {ok:true,json:async()=>url==='/api/auth/me'?{csrf:'existing-session-token'}:{}};}});
  await get('login-form').onsubmit({preventDefault(){}});
  assert.equal(calls[0].url,'/api/auth/me');assert.equal(calls[1].options.headers['X-CSRF-Token'],'existing-session-token');assert.equal(location.href,'/dashboard');
 });
@@ -202,14 +288,17 @@ test('Verification and password recovery pages serve their executable scripts',a
  assert.equal((await request('/server.js')).status,404);
 });
 
-test('Upgrade selection sets server-side price and duration, then locks started checkout',async()=>{
- const stranger=await register('packages-other@example.com');const u=await register('packages@example.com');assert.equal((await request('/register?plan=6m',{user:u})).res.headers.get('location'),'/dashboard?plan=6m');assert.equal((await request('/register?plan=invalid',{user:u})).res.headers.get('location'),'/dashboard');await request('/api/events',{method:'POST',user:u,body:{eventId:'package-test',title:'Packages',plan:'1m'}});
- assert.equal((await request('/api/checkout',{method:'POST',user:stranger,body:{eventId:'package-test',plan:'6m'}})).status,404);
- assert.equal((await request('/api/checkout',{method:'POST',user:u,body:{eventId:'package-test',plan:'wrong'}})).status,400);
- assert.equal((await request('/api/checkout',{method:'POST',user:u,body:{eventId:'package-test',plan:'6m',amount_cents:1}})).status,200);
- const payment=app.locals.db.prepare('SELECT * FROM payments WHERE event_id=?').get('package-test');assert.equal(payment.amount_cents,3900);assert.equal(payment.months,6);
- assert.equal((await request('/api/checkout',{method:'POST',user:u,body:{eventId:'package-test',plan:'1m'}})).status,409);
- assert.equal((await request('/api/checkout',{method:'POST',user:u,body:{eventId:'package-test',plan:'6m'}})).status,200);
+test('Checkout rejects client-side plan and price changes and charges the stored quote',async()=>{
+ const stranger=await register('packages-other@example.com');const u=await register('packages@example.com');assert.equal((await request('/register?plan=6m',{user:u})).res.headers.get('location'),'/dashboard?plan=6m');assert.equal((await request('/register?plan=invalid',{user:u})).res.headers.get('location'),'/dashboard');await request('/api/events',{method:'POST',user:u,body:{eventId:'package-test',title:'Packages',eventDate,plan:'event'}});
+ assert.equal((await request('/api/checkout',{method:'POST',user:stranger,body:{termsAccepted:true,eventId:'package-test',plan:'6m'}})).status,404);
+ assert.equal((await request('/api/checkout',{method:'POST',user:u,body:{termsAccepted:true,eventId:'package-test',plan:'wrong'}})).status,400);
+ assert.equal((await request('/api/checkout',{method:'POST',user:u,body:{termsAccepted:true,eventId:'package-test',plan:'6m',amount_cents:1}})).status,409);
+ assert.equal(app.locals.db.prepare('SELECT COUNT(*) n FROM payments WHERE event_id=?').get('package-test').n,0);
+ assert.equal((await request('/api/checkout',{method:'POST',user:u,body:{termsAccepted:true,eventId:'package-test',plan:'event',amount_cents:1}})).status,200);
+ const payment=app.locals.db.prepare('SELECT * FROM payments WHERE event_id=?').get('package-test');assert.equal(payment.amount_cents,4990);assert.equal(payment.months,3);
+ assert.equal(sessions.get(payment.stripe_session_id).amount_total,4990);
+ assert.equal((await request('/api/checkout',{method:'POST',user:u,body:{termsAccepted:true,eventId:'package-test',plan:'1m'}})).status,409);
+ assert.equal((await request('/api/checkout',{method:'POST',user:u,body:{termsAccepted:true,eventId:'package-test',plan:'event'}})).status,200);
  const session=sessions.get(payment.stripe_session_id);session.payment_status='paid';assert.equal(await webhook(session),200);
- const event=(await request('/api/events',{user:u})).data.events[0];assert.equal(event.plan,'6m');assert.equal(event.status,'paid');assert.ok(event.expires_at>Date.now()+179*86400000);
+ const event=(await request('/api/events',{user:u})).data.events[0];assert.equal(event.plan,'event');assert.equal(event.status,'paid');assert.equal(event.amount_cents,4990);assert.ok(event.expires_at>Date.now()+110*86400000);assert.ok(event.expires_at<Date.now()+130*86400000);
 });

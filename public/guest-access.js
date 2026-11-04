@@ -36,29 +36,72 @@
     const info=await res.json();
     let notice=document.getElementById('quota-notice');
     if(!notice){notice=document.createElement('div');notice.id='quota-notice';notice.className='quota-notice';notice.setAttribute('role','status');const parent=document.querySelector('.gallery-header')||document.querySelector('.upload-page');if(parent)parent.append(notice);}
-    if(notice){notice.replaceChildren();notice.hidden=!info.trial;
-      if(info.trial){const left=Math.max(0,info.photoLimit-info.photoCount);const text=document.createElement('p');text.textContent=left===0?'Die 25 kostenlosen Fotos sind genutzt. Erweitere das Album mit einem Paket.':`Noch ${left} kostenlose ${left===1?'Foto':'Fotos'} verfügbar.`;notice.append(text);
-        if(left<=5){notice.classList.add('quota-near');const a=document.createElement('a');a.className='button primary';a.textContent=info.canManage?'Paket auswählen':'Veranstalter? Paket auswählen';a.href=info.canManage?`/dashboard?event=${encodeURIComponent(eventId)}`:`/login?event=${encodeURIComponent(eventId)}`;notice.append(a);if(!info.canManage){const hint=document.createElement('p');hint.textContent='Gäste zahlen nichts. Das Paket wird im Veranstalterkonto gebucht.';notice.append(hint);}}
+    if(notice){notice.replaceChildren();notice.hidden=!info.testMode;
+      if(info.testMode){const left=Math.max(0,info.photoLimit-info.photoCount);const text=document.createElement('p');text.textContent=left===0?(info.preEventTest?'Die 25 Testfotos sind genutzt. Das 25-GB-Paket startet am Veranstaltungsdatum.':'Die 25 kostenlosen Testfotos sind genutzt. Buche das Album im Veranstalterkonto.'):(info.preEventTest?`Vorabtest: noch ${left} ${left===1?'Foto':'Fotos'} bis zum Veranstaltungsdatum.`:`Noch ${left} kostenlose ${left===1?'Testfoto':'Testfotos'} verfügbar.`);notice.append(text);
+        if(info.trial&&left<=5){notice.classList.add('quota-near');const a=document.createElement('a');a.className='button primary';a.textContent=info.canManage?'Album buchen':'Veranstalter? Album buchen';a.href=info.canManage?`/dashboard?event=${encodeURIComponent(eventId)}`:`/login?event=${encodeURIComponent(eventId)}`;notice.append(a);if(!info.canManage){const hint=document.createElement('p');hint.textContent='Gäste zahlen nichts. Das Album wird im Veranstalterkonto gebucht.';notice.append(hint);}}
       }
     }
     const back=document.getElementById('album-back');if(back)back.href=window.guestUrl(`/event/${encodeURIComponent(eventId)}/gallery`);
+    const games=document.getElementById('games-link');if(games)games.href=window.guestUrl(`/event/${encodeURIComponent(eventId)}/games`);
+    const guestbook=document.getElementById('guestbook-link');if(guestbook)guestbook.href=window.guestUrl(`/event/${encodeURIComponent(eventId)}/guestbook`);
+    document.querySelectorAll('.game-task .button').forEach(item=>{item.hidden=info.readOnly;});
     const manage=document.getElementById('manage-back');if(manage){manage.hidden=!info.canManage;manage.href=`/dashboard?event=${encodeURIComponent(eventId)}`;}
   }
   window.refreshEventQuota=refreshQuota;
   document.addEventListener('DOMContentLoaded',()=>{refreshQuota().catch(()=>{});if(!location.pathname.endsWith('/slideshow'))setInterval(()=>refreshQuota().catch(()=>{}),10000);});
-  if (eventId) window.fetch(`/api/event/${encodeURIComponent(eventId)}/info`).then(res => res.json()).then(info => {
-    const title = document.querySelector('.event-title');
-    if (title && info.title) title.textContent = info.title;
-    const subtitle = document.querySelector('.event-subtitle');
-    if (subtitle) subtitle.textContent = info.moderation ? 'Teile deine schönsten Momente. Nach Freigabe sind sie für die Gäste in Galerie und Diashow sichtbar.' : 'Teile deine schönsten Momente. Deine Fotos sind direkt für die Gäste in Galerie und Diashow sichtbar.';
-    const hint = document.getElementById('retention-hint');
-    if (hint && info.expiresAt) hint.textContent = `Diese Veranstaltung läuft bis ${new Date(info.expiresAt).toLocaleString('de-DE')}. Danach sind die Bilder nicht mehr erreichbar und werden im nächsten Löschlauf entfernt.`;
-    const link = document.getElementById('gallery-link');
-    if (link) link.href = window.guestUrl(`/event/${encodeURIComponent(eventId)}/gallery`);
-  }).catch(() => {});
+  const applyEventInfo = info => {
+    const update = () => {
+      const design=info.design||{};
+      const eventFonts={classic:'Georgia,serif',palatino:'Palatino Linotype,Palatino,serif',modern:'Arial,sans-serif',verdana:'Verdana,sans-serif',relaxed:'Trebuchet MS,sans-serif',typewriter:'Courier New,monospace'};
+      if(design.accent)document.documentElement.style.setProperty('--color-accent',design.accent);
+      if(design.theme)document.body.dataset.designTheme=design.theme;
+      const title = document.querySelector('.event-title');
+      if (title && (design.title||info.title)) {title.textContent=design.title||info.title;title.style.fontFamily=eventFonts[design.font]||eventFonts.classic;}
+      const galleryHeader=document.querySelector('.gallery-header');
+      if(galleryHeader&&design.hasCover) {
+        let cover=galleryHeader.querySelector('.event-design-cover');
+        if(!cover){cover=document.createElement('img');cover.className='event-design-cover';cover.alt='Titelmotiv der Veranstaltung';const eyebrow=galleryHeader.querySelector('.eyebrow');galleryHeader.insertBefore(cover,eyebrow||galleryHeader.firstChild);}
+        cover.src=window.guestUrl(`/api/event/${encodeURIComponent(eventId)}/design-cover`);
+      }
+      const subtitle = document.querySelector('.event-subtitle');
+      if (subtitle) subtitle.textContent = info.readOnly
+        ? `Der Albumzeitraum ist beendet. Fotos bleiben bis ${new Date(info.retentionUntil).toLocaleDateString('de-DE')} abrufbar.`
+        : info.canManage
+          ? 'Verwalte alle Fotos eurer Feier. Gäste sehen auf ihrem eigenen Gerät nur die Fotos, die sie selbst hochgeladen haben.'
+          : info.moderation
+            ? 'Teile deine schönsten Momente. Deine Fotos erscheinen nach Freigabe in deiner Galerie.'
+            : 'Teile deine schönsten Momente. Deine Fotos erscheinen in der Galerie auf diesem Gerät.';
+      const galleryHeading=document.querySelector('.gallery-header .eyebrow');
+      if(galleryHeading)galleryHeading.textContent=info.canManage?'ALLE MOMENTE EURER FEIER':'DEINE FOTOS AUF DIESEM GERÄT';
+      const galleryDescription=document.querySelector('.gallery-header > p');
+      if(galleryDescription)galleryDescription.textContent=info.readOnly
+        ? `Downloadphase: Fotos sind bis ${new Date(info.retentionUntil).toLocaleDateString('de-DE')} abrufbar. Neue Uploads sind geschlossen.`
+        : info.canManage?'Verwalte alle Fotos eurer Feier. Gäste sehen jeweils ihre eigenen Uploads.':'Hier siehst du die Fotos, die du mit diesem Browser hochgeladen hast.';
+      const emptyMessage=document.getElementById('empty-msg');
+      if(emptyMessage)emptyMessage.textContent=info.canManage?'Noch keine Fotos vorhanden.':'Du hast mit diesem Browser noch keine Fotos hochgeladen.';
+      const downloadButton=document.getElementById('download-all-btn');
+      if(downloadButton)downloadButton.textContent=info.canManage?'Alle Fotos als ZIP herunterladen':'Meine Fotos als ZIP herunterladen';
+      const uploadLink=document.getElementById('upload-link');if(uploadLink)uploadLink.hidden=info.readOnly;
+      for(const id of ['upload-trigger','camera-trigger']){const button=document.getElementById(id);if(button)button.hidden=info.readOnly;}
+      const hint = document.getElementById('retention-hint');
+      if (hint && info.expiresAt) hint.textContent = info.eventDate ? `Fotos sind bis zum ${new Date(info.retentionUntil).toLocaleDateString('de-DE')} verfügbar: 90 Tage ab Veranstaltungsdatum. Bitte vorher herunterladen; am Ablaufdatum werden sie automatisch gelöscht.` : `Der Albumzeitraum endet am ${new Date(info.expiresAt).toLocaleDateString('de-DE')}. Du kannst Fotos noch bis zum ${new Date(info.retentionUntil).toLocaleDateString('de-DE')} ansehen und herunterladen. Danach werden sie gelöscht.`;
+      const link = document.getElementById('gallery-link');
+      if (link) link.href = window.guestUrl(`/event/${encodeURIComponent(eventId)}/gallery`);
+    };
+    if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',update,{once:true});else update();
+  };
+  if (eventId) window.fetch(`/api/event/${encodeURIComponent(eventId)}/info`).then(res => res.ok?res.json():null).then(info => {if(info)applyEventInfo(info);}).catch(() => {});
   window.guestUrl = url => {
     const parsed = new URL(url, location.origin);
     if (token) parsed.searchParams.set('token', token);
     return parsed.href;
   };
+  const updateGuestBrand = () => {
+    const brand = document.querySelector('.site-header .brand');
+    if (!brand || !eventId) return;
+    brand.href = window.guestUrl(`/event/${encodeURIComponent(eventId)}/upload`);
+    brand.setAttribute('aria-label', 'Zur Gäste-Startseite');
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', updateGuestBrand, {once:true});
+  else updateGuestBrand();
 })();

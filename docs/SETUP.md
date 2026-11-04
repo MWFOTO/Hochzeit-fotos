@@ -20,10 +20,11 @@
 7. Generische `stripe trigger`-Sessions enthalten keine lokale Bestellung und
    können daher nicht zur Freischaltung dienen. Den wirklichen App-Checkout testen.
 
-## Separater Testservice auf Render – erst nach Freigabe einrichten
+## Separater Testservice auf Render – nur falls später benötigt
 
-Produktiven Service unverändert lassen. Kein Blueprint mit kostenpflichtigen
-Ressourcen wird automatisch angelegt.
+Der aktuelle Dienst `finalsnap-deutschland` läuft in Frankfurt unter
+`https://finalsnap.de`. Vor Änderungen immer Dienst-ID, Region und Branch prüfen;
+der ältere Dienst in Ohio ist vom Deutschland-Dienst getrennt.
 
 | Einstellung | Wert |
 | --- | --- |
@@ -31,32 +32,175 @@ Ressourcen wird automatisch angelegt.
 | Runtime | Node.js 22.13+ oder 24 |
 | Build Command | npm ci |
 | Start Command | npm start |
-| Health Check | /health |
+| Health Check (Liveness) | /health |
 | NODE_ENV | production |
 | BASE_URL | https://DEIN-TESTSERVICE.onrender.com |
 | TRUST_PROXY | 1 (genau ein vertrauenswürdiger Proxy) |
-| DB_PATH | /var/data/events.db |
-| UPLOAD_DIR | /var/data/uploads |
+| DB_PATH | /data/events.db |
+| UPLOAD_DIR | /data/uploads |
 | STRIPE_SECRET_KEY | sk_test_… als Secret |
 | STRIPE_WEBHOOK_SECRET | whsec_… des Test-Webhooks als Secret |
-| MAX_EVENT_PHOTOS | 2000, vor Verkauf abstimmen |
-| MAX_EVENT_BYTES | 2147483648 pro Event, vor Verkauf abstimmen |
+| MAX_EVENT_PHOTOS | Nur für geschlossene Pilot-Events; im Verkaufspaket keine feste Fotoanzahl |
+| MAX_EVENT_BYTES | 26843545600 als 25-GB-Ziel pro bezahltem Event; Hosting-Wert vor Verkauf prüfen |
 
-Für SQLite und Bilder muss `/var/data` auf einer Persistent Disk liegen.
+Für SQLite und Bilder muss `/data` auf einer Persistent Disk liegen.
 Nur Pfade auf dem gemounteten Datenträger sind dauerhaft. Free-Webservices haben
 keine Persistent Disk; Bilder/SQLite gehen bei Neustart/Redeploy/Spin-down verloren.
 Deshalb Free nur für wegwerfbare Tests, nicht für Kundendaten einsetzen.
 Disk und Service können Kosten verursachen: erst nach ausdrücklicher Freigabe.
 Ein einzelner Prozess/eine Instanz; kein Node-Cluster und keine horizontale Skalierung.
 Datenträger ist während Build/Pre-deploy nicht verfügbar: Import dort nicht ausführen.
+Zusätzlich prüft `/ready` Datenbank, Upload-Datenträger und Object Storage. Für externe Alarmierung `/ready` überwachen; eine solche Überwachung ist nicht automatisch eingerichtet.
+
+Nach erfolgreicher Stripe-Zahlung wird eine Vertragsbestätigung mit dem bei Bestellung geltenden Bedingungstext und der Widerrufsinformation an die Konto-E-Mail gestellt. Der Versand wird persistent wiederholt, bis er erfolgreich ist. Vor Verkaufsfreigabe im Stripe- und Brevo-Testbetrieb verifizieren, dass die Nachricht zugestellt wird und im Postfach gespeichert werden kann. Steuerberechnung/Rechnung über Stripe Tax separat testen; `STRIPE_TAX_ENABLED` bleibt aus, bis die deutsche Steuerregistrierung im Stripe-Testmodus eingerichtet und bestätigt wurde.
+
+Die schrittweise Betreiber-Anleitung für Stripe Tax, Backup-Bucket und Testkäufe steht in [`OWNER-SETUP-BLOCKERS.md`](OWNER-SETUP-BLOCKERS.md).
+
+## Zielbetrieb Deutschland: Render Frankfurt plus Hetzner Object Storage
+
+Der deutsche Dienst `finalsnap-deutschland` ist unter `https://finalsnap.de` live.
+Der ältere Dienst in Ohio ist getrennt und darf nicht für Kundendaten eingesetzt
+werden. Vor jeder Änderung die Dienst-ID und Region im Render-Dashboard prüfen.
+
+**Deutschland ist die Standortvorgabe für App und dauerhafte Kundendaten.** Die
+App und SQLite laufen in Frankfurt; der konfigurierte Hetzner-Fotospeicher-Endpunkt
+ist Nürnberg (`nbg1`). Damit ist nicht automatisch belegt, dass E-Mail, Zahlung,
+Quellcode-Builds, Supportzugriffe und Backups ausschließlich in Deutschland
+verarbeitet werden. Diese Anbieter- und Datenflüsse sind separat zu prüfen.
+
+| Einstellung | Wert |
+| --- | --- |
+| Git-Branch | `codex/germany-storage` |
+| Hosting | Render, Region Frankfurt (Deutschland) |
+| Öffentliche Adresse | `https://finalsnap.de` (mit automatischer `www`-Weiterleitung) |
+| Instanzen | 1 (SQLite wird nicht horizontal geteilt) |
+| Dauer-Volume-Mount | `/data` |
+| DB_PATH | `/data/events.db` |
+| UPLOAD_DIR | `/data/staging` (temporäre Uploads; die Fotos gehen in S3) |
+| S3_BUCKET | privater Hetzner-Bucket in Nürnberg oder Falkenstein |
+| S3_ENDPOINT | `https://nbg1.your-objectstorage.com` oder `https://fsn1.your-objectstorage.com` |
+| S3_REGION | passend zum Endpunkt: `nbg1` oder `fsn1` |
+| S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY | nur als geheime Hosting-Variablen eintragen |
+| S3_SSE_C_KEY | Base64-kodierter, zufälliger 32-Byte-Schlüssel; als Render-Secret und separat im Passwortmanager speichern |
+| S3_MAX_STORAGE_BYTES | 900 GiB standardmäßig; stoppt Uploads vor dem 1-TB-Speicherkontingent |
+| BACKUP_ENABLED | bleibt `0`, bis separater Backup-Bucket, Zugang, Versioning und Lifecycle-Regel geprüft sind |
+| BACKUP_S3_BUCKET | privater Hetzner-Sicherungs-Bucket, getrennt vom Fotobucket und in Falkenstein (`fsn1`) |
+| BACKUP_S3_ACCESS_KEY_ID / BACKUP_S3_SECRET_ACCESS_KEY | eigener Schlüssel mit Zugriff nur auf den Sicherungs-Bucket |
+| BACKUP_S3_SSE_C_KEY | eigener Base64-kodierter 32-Byte-Schlüssel, separat vom Fotoschlüssel verwahren |
+
+`render.yaml` beschreibt den neuen Dienst: Frankfurt, Starter-Plan, 10-GB-Datenträger,
+`finalsnap.de`, `/health` und zunächst deaktivierte automatische Deploys. Render
+stellt nach erfolgreicher DNS-Prüfung TLS bereit. Die DNS-Einträge müssen beim
+Domainanbieter auf den neuen Render-Dienst zeigen; vorhandene Website-Einträge erst
+ändern, wenn klar ist, dass `finalsnap.de` künftig FinalSnap ausliefern soll. Die
+Blueprint-Datei legt
+keinen Hetzner-Bucket an. Für Fotos zuerst einen privaten Bucket in `nbg1` oder `fsn1`
+und Zugangsdaten erstellen; die S3-Werte sowie den Brevo-Schlüssel beim Einrichten
+des Render-Blueprints als geheime Variablen setzen. Zusätzlich vor dem ersten
+Deploy einen zufälligen 32-Byte-SSE-C-Schlüssel erzeugen und sowohl als
+`S3_SSE_C_KEY` in Render als auch getrennt in einem Passwortmanager sichern.
+Hetzner speichert diesen Schlüssel nicht; geht er verloren, lassen sich die
+verschlüsselten Fotos nicht mehr lesen. Vor dem kostenpflichtigen Blueprint-Sync
+den im Render-Dashboard angezeigten Gesamtpreis bestätigen.
+
+Für Sicherungen einen weiteren privaten Bucket in der anderen deutschen Region
+(`fsn1`, getrennt vom Fotospeicher) anlegen. Versioning muss aktiviert sein; eine
+Lifecycle-Regel nur für `photos/` muss nicht aktuelle Versionen nach höchstens 7
+Tagen löschen und aktive Versionen behalten. Einen eigenen beschränkten S3-Schlüssel
+und separaten SSE-C-Schlüssel dafür erzeugen. Erst nach Prüfung im Hetzner-Dashboard
+die Backup-Zugangsdaten in Render setzen und `BACKUP_ENABLED=1` aktivieren. Die App
+prüft Versioning und die Foto-Lifecycle-Regel vor jedem Sicherungslauf; ohne passende
+Einstellungen wird der Lauf als fehlgeschlagen protokolliert und nicht als Erfolg
+gewertet. Datenbankkopien werden nach 30 Tagen aus dem Bucket entfernt.
+
+Die App wird aus dem GitHub-Zweig auf Render bereitgestellt. Datenbank und
+temporäre Uploads liegen auf einem dauerhaften Volume am deutschen Standort.
+Fotoobjekte werden ausschließlich in einen deutschen Hetzner-Standort geschrieben.
+Der Bucket bleibt privat; die App prüft Veranstaltungsstatus, Freigabe und Gastlink,
+bevor sie ein Foto aus S3 ausliefert. Zugangsdaten kommen nie in Browsercode oder
+Repository. Die alten lokalen Fotos werden durch einen wiederholbaren Kopierlauf
+nach S3 kopiert; das Original wird dabei nicht gelöscht.
+
+Der Kopierlauf ist standardmäßig eine Vorschau:
+
+```bash
+npm run migrate:photos-to-s3
+```
+
+Erst mit `--apply` kopiert er die in der Datenbank erfassten Fotos. Vor dem
+endgültigen Umschalten muss der Kopierlauf nach einer kurzen Upload-Pause erneut
+ausgeführt werden, damit neue Fotos seit dem ersten Lauf ebenfalls enthalten sind.
+Fotos ohne Datenbankeintrag werden nicht automatisch übernommen; solche Altordner
+müssen vorher geprüft und zugeordnet werden.
+
+Für Veranstaltungen mit Datum endet die gesamte Nutzung 90 Kalendertage nach
+dem Veranstaltungsdatum (Mitternacht Europe/Berlin). Buchung und Zahlung vorab
+verkürzen diese Frist nicht. Es gibt keine zusätzliche Downloadphase. Ab dem
+Ablauf sind Upload, Galerie und Download gesperrt; der nächste stündliche Löschlauf
+oder App-Start entfernt die Fotos und ihre Datenbankeinträge. Bereits vorhandene
+datierte Alben werden ebenfalls auf diese Frist begrenzt. Kürzere explizite
+Ablaufdaten bleiben wirksam. Undatierte Altalben behalten ihre bestehende Frist,
+bis ein Veranstaltungsdatum geprüft und zugeordnet wurde. Der private Hetzner-Bucket erhält keine pauschale S3-Löschfrist,
+die ein noch gültiges Album vorzeitig entfernen könnte. Backups der SQLite-Datenbank,
+Provider-Logs und deren eigene Aufbewahrungsfristen müssen vor dem Produktivbetrieb
+separat eingerichtet und geprüft werden.
+
+Der Hetzner Object Storage hat ein gemeinsames Speicher- und Traffic-Kontingent;
+die Anwendung begrenzt den Speicher standardmäßig auf 900 GiB. Das ist keine
+Traffic-Sperre. Bei sehr großen Downloads kann zusätzlicher Egress berechnet
+werden. Die aktuellen Tarife sind vor dem Verkauf zu prüfen.
+
+Render und Hetzner sind auf deutsche Standorte konfiguriert: Frankfurt und
+Nürnberg (`nbg1`). Für Hetzner kommen grundsätzlich
+Nürnberg (`nbg1`) oder Falkenstein (`fsn1`) infrage, Helsinki nicht. Das erfüllt
+die Standortvorgabe für App, Upload-Verarbeitung und dauerhafte Fotospeicherung;
+der ältere Ohio-Dienst erfüllt sie nicht. Das belegt aber nicht automatisch
+den Standort aller weiteren Dienste. Brevo dokumentiert Datenverarbeitung innerhalb
+der EU, mit Speicherung unter anderem in Belgien; das ist EU-, aber nicht
+Deutschland-exklusiv. GitHub ist der Quellcode- und Build-Ausgangspunkt und Stripe
+ist für spätere Livezahlungen vorgesehen. Ihre konkreten Datenflüsse und
+Speicherorte müssen separat geklärt werden, bevor eine Aussage „alles liegt in
+Deutschland“ getroffen wird. Solange die Vorgabe auch diese Anbieter umfasst,
+bleiben sie für den Produktivbetrieb offen und dürfen nicht stillschweigend als
+deutsch behandelt werden.
 
 Im Stripe-Testmodus einen Webhook für
-`https://DEIN-TESTSERVICE.onrender.com/api/stripe/webhook` anlegen:
-`checkout.session.completed`, `checkout.session.async_payment_succeeded`.
+`https://finalsnap.de/api/stripe/webhook` im Stripe-Testmodus anlegen:
+`checkout.session.completed`, `checkout.session.async_payment_succeeded`,
+`checkout.session.async_payment_failed`, `checkout.session.expired`,
+`refund.created`, `refund.updated`, `refund.failed`, `charge.refunded`,
+`charge.dispute.created`, `charge.dispute.updated`, `charge.dispute.closed`,
+`charge.dispute.funds_reinstated`, `charge.dispute.funds_withdrawn`,
+`invoice.finalized`, `invoice.finalization_failed`, `invoice.paid` und
+`invoice.payment_failed`.
 CLI- und Dashboard-Endpunkte besitzen unterschiedliche Webhook-Secrets.
 BASE_URL muss exakt zur aufgerufenen HTTPS-Origin passen (CSRF/Herkunftsprüfung).
 Keine CORS-Freigabe nötig. Der Anbieter darf nicht Querystrings mit Gasttokens in
 öffentlichen Logs exportieren. HTTPS und Referrer-Policy werden berücksichtigt.
+
+### Testmodus für Brutto-USt. und Belege
+
+`STRIPE_TAX_ENABLED=0` lässt die automatische Steuerberechnung ausdrücklich aus.
+Für einen echten Checkout-Test zuerst in Stripe „Testmodus“ einschalten und unter
+Tax die Unternehmensadresse sowie eine aktive deutsche Steuerregistrierung
+hinterlegen. Unter Tax/Products die zutreffende Produkt-Steuerkategorie festlegen;
+bei Code-Konfiguration dazu `STRIPE_PRODUCT_TAX_CODE` mit dem von der
+Steuerberatung bestätigten Stripe-Steuercode befüllen. Die Kategorie nicht aus
+einer allgemeinen SaaS-Vermutung ableiten.
+
+Danach `STRIPE_TAX_ENABLED=1` im Render-Service setzen und manuell deployen.
+`server.js` schaltet dann Checkout-Steuer inkl. im 49,90-€-Preis,
+Pflicht-Rechnungsanschrift, USt-IdNr.-Erfassung, Name der Privatperson bzw.
+des optionalen Unternehmens und Rechnungserstellung ein. Der Checkout wird
+auf Deutsch mit einer Zahlungsschaltfläche vom Typ `pay` und einer
+Bestellzusammenfassung mit Bruttopreis, Leistungsumfang, Dauer und Anbieter
+angelegt. Die tatsächlich gerenderte Schaltfläche und Zusammenfassung müssen
+trotzdem im Stripe-Testmodus visuell geprüft werden.
+
+Im Testmodus je einen Kauf als Privatperson und mit deutscher USt-IdNr. durchführen; bei beiden
+muss der Gesamtbetrag 49,90 € bleiben und die Rechnung die Steuer ausweisen.
+Erst nach Prüfung der Rechnung-PDFs und Steuerangaben den Live-Steuersetup und
+die Preislogik für den Verkauf vorbereiten.
 
 ## Bestandsdaten erhalten
 
@@ -98,16 +242,48 @@ Nicht annehmen, dass `db.js` bereits produktiv verwendet wird.
    Alte Dateiadressen/Dateinamen bleiben erhalten, benötigen aber Zugang/Freigabe.
    Fotoordnernamen außerhalb der erlaubten ID-Regel separat prüfen.
 
-Produktive Datenübernahme, Umschalten des Render-Branches und Live-Schlüssel sind
+Produktive Datenübernahme, Umschalten des Hosting-Branches und Live-Schlüssel sind
 nicht Teil der automatischen Schritte. Vor Umzug/Rollback Datenbankbackup und
 Foto-Kopie bereitstellen; Code-Rollback allein macht Schemaänderungen nicht rückgängig.
 Backups nach vereinbarter Frist löschen. Restore regelmäßig auf einer Kopie testen.
 
 ## Limits und Betrieb
 
-20 MB pro Eingangsdatei, maximal 10 Dateien pro Request, maximal 40 Megapixel
-beim Dekodieren. Disk-Staging begrenzt den RAM-Verbrauch; Upload-Requests werden
-pro Event nacheinander zugelassen. Fotoanzahl und Bytes gelten für die neu
+## Zahlungsversuche, Erstattungen und Streitfälle
+
+- Ein Album behält einen Zahlungsdatensatz. Nach Ablauf oder Fehlschlag eines
+  Checkout-Versuchs erzeugt der nächste Klick einen neuen Checkout-Link; offene
+  Links werden wiederverwendet, abgeschlossene Zahlungen nicht doppelt gestartet.
+- Zahlungs-Admins erhalten über `PAYMENT_ADMIN_EMAILS` Zugriff auf
+  `/ops/payments`. Dafür ist ein registriertes, per E-Mail bestätigtes Konto
+  erforderlich. `PAYMENT_ALERT_EMAIL` erhält Refund- und Streitfallalarme;
+  ohne diesen Wert wird die erste Admin-Adresse verwendet.
+- Refunds werden manuell im internen Zahlungsbereich entschieden. Grund,
+  Freitextbegründung, Betrag, Bearbeiter, Stripe-Status und Webhook-Verlauf
+  bleiben im lokalen Zahlungsjournal erhalten. Stripe-Dashboard bleibt
+  maßgeblich, falls der API-Aufruf in einen unklaren Status läuft.
+- Policy: bestätigter Vollrefund beendet sofort Gäste- und Veranstalterzugang;
+  die Fotos werden weiterhin spätestens zum ursprünglich ausgewiesenen
+  Löschtermin entfernt. Teilrefunds ändern den Albumzugang nicht. Während eines
+  offenen Kartenstreitfalls bleibt der Zugang bis zur Entscheidung bestehen;
+  bei verlorenem Streitfall endet er, bei gewonnenem Streitfall bleibt er aktiv.
+  Diese Vertragsregel muss in AGB/Widerrufsinformationen widerspruchsfrei erklärt
+  und vor Livebetrieb rechtlich geprüft werden.
+- Erforderliche Stripe-Test-Webhooks: `checkout.session.completed`,
+  `checkout.session.async_payment_succeeded`,
+  `checkout.session.async_payment_failed`, `checkout.session.expired`,
+  `refund.created`, `refund.updated`, `refund.failed`, `charge.refunded`,
+  `charge.dispute.created`, `charge.dispute.updated`, `charge.dispute.closed`,
+  `charge.dispute.funds_reinstated` und `charge.dispute.funds_withdrawn`.
+- Webhook-Ereignisse werden idempotent gespeichert und Zahlungsalarme werden
+  sofort per Brevo versandt. Nicht versandte Meldungen bleiben in einer
+  ausstehenden Queue und werden minütlich erneut versucht.
+
+20 MB pro Eingangs- und verarbeiteter Datei, maximal 10 Dateien pro Request,
+maximal 40 Megapixel beim Dekodieren. Disk-Staging begrenzt den RAM-Verbrauch; global werden maximal
+zwei Upload-Requests gleichzeitig zugelassen, pro Event nur einer. Bei weniger
+als 2 GiB freiem Staging-Datenträger werden neue Requests vor Empfang der Dateien
+abgewiesen. Fotoanzahl und Bytes gelten für die neu
 kodierten Dateien plus importierte Bestandsbilder. Erreichtes Limit stoppt den
 kompletten Request; bereits geschriebene Dateien werden zurückgenommen.
 Keine Video-/SVG-/GIF-Uploads. Neue Fotos als JPEG, hohe Qualität, Metadaten entfernt.

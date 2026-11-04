@@ -1,43 +1,61 @@
 # FinalSnap – Aufgaben bis zum öffentlichen Start
 
-Stand: 12. Oktober 2026. Die Anwendung bleibt im Stripe-Testmodus. Dieser Plan ist keine rechtliche Freigabe.
+Stand: 4. November 2026. Der deutsche Dienst ist live; Stripe bleibt im Testmodus. Dieser Plan ist keine rechtliche Freigabe.
+
+Die konkreten Kontoschritte für Stripe Tax, Hetzner-Backups und die kontrollierte Testbestellung stehen in [`OWNER-SETUP-BLOCKERS.md`](OWNER-SETUP-BLOCKERS.md).
 
 ## Erledigt, mit Grenzen
 - [x] Registrierung, Anmeldung und Veranstalterkonto.
 - [x] Brevo für Bestätigungsmails und Passwort-Zurücksetzen angebunden; vom Betreiber im echten Postfach getestet.
+- [x] Brevo-Absender `info@finalsnap.de` ist aktiv; Brevo meldet die Domain `finalsnap.de` als authentifiziert.
 - [x] QR-Gästezugang ohne Konto, Upload, Kamera-Auswahl, Galerie und Diashow.
-- [x] Kostenloser Einstieg: einmal pro Konto, 25 Fotos, 14 Tage; Praxisprüfung erfolgreich.
+- [x] In der aktuellen Testphase: je Veranstaltung bis zu 25 kostenlose Testfotos; vor dem Veranstaltungsdatum vorbereiten.
 - [x] Fotoverwaltung, Mehrfachauswahl, Moderation und Löschung.
 - [x] Bilder auf maximal 2.560 Pixel, JPEG-Qualität 82; keine unveränderten Originale.
 - [x] Stripe-Testcheckout, Webhook-Prüfung und Übergang vom Testalbum zur Zahlung.
 - [x] Grundlegende Zugriffskontrollen, Origin/CSRF-Schutz, Rate Limits und Upload-Prüfung; noch keine vollständige Sicherheitsprüfung.
 - [x] Speicheranzeige, Uploadzähler und Warnung bei wenig freiem Disk-Speicher.
+- [x] Aktiver Dienst `finalsnap-deutschland` in Frankfurt; `/health` und `/ready` geprüft.
+- [x] Fotospeicher über Hetzner Object Storage in Nürnberg konfiguriert; Render-Disk enthält SQLite und temporäre Uploads.
+- [x] Checkout-Wiederholungen, dokumentierte manuelle Erstattungen sowie Refund-/Streitfall-Protokollierung und Meldungen implementiert.
+- [x] Versionierte Leistungsbedingungen, protokollierte Checkout-Annahme, Verbraucher-Widerrufsseite mit Musterformular und E-Mail-Vertragsbestätigung mit wiederholbarem Versand implementiert.
+- [x] Online-Widerruf nach § 356a BGB im Kundenkonto umgesetzt: hervorgehobene Vertragsfunktion, getrennte Bestätigung, gespeicherte Erklärung und Eingangsbestätigung mit Text sowie Datum/Uhrzeit.
+- [x] Öffentliche Preisangabe: 49,90 € Endpreis inkl. 19 % USt.; Pakettext nennt 25 GB und 90 Tage ab Veranstaltungsdatum.
+- [x] Gästefotos sind pro Browser getrennt: Gäste sehen nur eigene Uploads; Veranstalter sehen alle. Gleicher Browser bedeutet dieselbe anonyme Gästesitzung.
+- [x] 90 Tage Upload, Ansicht und Download ab Veranstaltungsdatum; danach automatische Löschung ohne zusätzliche Downloadphase.
 - [x] FinalSnap als Arbeitsmarke, Paketkarten und Übernahme der Auswahl von der Landingpage.
-- [x] 15 automatisierte Tests bestehen. Mobile End-to-End- und Lasttests bleiben offen.
+- [x] 34 automatisierte Tests bestehen aktuell, einschließlich Wiederholungsversand der Vertragsbestätigung; `npm audit --omit=dev` meldet 0 bekannte Schwachstellen. Mobile End-to-End- und Lasttests bleiben offen.
 
 ## Als Nächstes: Praxistests und Infrastruktur
-- [ ] Ein bis zwei geschlossene Testveranstaltungen durchführen; zulässige Testbilder und Löschtermin abstimmen.
+- [ ] Deutsche Steuerregistrierung in Stripe Tax im Testmodus einrichten. Betreiber hat bestätigt, dass sie derzeit fehlt; Live-Modus bleibt gesperrt.
+- [ ] `STRIPE_TAX_ENABLED=1` erst nach bestätigter Testmodus-Registrierung einschalten und automatische Steuerberechnung prüfen.
+- [ ] Ein bis zwei geschlossene Testveranstaltungen durchführen; mehrere Mobilgeräte, getrennte Gästegalerien und Löschtermine prüfen.
+- [ ] Im Stripe-Testmodus Privat- und Geschäftskauf aus FinalSnap durchführen; Rechnungs-PDF, ausgewiesene 19 % USt., Endpreis 49,90 € und Rechnungslink im Veranstalterkonto prüfen.
+- [ ] Den echten Stripe-Testcheckout visuell prüfen: deutsche Zahlungsschaltfläche mit eindeutigem Zahlungsversprechen, Name/Unternehmensname und hervorgehobene Pflichtangaben unmittelbar vor der Bestellung.
+- [ ] Vertragsbestätigung mit Vertragsbedingungen und Widerrufsinformation auf dauerhaftem Datenträger zustellen und Empfang praktisch prüfen.
+- [ ] Verbraucher-Widerruf im Testbetrieb abnehmen: Erklärung absenden, Eingangsbestätigung auf Konto-E-Mail empfangen, Text und Datum/Uhrzeit prüfen und einen fehlgeschlagenen Mailversand mit erfolgreichem Wiederholungsversand nachweisen.
+- [ ] Die neue Vertragsbestätigung im Testkonto zustellen lassen und prüfen, ob sie vollständig, lesbar und speicherbar ist; die Datenschutzhinweise für den Belegversand und die Aufbewahrung final abstimmen.
+- [ ] Stripe-Einstellung für automatische Zahlungsbelege prüfen. Stripe versendet keine automatischen Testbelege; den Testbeleg manuell im Stripe-Dashboard auslösen und den Live-E-Mailversand vor Freigabe prüfen.
+- [ ] Stripe-Testerstattung und Teststreitfall auslösen; Status, Albumzugang, Protokoll und Alarmmail prüfen.
 - [ ] Anzahl, Durchschnittsgröße und Gesamtvolumen der Fotos, Uploadfehler und Supportbedarf auswerten.
 - [ ] Android/iPhone, HEIF-Unterstützung, Kamera, mehrere Uploads, langsames Netz, Verbindungsabbrüche und ZIP-Downloads testen.
-- [ ] Gleichzeitige Uploads prüfen; derzeit wird pro Event nur ein Uploadauftrag gleichzeitig verarbeitet.
-- [ ] Aktuelle 1-GB-Disk vor jeder Testveranstaltung auf freien Platz prüfen.
-- [ ] Hosting-Region prüfen: aktueller Render-Service steht in Ohio; gewünschter Zielstandort und Datentransfers vor Marktstart klären.
-- [ ] App, PostgreSQL und privaten Fotospeicher planen; Anbieter, Standort, Zugriffe, Kosten und Migration bewerten.
-- [ ] Daten sichern und Wiederherstellung testen, bevor produktive Daten umgezogen werden.
-- [ ] Vollständigen Umzug mit Rückweg und Datenabgleich vorbereiten; alte Disk erst nach Prüfung abbauen.
+- [ ] Begrenzung mit zwei gleichzeitigen Uploads aus verschiedenen Events unter Last sowie Verhalten bei erreichtem 2-GiB-Uploadreservewert praktisch prüfen.
+- [ ] 10-GB-Render-Disk und Hetzner-Speicherverbrauch in den Anbieter-Dashboards beobachten.
+- [ ] Anbieter- und Datenflüsse für Render, Hetzner, Brevo, Stripe und GitHub vollständig prüfen und dokumentieren.
+- [ ] Separaten Hetzner-Sicherungs-Bucket in Falkenstein anlegen, Zugang/Schlüssel setzen, Versioning und Lifecycle-Regel prüfen; dann `BACKUP_ENABLED=1` aktivieren.
+- [ ] Täglichen Backup-Lauf und dokumentierten Wiederherstellungstest prüfen. Bestätigte Fristen: Datenbank 30 Tage, Fotos maximal 7 Tage nach aktiver Löschung.
+- [ ] Vor größeren Datenbankänderungen einen konsistenten Sicherungs- und Rückweg nachweisen.
 
-## Angebot – verbindlich offen halten
-- [ ] Fotoanzahl ist Hauptunterschied der Pakete; Laufzeit ist Zusatzinformation.
-- [ ] Klein / Mittel / Groß; mittleres Paket als Empfehlung. Keine unbelegte Behauptung „am beliebtesten“.
-- [ ] Vorgeschlagene 300 / 1.000 / 3.000 Fotos und 19,90 / 34,90 / 54,90 Euro sind NICHT festgelegt oder umgesetzt.
-- [ ] Aktuelle 1-/3-/6-Monatsangebote sind vorläufige technische Testangebote und müssen vor Verkauf ersetzt werden.
-- [ ] Fotoanzahl und Speicherlimit müssen zusammenpassen; keine irreführenden Mengenzusagen.
-- [ ] Speicher- und Uploadzeit getrennt definieren; Laufzeitstart an Veranstaltung statt Zahlung prüfen.
-- [ ] Paket-Upgrade gegen Preisdifferenz auch für bereits bezahlte Alben implementieren.
-- [ ] Foto-Nachschläge ohne Laufzeitverlängerung kalkulieren und implementieren.
-- [ ] Hinweis bei 80 % des Kontingents, Uploadpause am Limit und Fortsetzung nach bestätigter Buchung prüfen.
+## Angebot – Arbeitsmodell, vor Verkauf noch bestätigen
+- [x] Ein Kernpaket je Veranstaltung: 49,90 € Endpreis inkl. 19 % USt.
+- [x] Keine feste Fotoanzahl; Zielgrenze bis zu 25 GB verarbeitete Fotos je Event.
+- [x] Start am Veranstaltungsdatum; 90 Tage Upload, Ansicht und Download, danach automatische Löschung.
+- [x] Bis zu 25 Testfotos für die Vorbereitung; bei Buchung bleiben sie erhalten und zählen zum Event-Speicher.
+- [ ] Kosten für Render, Hetzner, Zahlungsverkehr und Support anhand tatsächlicher Pilotnutzung prüfen.
+- [ ] 25-GB-Grenze, Speicherwarnung und Uploadverhalten bei vollem Speicher in Hosting und Nutzerhinweisen bestätigen.
+- [ ] Videos bleiben zunächst außerhalb des Kernpakets; Grußbox als spätere Option kalkulieren und umsetzen.
+- [ ] Fotospiegel und persönliche Begleitung separat kalkulieren; Landingpage-Anfragen sind kein bestätigtes Miet-/Serviceangebot.
 - [ ] Gäste zahlen nichts; Kaufaktionen gehören ins Veranstalterkonto.
-- [ ] Videos erst nach eigener Speicher-, Verarbeitungskosten- und Rechteprüfung anbieten.
 
 ## Datenschutz, Rechte und Cookies – vor öffentlichem Verkauf prüfen lassen
 - [ ] Verarbeitungsvorgänge und Datenflüsse dokumentieren: Konto, Bilder, Metadaten, Zahlungen, E-Mails, Logs, Backups.
@@ -45,8 +63,11 @@ Stand: 12. Oktober 2026. Die Anwendung bleibt im Stripe-Testmodus. Dieser Plan i
 - [ ] Bildrechte, abgebildete Dritte, Minderjährige und Meldung unzulässiger Inhalte berücksichtigen.
 - [ ] Auftragsverarbeitungsverträge, Unterauftragnehmer und mögliche Drittlandtransfers prüfen.
 - [ ] Datenschutzerklärung, Nutzungsbedingungen/AGB, Impressum und Verbraucher-Checkout rechtlich prüfen lassen.
+- [ ] Checkout-Vorvertragstexte, Widerrufsablauf und Leistungsbeginn passend zur konkreten Produktklassifikation festlegen.
+- [ ] `docs/LEGAL-CHECKOUT-REVIEW.md` fachkundig prüfen lassen, bevor Checkout-Texte oder Widerrufs-Checkboxen veröffentlicht werden.
 - [ ] Speicherfristen begründen; keine vermeintlich gesetzliche 3-/6-Monatsfrist behaupten.
 - [ ] Löschkonzept für Originale, Vorschaubilder, Tokens, Konten, Logs und Backups erstellen und technisch testen.
+- [ ] Externe Wiederherstellung/Backup- und Provider-Log-Aufbewahrung passend zur 90-Tage-Frist prüfen; App-Löschung allein löscht keine außerhalb der App vorhandenen Kopien.
 - [ ] Auskunft, Berichtigung, Löschung, Widerruf/Widerspruch und zuständige Kontaktstelle organisatorisch ermöglichen.
 - [ ] Cookies, Browser-Speicher, Tracking und externe Ressourcen inventarisieren; erforderliche Einwilligung und Hinweise konkret prüfen.
 - [ ] Brevo-Tracking und E-Mail-Protokollierung prüfen; Konto-Verifizierung nicht mit Newsletter-Anmeldung vermischen.
@@ -55,15 +76,27 @@ Stand: 12. Oktober 2026. Die Anwendung bleibt im Stripe-Testmodus. Dieser Plan i
 - [ ] Fachkundige rechtliche Prüfung des tatsächlichen Produkts und der Unterlagen abschließen.
 
 ## Sicherheit und Betrieb
+- [x] Schneller Liveness-Endpunkt `/health` und Abhängigkeitsprüfung `/ready` ergänzt; Ready meldet Datenbank-, Uploadspeicher- und Object-Storage-Ausfälle mit HTTP 503.
+- [x] Geordnetes Herunterfahren bei SIGTERM/SIGINT ergänzt, damit laufende Anfragen Zeit zum Beenden erhalten.
+- [x] Aktiven Live-Dienst, Region, Datenträger und Datenpfade mit Render-Dienst und Startprotokoll abgeglichen.
+- [x] App-interne Speicheralarme alle 15 Minuten ergänzt: Render-Datenträger sowie 75-%-/90-%-Schwellen der aus Fotometadaten erfassten Hetzner-Auslastung; Alarm und Erholung gehen an den Zahlungs-Alarmkontakt.
+- [x] Temporäre Render-Uploads begrenzt: höchstens zwei gleichzeitige Requests, einer je Album; bei weniger als 2 GiB freiem Platz werden neue Uploads vor Dateiannahme pausiert. Veranstalterkonto zeigt Hetzner-Fotospeicher und Render-Uploadpuffer getrennt.
+- [x] Inline-JavaScript aus Landingpage, Galerie, Zahlungserfolg und Admin-Seite in eigene Dateien ausgelagert; globale Skriptrichtlinie erlaubt nur FinalSnap-Dateien. Styles und Browserdarstellung separat prüfen.
+- [ ] Den ersten geplanten externen GitHub-Actions-Lauf für `/health` und `/ready` sowie den Empfang einer Fehlerbenachrichtigung bestätigen; Workflow ist eingerichtet, Ausführung und Benachrichtigungen sind noch nicht verifiziert.
+- [ ] Hetzner-Verbrauchs-/Kostenalarm im Anbieter-Konto einrichten; der App-Alarm ist eine Speicher-Schätzung und kein Rechnungsalarm.
+- [ ] Konsistente tägliche SQLite-Sicherung und Fotosicherung an einem unabhängigen Ort einrichten.
+- [ ] Wiederherstellung von Datenbank und Fotos nachweisen; danach regelmäßige Wiederherstellungstests dokumentieren.
+- [ ] Supportzeiten, Zuständigkeit und Störungsablauf festlegen; Runbook in `docs/OPERATIONS.md` beachten.
 - [ ] Unabhängige Prüfung von Berechtigungen, Gäste-Tokens, Sessions, Passwort-Reset, E-Mail-Verifizierung und Checkout.
 - [ ] E-Mail-Bestätigung vor sensiblen Aktionen und Missbrauchsschutz für kostenlose Konten festlegen.
 - [ ] Verifizierungs-/Reset-Mails mit Zustellfehlern, Rate Limits und abgelaufenen Links testen.
-- [ ] Upload-Limits und temporären Speicher bei parallelen Events absichern; Disk-Warnung darf nicht alleiniger Schutz sein.
+- [x] Upload-Limits, parallele temporäre Uploads und eine Mindestreserve vor Dateiannahme absichern; Praxistest unter Last bleibt offen.
 - [ ] Schad-/Fremdformate, sehr große Bilder, beschädigte Dateien, EXIF/GPS und unerwartete Dateinamen prüfen.
 - [ ] Abhängigkeiten, Node-Version, Sicherheitsupdates, Secrets, minimale Berechtigungen und Tokenrotation verwalten.
 - [ ] Sicherheitsheader/CSP prüfen; inline Scripts soweit sinnvoll entfernen.
 - [ ] HTTPS, Domain, sichere Cookies und DNS-/Mail-Authentifizierung prüfen.
 - [ ] Brevo-IP-Freigaben für die künftige Hosting-Region aktualisieren; Schutz eingeschaltet lassen.
+- [x] FinalSnap-Absenderdomain bei Brevo authentifiziert und Absender aktiv.
 - [ ] Fehlerüberwachung, Erreichbarkeitsprüfung, Kosten-/Speicheralarme und Supportkontakt einrichten.
 - [ ] Backups verschlüsseln, Zugriff begrenzen und Wiederherstellung einschließlich bereits gelöschter Daten testen.
 - [ ] Deployment, Datenbankmigrationen und Rücknahme fehlerhafter Releases dokumentieren.
@@ -78,6 +111,7 @@ Stand: 12. Oktober 2026. Die Anwendung bleibt im Stripe-Testmodus. Dieser Plan i
 ## Letzte Freigabe
 - [ ] Belastbare Kapazität, erfolgreiche Wiederherstellung, Zugriffsschutz und Löschung nachweisen.
 - [ ] Pakete, Bruttopreise, Abrechnung, Steuer-/Rechnungsablauf, Rückerstattung und Support festlegen.
+- [ ] `STRIPE_TAX_ENABLED=1` erst im Testmodus nach bestätigter Stripe-Steuerkonfiguration einschalten und die beiden Testkäufe abnehmen.
 - [ ] Stripe-Livemodus separat implementieren; Live-Schlüssel sind aktuell absichtlich im Code gesperrt.
 - [ ] Rechte/Datenschutz/Verkaufsunterlagen fertig prüfen lassen.
 - [ ] Öffentlichen Start und echte Zahlungen ausdrücklich durch Matthias freigeben lassen.
