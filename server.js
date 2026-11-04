@@ -99,6 +99,7 @@ function createApp(options = {}) {
     db.prepare("UPDATE events SET status='pilot', expires_at=?, title=CASE WHEN ?='' THEN title ELSE ? END WHERE id=? AND owner_id IS NOT NULL AND deleted_at IS NULL AND status IN ('pending','trial','pilot')").run(expires,title,title,cfg.PILOT_EVENT_ID);
   }
   const stripe = options.stripe || (cfg.STRIPE_SECRET_KEY ? new Stripe(cfg.STRIPE_SECRET_KEY) : null);
+  const paymentAdminEmails=new Set(String(cfg.PAYMENT_ADMIN_EMAILS||'').split(',').map(email=>email.trim().toLowerCase()).filter(Boolean));
   const app = express();
   if (cfg.TRUST_PROXY === '1') app.set('trust proxy', 1);
   // Inline scripts in the existing HTML are retained until the design phase.
@@ -122,37 +123,114 @@ function createApp(options = {}) {
       hasCover:typeof design.coverFilename==='string'&&/^[a-z0-9-]+\.jpg$/.test(design.coverFilename)
     };
   };
-  function fulfill(notification) {
-    const session = notification.data.object;
-    if (notification.livemode !== false || session.livemode !== false) throw new Error('Live-Webhook gesperrt');
-    if (!['checkout.session.completed','checkout.session.async_payment_succeeded'].includes(notification.type) || session.payment_status !== 'paid') return;
-    db.transaction(()=>{
-      if (db.prepare('SELECT 1 FROM webhook_receipts WHERE id=?').get(notification.id)) return;
-      const payment = db.prepare('SELECT * FROM payments WHERE stripe_session_id=?').get(session.id);
-      if (!payment) throw new Error('Unbekannte Checkout-Session; Webhook erneut zustellen');
-      if (session.currency !== 'eur' || session.amount_total !== payment.amount_cents || session.mode !== 'payment' || session.metadata?.paymentId !== payment.id || session.metadata?.eventId !== payment.event_id) throw new Error('Zahlungsdaten stimmen nicht überein');
-      const e = lookup(payment.event_id);
-      if (payment.status !== 'paid' && ['pending','trial'].includes(e.status) && !e.deleted_at) {
-        const eventEnd=e.event_date?eventDeadline(e.event_date):e.expires_at||Date.now()+payment.months*30*86400000;
-        db.prepare("UPDATE events SET status='paid', expires_at=? WHERE id=?").run(eventEnd,e.id);
-        db.prepare("UPDATE payments SET status='paid' WHERE id=?").run(payment.id);
-      }
-      db.prepare('INSERT INTO webhook_receipts VALUES (?,?)').run(notification.id, Date.now());
-    })();
+  const relevantPaymentEvents=new Set(['refund.created','refund.updated','refund.failed','charge.refunded','charge.dispute.created','charge.dispute.updated','charge.dispute.closed','charge.dispute.funds_reinstated','charge.dispute.funds_withdrawn','invoice.finalized','invoice.finalization_failed','invoice.paid','invoice.payment_failed']);
+  const paymentAlertEvents=new Set(['refund.created','refund.updated','refund.failed','charge.refunded','charge.dispute.created','charge.dispute.updated','charge.dispute.closed','charge.dispute.funds_reinstated','charge.dispute.funds_withdrawn','invoice.finalization_failed','invoice.payment_failed']);
+  function paymentForStripeObject(object) {
+    const paymentIntent=typeof object.payment_intent==='string'?object.payment_intent:object.payment_intent?.id;
+    if(paymentIntent){const payment=db.prepare('SELECT * FROM payments WHERE stripe_payment_intent_id=?').get(paymentIntent);if(payment)return payment;}
+    const paymentId=object.metadata?.paymentId;
+    if(paymentId){const payment=db.prepare('SELECT * FROM payments WHERE id=?').get(paymentId);if(payment)return payment;}
+    const charge=typeof object.charge==='string'?object.charge:object.charge?.id;
+    if(charge){const refund=db.prepare('SELECT payment_id FROM refunds WHERE stripe_refund_id=?').get(charge);if(refund)return db.prepare('SELECT * FROM payments WHERE id=?').get(refund.payment_id);}
+    return null;
   }
-  app.post('/api/stripe/webhook', express.raw({type:'application/json',limit:'1mb'}),(req,res)=>{
+  function auditPaymentEvent({stripeEventId=null,paymentId,source,eventType,status,amountCents=null,actorEmail=null,note=null,details={}}) {
+    const id=crypto.randomUUID(),now=Date.now();
+    db.prepare('INSERT INTO payment_events (id,stripe_event_id,payment_id,source,event_type,status,amount_cents,actor_email,note,details_json,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)').run(id,stripeEventId,paymentId,source,eventType,status,amountCents,actorEmail,note,JSON.stringify(details),now);
+    if(paymentAlertEvents.has(eventType)||eventType.startsWith('manual.refund.'))db.prepare('INSERT INTO payment_alerts (event_id,status,attempts,created_at) VALUES (?,\'pending\',0,?)').run(id,now);
+    return id;
+  }
+  async function flushPaymentAlerts() {
+    const pending=db.prepare("SELECT a.event_id,a.attempts,p.id payment_id,p.event_id album_id,p.amount_cents,e.event_type,e.status,e.amount_cents event_amount,e.note,e.details_json FROM payment_alerts a JOIN payment_events e ON e.id=a.event_id JOIN payments p ON p.id=e.payment_id ORDER BY e.created_at LIMIT 20").all();
+    const recipient=String(cfg.PAYMENT_ALERT_EMAIL||[...paymentAdminEmails][0]||cfg.BREVO_SENDER_EMAIL||'').trim();
+    for(const alert of pending){
+      try{
+        if(!recipient||!mailer)throw new Error(!recipient?'PAYMENT_ALERT_EMAIL fehlt.':'Brevo-Versand ist nicht eingerichtet.');
+        const info=JSON.parse(alert.details_json||'{}');
+        await mailer({to:recipient,subject:`FinalSnap Zahlung: ${alert.event_type}`,text:[`Zahlungsereignis: ${alert.event_type}`,`Status: ${alert.status}`,`Album-ID: ${alert.album_id}`,`Zahlungs-ID: ${alert.payment_id}`,`Betrag: ${((alert.event_amount??alert.amount_cents??alert.amount_cents??0)/100).toFixed(2)} EUR`,alert.note?`Notiz: ${alert.note}`:'',`Details: ${JSON.stringify(info)}`,'Prüfen: Stripe Dashboard und interner Zahlungsablauf.'].filter(Boolean).join('\n')});
+        db.prepare("UPDATE payment_alerts SET status='sent',attempts=attempts+1,last_error=NULL,sent_at=? WHERE event_id=?").run(Date.now(),alert.event_id);
+      }catch(error){
+        db.prepare('UPDATE payment_alerts SET attempts=attempts+1,last_error=? WHERE event_id=?').run(String(error.message||error).slice(0,300),alert.event_id);
+        console.error('Zahlungsalarm konnte nicht versendet werden:',String(error.message||error));
+      }
+    }
+  }
+  function refreshRefundState(paymentId) {
+    const payment=db.prepare('SELECT * FROM payments WHERE id=?').get(paymentId);
+    const refunded=Number(db.prepare("SELECT COALESCE(SUM(amount_cents),0) amount FROM refunds WHERE payment_id=? AND status='succeeded'").get(paymentId).amount);
+    if(refunded>=payment.amount_cents){
+      db.prepare("UPDATE payments SET status='refunded',refunded_at=COALESCE(refunded_at,?) WHERE id=?").run(Date.now(),paymentId);
+      db.prepare("UPDATE events SET status='refunded' WHERE id=? AND status='paid'").run(payment.event_id);
+    }else if(refunded>0){
+      db.prepare("UPDATE payments SET status='partially_refunded' WHERE id=? AND status!='disputed'").run(paymentId);
+    }else{
+      db.prepare("UPDATE payments SET status='paid',refunded_at=NULL WHERE id=? AND status IN ('refunded','partially_refunded','disputed_lost')").run(paymentId);
+      db.prepare("UPDATE events SET status='paid' WHERE id=? AND status='refunded'").run(payment.event_id);
+    }
+    return refunded;
+  }
+  function fulfill(notification) {
+    const object=notification.data.object,type=notification.type;
+    if(notification.livemode!==false||object.livemode===true)throw new Error('Live-Webhook gesperrt');
+    if(db.prepare('SELECT 1 FROM webhook_receipts WHERE id=?').get(notification.id))return false;
+    const checkoutTypes=new Set(['checkout.session.completed','checkout.session.async_payment_succeeded','checkout.session.async_payment_failed','checkout.session.expired']);
+    if(!checkoutTypes.has(type)&&!relevantPaymentEvents.has(type)){db.prepare('INSERT INTO webhook_receipts VALUES (?,?)').run(notification.id,Date.now());return false;}
+    let payment;
+    if(checkoutTypes.has(type))payment=db.prepare('SELECT p.* FROM payments p LEFT JOIN payment_attempts a ON a.payment_id=p.id WHERE p.stripe_session_id=? OR a.stripe_session_id=? LIMIT 1').get(object.id,object.id);
+    else payment=paymentForStripeObject(object);
+    if(!payment)throw new Error(`Unbekanntes Zahlungsereignis ${type}; Webhook erneut zustellen`);
+    let alert=paymentAlertEvents.has(type);
+    db.transaction(()=>{
+      const now=Date.now();
+      db.prepare('INSERT INTO webhook_receipts VALUES (?,?)').run(notification.id,now);
+      const attempt=db.prepare('SELECT * FROM payment_attempts WHERE stripe_session_id=?').get(object.id);
+      if(checkoutTypes.has(type)){
+        if(object.currency!=='eur'||object.amount_total!==payment.amount_cents||object.mode!=='payment'||object.metadata?.paymentId!==payment.id||object.metadata?.eventId!==payment.event_id)throw new Error('Zahlungsdaten stimmen nicht überein');
+        if(attempt)db.prepare('UPDATE payment_attempts SET status=?,updated_at=? WHERE id=?').run(type==='checkout.session.expired'?'expired':type==='checkout.session.async_payment_failed'?'failed':object.payment_status==='paid'?'paid':'complete',now,attempt.id);
+        if(object.payment_intent){const pi=typeof object.payment_intent==='string'?object.payment_intent:object.payment_intent.id;db.prepare('UPDATE payments SET stripe_payment_intent_id=? WHERE id=?').run(pi,payment.id);}
+        if(object.invoice||object.customer){const invoice=typeof object.invoice==='string'?object.invoice:object.invoice?.id;const customer=typeof object.customer==='string'?object.customer:object.customer?.id;db.prepare('UPDATE payments SET stripe_invoice_id=COALESCE(?,stripe_invoice_id),stripe_customer_id=COALESCE(?,stripe_customer_id) WHERE id=?').run(invoice,customer,payment.id);}
+        if(['checkout.session.completed','checkout.session.async_payment_succeeded'].includes(type)&&object.payment_status==='paid'&&payment.status==='pending'){
+          const e=lookup(payment.event_id);
+          if(['pending','trial'].includes(e.status)&&!e.deleted_at){const eventEnd=e.event_date?eventDeadline(e.event_date):e.expires_at||now+payment.months*30*86400000;db.prepare("UPDATE events SET status='paid',expires_at=? WHERE id=?").run(eventEnd,e.id);db.prepare("UPDATE payments SET status='paid' WHERE id=?").run(payment.id);}
+        }
+      }else if(type.startsWith('refund.')||type==='charge.refunded'){
+        const refund=type==='charge.refunded'?null:object;
+        const amount=Number(refund?.amount??object.amount_refunded??0),refundStatus=type==='refund.failed'?'failed':refund?.status==='succeeded'||type==='charge.refunded'?'succeeded':'pending';
+        if(refund){
+          const known=db.prepare('SELECT * FROM refunds WHERE stripe_refund_id=?').get(refund.id)||db.prepare('SELECT * FROM refunds WHERE id=?').get(refund.metadata?.decisionId||'');
+          if(known)db.prepare('UPDATE refunds SET stripe_refund_id=COALESCE(stripe_refund_id,?),status=?,updated_at=? WHERE id=?').run(refund.id,refundStatus,now,known.id);
+          else db.prepare("INSERT INTO refunds (id,payment_id,stripe_refund_id,amount_cents,reason,decision_note,actor_email,status,created_at,updated_at) VALUES (?,?,?,?,'stripe','Von Stripe gemeldet','Stripe',?,?,?)").run(crypto.randomUUID(),payment.id,refund.id,amount,refundStatus,now,now);
+        }else if(object.refunded){db.prepare("UPDATE refunds SET status='succeeded',updated_at=? WHERE payment_id=? AND status IN ('submitted','pending')").run(now,payment.id);}
+        refreshRefundState(payment.id);
+        alert=true;
+      }else if(type.startsWith('charge.dispute.')){
+        if(type==='charge.dispute.created'||type==='charge.dispute.updated'||type==='charge.dispute.funds_withdrawn')db.prepare("UPDATE payments SET status='disputed' WHERE id=? AND status NOT IN ('refunded','disputed_lost')").run(payment.id);
+        if(type==='charge.dispute.closed'){
+          if(['won','warning_closed'].includes(object.status)){db.prepare("UPDATE payments SET status='paid' WHERE id=? AND status IN ('disputed','disputed_lost')").run(payment.id);db.prepare("UPDATE events SET status='paid' WHERE id=? AND status='refunded'").run(payment.event_id);refreshRefundState(payment.id);}
+          else if(object.status==='lost'){db.prepare("UPDATE payments SET status='disputed_lost',refunded_at=? WHERE id=?").run(now,payment.id);db.prepare("UPDATE events SET status='refunded' WHERE id=? AND status='paid'").run(payment.event_id);}
+        }
+        if(type==='charge.dispute.funds_reinstated'){db.prepare("UPDATE payments SET status='paid',refunded_at=NULL WHERE id=? AND status='disputed_lost'").run(payment.id);db.prepare("UPDATE events SET status='paid' WHERE id=? AND status='refunded'").run(payment.event_id);refreshRefundState(payment.id);}
+        alert=true;
+      }
+      const safeDetails={objectId:object.id,status:object.status||object.payment_status||null,reason:object.reason||null,amount:object.amount??object.amount_refunded??object.amount_total??null,currency:object.currency||null,paymentIntent:typeof object.payment_intent==='string'?object.payment_intent:object.payment_intent?.id||null,charge:typeof object.charge==='string'?object.charge:object.charge?.id||null};
+      const eventId=auditPaymentEvent({stripeEventId:notification.id,paymentId:payment.id,source:'stripe',eventType:type,status:object.status||object.payment_status||'received',amountCents:safeDetails.amount,details:safeDetails});
+      if(alert&&!db.prepare('SELECT 1 FROM payment_alerts WHERE event_id=?').get(eventId))db.prepare("INSERT INTO payment_alerts (event_id,status,attempts,created_at) VALUES (?,'pending',0,?)").run(eventId,now);
+    })();
+    return true;
+  }
+  app.post('/api/stripe/webhook', express.raw({type:'application/json',limit:'1mb'}),async(req,res)=>{
     if (!stripe || !cfg.STRIPE_WEBHOOK_SECRET) return fail(res,503,'Stripe noch nicht eingerichtet.');
     let event;
     try { event = stripe.webhooks.constructEvent(req.body,req.headers['stripe-signature'],cfg.STRIPE_WEBHOOK_SECRET); }
     catch { return fail(res,400,'Ungültige Webhook-Signatur.'); }
-    try { fulfill(event); res.json({received:true}); }
+    try { fulfill(event); await flushPaymentAlerts(); res.json({received:true}); }
     catch(err) { console.error('Webhook:',err.message); fail(res,500,'Zahlungsbestätigung konnte nicht verarbeitet werden.'); }
   });
   app.use(express.json({limit:'32kb'}));
   app.use((req,res,next)=>{
     const match = /(?:^|;\s*)event_session=([a-f0-9]{64})(?:;|$)/.exec(req.headers.cookie || '');
     if(match) {
-      const session = db.prepare('SELECT s.*, u.email FROM sessions s JOIN users u ON u.id=s.user_id WHERE token_hash=? AND expires_at>?').get(hash(match[1]),Date.now());
+      const session = db.prepare('SELECT s.*, u.email, u.email_verified_at FROM sessions s JOIN users u ON u.id=s.user_id WHERE token_hash=? AND expires_at>?').get(hash(match[1]),Date.now());
       if(session) {req.user={id:session.user_id,email:session.email}; req.session=session;}
     }
     next();
@@ -256,38 +334,109 @@ function createApp(options = {}) {
   });
   app.get('/api/event/:eventId/availability',(req,res)=>res.json({available:/^[a-z0-9][a-z0-9_-]{2,63}$/.test(req.params.eventId)&&!lookup(req.params.eventId)&&!fs.existsSync(path.join(root,req.params.eventId))}));
   function owner(req,res,next) { const e=lookup(req.params.eventId); if(!own(req,e)) return fail(res,404,'Event nicht gefunden.'); req.event=e; next(); }
+  function paymentAdminRequired(req,res,next) {
+    if(!req.user)return fail(res,401,'Bitte anmelden.');
+    const user=db.prepare('SELECT email_verified_at FROM users WHERE id=?').get(req.user.id);
+    if(!user?.email_verified_at||!paymentAdminEmails.has(String(req.user.email||'').toLowerCase()))return fail(res,403,'Kein Zugriff auf die Zahlungsverwaltung.');
+    next();
+  }
+  app.get('/ops/payments',paymentAdminRequired,(req,res)=>res.sendFile(path.join(__dirname,'public','payments-admin.html')));
+  app.get('/api/admin/payments',paymentAdminRequired,(req,res)=>{
+    const payments=db.prepare('SELECT p.*,e.title,e.email,e.status album_status,e.event_date FROM payments p JOIN events e ON e.id=p.event_id ORDER BY p.rowid DESC LIMIT 100').all();
+    res.json({payments:payments.map(payment=>({...payment,
+      refunded_cents:Number(db.prepare("SELECT COALESCE(SUM(amount_cents),0) amount FROM refunds WHERE payment_id=? AND status='succeeded'").get(payment.id).amount),
+      attempts:db.prepare('SELECT id,attempt_no,status,created_at,updated_at FROM payment_attempts WHERE payment_id=? ORDER BY attempt_no DESC').all(payment.id),
+      refunds:db.prepare('SELECT id,stripe_refund_id,amount_cents,reason,decision_note,actor_email,status,created_at,updated_at FROM refunds WHERE payment_id=? ORDER BY created_at DESC').all(payment.id),
+      events:db.prepare('SELECT e.event_type,e.status,e.amount_cents,e.actor_email,e.note,e.details_json,e.created_at,a.status alert_status,a.attempts alert_attempts,a.last_error alert_error FROM payment_events e LEFT JOIN payment_alerts a ON a.event_id=e.id WHERE e.payment_id=? ORDER BY e.created_at DESC LIMIT 30').all(payment.id).map(event=>({...event,details:JSON.parse(event.details_json||'{}')}))
+    }))});
+  });
+  app.post('/api/admin/payments/:paymentId/refunds',paymentAdminRequired,wrap(async(req,res)=>{
+    const payment=db.prepare('SELECT * FROM payments WHERE id=?').get(req.params.paymentId);
+    if(!payment)return fail(res,404,'Zahlung nicht gefunden.');
+    if(!stripe||!payment.stripe_payment_intent_id)return fail(res,409,'Für diese Zahlung ist keine erstattungsfähige Stripe-Zahlungsreferenz vorhanden.');
+    if(!['paid','partially_refunded'].includes(payment.status))return fail(res,409,'Diese Zahlung kann aktuell nicht manuell erstattet werden.');
+    const reason=String(req.body?.reason||'requested_by_customer');
+    if(!['duplicate','fraudulent','requested_by_customer'].includes(reason))return fail(res,400,'Bitte einen gültigen Erstattungsgrund wählen.');
+    const note=String(req.body?.note||'').trim();
+    if(note.length<20||note.length>2000)return fail(res,400,'Bitte die Entscheidung mit mindestens 20 Zeichen dokumentieren.');
+    const already=Number(db.prepare("SELECT COALESCE(SUM(amount_cents),0) amount FROM refunds WHERE payment_id=? AND status IN ('requested','submitted','pending','succeeded')").get(payment.id).amount);
+    const remaining=Math.max(0,payment.amount_cents-already);
+    const amount=req.body?.amountCents===undefined?remaining:Number(req.body.amountCents);
+    if(!Number.isSafeInteger(amount)||amount<=0||amount>remaining)return fail(res,400,'Der Erstattungsbetrag überschreitet den noch offenen Betrag.');
+    const refundId=crypto.randomUUID(),now=Date.now();
+    db.prepare("INSERT INTO refunds (id,payment_id,amount_cents,reason,decision_note,actor_email,status,created_at,updated_at) VALUES (?,?,?,?,?,?,'requested',?,?)").run(refundId,payment.id,amount,reason,note,req.user.email,now,now);
+    auditPaymentEvent({paymentId:payment.id,source:'manual',eventType:'manual.refund.requested',status:'requested',amountCents:amount,actorEmail:req.user.email,note,details:{refundId,reason}});
+    try{
+      const refund=await stripe.refunds.create({payment_intent:payment.stripe_payment_intent_id,amount,reason,metadata:{paymentId:payment.id,decisionId:refundId}},{idempotencyKey:`finalsnap-refund-${refundId}`});
+      if(refund.livemode!==false)throw new Error('Live-Erstattung gesperrt');
+      const status=refund.status==='succeeded'?'succeeded':refund.status==='failed'?'failed':'pending';
+      db.prepare('UPDATE refunds SET stripe_refund_id=?,status=?,updated_at=? WHERE id=?').run(refund.id,status,Date.now(),refundId);
+      auditPaymentEvent({paymentId:payment.id,source:'manual',eventType:`manual.refund.${status}`,status,amountCents:amount,actorEmail:req.user.email,note,details:{refundId,stripeRefundId:refund.id,reason}});
+      refreshRefundState(payment.id);
+      await flushPaymentAlerts();
+      return res.status(202).json({id:refundId,refundId,status,amountCents:amount});
+    }catch(error){
+      const message=String(error.message||error).slice(0,300);
+      const definitiveFailure=['StripeInvalidRequestError','StripeAuthenticationError','StripePermissionError','StripeCardError'].includes(error.type)||error.code==='resource_missing';
+      const refundStatus=definitiveFailure?'failed':'submitted';
+      db.prepare('UPDATE refunds SET status=?,updated_at=? WHERE id=?').run(refundStatus,Date.now(),refundId);
+      auditPaymentEvent({paymentId:payment.id,source:'manual',eventType:definitiveFailure?'manual.refund.failed':'manual.refund.uncertain',status:refundStatus,amountCents:amount,actorEmail:req.user.email,note,details:{refundId,error:message}});
+      await flushPaymentAlerts();
+      console.error('Erstattung fehlgeschlagen:',message);
+      if(!definitiveFailure)return res.status(202).json({id:refundId,refundId,status:refundStatus,amountCents:amount,message:'Stripe hat den Status nicht eindeutig bestätigt. Der Vorgang ist gegen eine doppelte Erstattung gesperrt; bitte den Stripe-Testmodus prüfen.'});
+      return fail(res,502,'Stripe konnte die Erstattung nicht bestätigen. Bitte Zahlungsstatus in Stripe prüfen, bevor du es erneut versuchst.');
+    }
+  }));
   app.post('/api/checkout',loginRequired,wrap(async(req,res)=>{
-    let e=lookup(String(req.body.eventId||''));
-    if(!own(req,e)) return fail(res,404,'Event nicht gefunden.');
-    if(!['pending','trial'].includes(e.status) || e.deleted_at || (e.status==='trial'&&!active(e))) return fail(res,409,'Dieses Event kann nicht bezahlt werden.');
-    if(!stripe || !cfg.STRIPE_WEBHOOK_SECRET) return fail(res,503,'Stripe-Testmodus noch nicht eingerichtet.');
-    if(req.body.plan!==undefined){
-      const plan=PLANS[req.body.plan];if(!plan)return fail(res,400,'Bitte ein gültiges Paket wählen.');
-      if(req.body.plan!==e.plan)return fail(res,409,'Das Paket und der Preis für dieses Album sind bereits festgelegt.');
-    }
-    // One stable payment/idempotency key per event prevents parallel checkout overwrites.
+    const e=lookup(String(req.body.eventId||''));
+    if(!own(req,e))return fail(res,404,'Event nicht gefunden.');
+    if(!['pending','trial'].includes(e.status)||e.deleted_at||(e.status==='trial'&&!active(e)))return fail(res,409,'Dieses Event kann nicht bezahlt werden.');
+    if(!stripe||!cfg.STRIPE_WEBHOOK_SECRET)return fail(res,503,'Stripe-Testmodus noch nicht eingerichtet.');
+    if(req.body.plan!==undefined){const plan=PLANS[req.body.plan];if(!plan)return fail(res,400,'Bitte ein gültiges Paket wählen.');if(req.body.plan!==e.plan)return fail(res,409,'Das Paket und der Preis für dieses Album sind bereits festgelegt.');}
     let payment=db.prepare('SELECT * FROM payments WHERE event_id=?').get(e.id);
-    if(!payment) {
-      const plan=PLANS[e.plan];
-      db.prepare('INSERT INTO payments (id,event_id,amount_cents,months) VALUES (?,?,?,?)').run(crypto.randomUUID(),e.id,e.amount_cents,plan.months);
-      payment=db.prepare('SELECT * FROM payments WHERE event_id=?').get(e.id);
+    if(!payment){const plan=PLANS[e.plan];db.prepare('INSERT INTO payments (id,event_id,amount_cents,months) VALUES (?,?,?,?)').run(crypto.randomUUID(),e.id,e.amount_cents,plan.months);payment=db.prepare('SELECT * FROM payments WHERE event_id=?').get(e.id);}
+    if(['refunded','disputed','disputed_lost'].includes(payment.status))return fail(res,409,'Für diese Zahlung ist aktuell kein neuer Checkout möglich. Bitte kontaktiere den Support.');
+    let attempt=db.prepare('SELECT * FROM payment_attempts WHERE payment_id=? ORDER BY attempt_no DESC LIMIT 1').get(payment.id);
+    let session=null;
+    if(attempt&&attempt.status==='open'&&!attempt.stripe_session_id.startsWith('creating_')){
+      try{session=await stripe.checkout.sessions.retrieve(attempt.stripe_session_id);}catch(error){if(error.code!=='resource_missing')throw error;}
+      if(session?.livemode!==false)throw new Error('Live-Checkout gesperrt');
+      if(session?.status==='open')return res.json({url:session.url||`${baseUrl.origin}/success?session_id=${session.id}`,attempt:attempt.attempt_no});
+      if(session?.status==='expired')db.prepare("UPDATE payment_attempts SET status='expired',updated_at=? WHERE id=?").run(Date.now(),attempt.id);
+      else if(session?.status==='complete'&&session.payment_status!=='paid')return fail(res,409,'Die Zahlung wird noch verarbeitet. Bitte aktualisiere die Seite in Kürze.');
+      else if(session?.payment_status==='paid')return fail(res,409,'Die Zahlung ist bereits eingegangen. Bitte lade dein Album neu.');
+      if(session?.status==='complete')db.prepare("UPDATE payment_attempts SET status='failed',updated_at=? WHERE id=?").run(Date.now(),attempt.id);
+      if(session?.status==='expired'||session?.status==='complete')attempt=null;
     }
-    let session;
-    if(payment.stripe_session_id) session=await stripe.checkout.sessions.retrieve(payment.stripe_session_id);
-    else {
-      session=await stripe.checkout.sessions.create({mode:'payment',payment_method_types:['card'],customer_email:e.email,line_items:[{price_data:{currency:'eur',unit_amount:payment.amount_cents,product_data:{name:PLANS[e.plan].label}},quantity:1}],metadata:{eventId:e.id,paymentId:payment.id},success_url:`${baseUrl.origin}/success?session_id={CHECKOUT_SESSION_ID}`,cancel_url:`${baseUrl.origin}/dashboard`},{idempotencyKey:`payment-${payment.id}`});
-      if(session.livemode!==false) throw new Error('Live-Checkout gesperrt');
+    if(!attempt||!['open','creating'].includes(attempt.status)){
+      const attemptNo=Number(db.prepare('SELECT COALESCE(MAX(attempt_no),0)+1 n FROM payment_attempts WHERE payment_id=?').get(payment.id).n);
+      const id=crypto.randomUUID(),placeholder=`creating_${id}`;
+      db.prepare("INSERT INTO payment_attempts (id,payment_id,stripe_session_id,attempt_no,status,created_at,updated_at) VALUES (?,?,?,?, 'creating',?,?)").run(id,payment.id,placeholder,attemptNo,Date.now(),Date.now());
+      attempt=db.prepare('SELECT * FROM payment_attempts WHERE id=?').get(id);
+    }
+    const taxEnabled=String(cfg.STRIPE_TAX_ENABLED||'0')==='1';
+    const priceData={currency:'eur',unit_amount:payment.amount_cents,tax_behavior:'inclusive',product_data:{name:PLANS[e.plan].label}};
+    if(taxEnabled&&cfg.STRIPE_PRODUCT_TAX_CODE)priceData.product_data.tax_code=cfg.STRIPE_PRODUCT_TAX_CODE;
+    const params={mode:'payment',payment_method_types:['card'],customer_email:e.email,customer_creation:'always',line_items:[{price_data:priceData,quantity:1}],metadata:{eventId:e.id,paymentId:payment.id,attemptId:attempt.id},success_url:`${baseUrl.origin}/success?session_id={CHECKOUT_SESSION_ID}`,cancel_url:`${baseUrl.origin}/dashboard`};
+    if(taxEnabled){params.automatic_tax={enabled:true};params.billing_address_collection='required';params.tax_id_collection={enabled:true};params.invoice_creation={enabled:true};}
+    try{session=await stripe.checkout.sessions.create(params,{idempotencyKey:`finalsnap-checkout-${attempt.id}`});}
+    catch(error){console.error('Stripe-Testcheckout fehlgeschlagen:',error.type||error.code||'Stripe-Fehler');return fail(res,502,'Der Test-Checkout konnte gerade nicht geöffnet werden. Es wurde keine Zahlung bestätigt. Bitte versuche es erneut.');}
+    if(session.livemode!==false){console.error('Checkout mit Live-Modus abgewiesen.');return fail(res,503,'Der Checkout wurde aus Sicherheitsgründen blockiert. FinalSnap akzeptiert derzeit nur Stripe-Testzahlungen.');}
+    const now=Date.now();
+    db.transaction(()=>{
+      db.prepare("UPDATE payment_attempts SET stripe_session_id=?,status='open',updated_at=? WHERE id=?").run(session.id,now,attempt.id);
       db.prepare('UPDATE payments SET stripe_session_id=? WHERE id=?').run(session.id,payment.id);
       db.prepare('UPDATE events SET stripe_session_id=? WHERE id=?').run(session.id,e.id);
-    }
-    if(session.livemode!==false) throw new Error('Live-Checkout gesperrt');
-    if(session.status==='expired') return fail(res,409,'Checkout abgelaufen. Neues Event erstellen; diese Event-ID bleibt reserviert.');
-    res.json({url:session.url || `${baseUrl.origin}/success?session_id=${session.id}`});
+    })();
+    res.json({url:session.url||`${baseUrl.origin}/success?session_id=${session.id}`,attempt:attempt.attempt_no});
   }));
   app.get('/api/checkout/:sessionId',loginRequired,(req,res)=>{
-    const e=db.prepare('SELECT * FROM events WHERE stripe_session_id=?').get(req.params.sessionId);
-    if(!own(req,e)) return fail(res,404,'Bestellung nicht gefunden.');
-    res.json({eventId:e.id,status:e.status,expiresAt:e.event_date?retentionUntil(e):e.expires_at});
+    const e=db.prepare('SELECT e.* FROM events e JOIN payments p ON p.event_id=e.id LEFT JOIN payment_attempts a ON a.payment_id=p.id WHERE e.stripe_session_id=? OR p.stripe_session_id=? OR a.stripe_session_id=? LIMIT 1').get(req.params.sessionId,req.params.sessionId,req.params.sessionId);
+    if(!own(req,e))return fail(res,404,'Bestellung nicht gefunden.');
+    const payment=db.prepare('SELECT * FROM payments WHERE event_id=?').get(e.id);
+    const attempt=db.prepare('SELECT status FROM payment_attempts WHERE stripe_session_id=?').get(req.params.sessionId);
+    const status=['refunded','disputed_lost'].includes(payment?.status)?'refunded':payment?.status==='disputed'?'disputed':['expired','failed'].includes(attempt?.status)?'retry_available':payment?.status==='paid'?'paid':e.status;
+    res.json({eventId:e.id,status,retryAvailable:status==='retry_available',expiresAt:e.event_date?retentionUntil(e):e.expires_at});
   });
   function access(req,res,next) {
     const e=lookup(req.params.eventId);
@@ -522,21 +671,21 @@ function createApp(options = {}) {
       // Prevent a still-open checkout from charging after the owner has deleted the albums.
       for(const event of events) {
         const payment=db.prepare('SELECT * FROM payments WHERE event_id=?').get(event.id);
-        if(!payment?.stripe_session_id||payment.status==='paid') continue;
+        if(!payment?.stripe_session_id||['paid','partially_refunded','refunded','disputed','disputed_lost'].includes(payment.status)) continue;
         if(!stripe) return fail(res,503,'Ein offener Zahlungs-Checkout kann gerade nicht geprüft werden. Bitte später erneut versuchen.');
         const session=await stripe.checkout.sessions.retrieve(payment.stripe_session_id);
         if(session.status==='open') await stripe.checkout.sessions.expire(session.id);
         if(session.payment_status==='paid'&&payment.status!=='paid') db.prepare("UPDATE payments SET status='paid' WHERE id=?").run(payment.id);
       }
       for(const event of events) if(!await erase(event)) return fail(res,409,'Für eine Veranstaltung läuft gerade ein Foto-Upload. Bitte versuche es erneut.');
-      const retainedPayments=events.filter(event=>db.prepare("SELECT 1 FROM payments WHERE event_id=? AND status='paid'").get(event.id)).length;
+      const retainedPayments=events.filter(event=>db.prepare("SELECT 1 FROM payments WHERE event_id=? AND status IN ('paid','partially_refunded','refunded','disputed','disputed_lost')").get(event.id)).length;
       db.transaction(()=>{
         const updatePaid=db.prepare("UPDATE events SET owner_id=NULL,email=NULL,title='Gelöschtes Album',event_date=NULL,design_json='{}',guest_token=NULL,stripe_session_id=NULL,status='expired',deleted_at=?,upload_successes=0,upload_failures=0 WHERE id=?");
-        const deletePayments=db.prepare("DELETE FROM payments WHERE event_id=? AND status!='paid'");
+        const deletePayments=db.prepare("DELETE FROM payments WHERE event_id=? AND status NOT IN ('paid','partially_refunded','refunded','disputed','disputed_lost')");
         const deleteUnpaid=db.prepare('DELETE FROM events WHERE id=?');
         for(const event of events) {
           deletePayments.run(event.id);
-          if(db.prepare("SELECT 1 FROM payments WHERE event_id=? AND status='paid'").get(event.id)) updatePaid.run(Date.now(),event.id);
+          if(db.prepare("SELECT 1 FROM payments WHERE event_id=? AND status IN ('paid','partially_refunded','refunded','disputed','disputed_lost')").get(event.id)) updatePaid.run(Date.now(),event.id);
           else deleteUnpaid.run(event.id);
         }
         db.prepare('DELETE FROM sessions WHERE user_id=?').run(req.user.id);
@@ -549,7 +698,7 @@ function createApp(options = {}) {
     } finally {deletingUsers.delete(req.user.id);}
   }));
   function cleanup() {
-    const expired=db.prepare("SELECT * FROM events WHERE owner_id IS NOT NULL AND deleted_at IS NULL AND status IN ('paid','trial','pilot') ").all().filter(e=>retentionUntil(e)<=Date.now());
+    const expired=db.prepare("SELECT * FROM events WHERE owner_id IS NOT NULL AND deleted_at IS NULL AND status IN ('paid','trial','pilot','refunded') ").all().filter(e=>retentionUntil(e)<=Date.now());
     const pruneRecords=()=>{
       db.prepare('DELETE FROM sessions WHERE expires_at<=?').run(Date.now());
       db.prepare('DELETE FROM email_verifications WHERE expires_at<=?').run(Date.now());
@@ -569,6 +718,7 @@ function createApp(options = {}) {
   app.get('/login',(req,res)=>res.sendFile(path.join(pub,'login.html')));
   app.get('/dashboard',(req,res)=>req.user?res.sendFile(path.join(pub,'dashboard.html')):res.redirect('/login'));
   app.get('/success',(req,res)=>req.user?res.sendFile(path.join(pub,'success.html')):res.redirect('/login'));
+  app.locals.paymentAlertTimer=setInterval(()=>flushPaymentAlerts().catch(error=>console.error('Zahlungsalarme konnten nicht verarbeitet werden:',error.message)),60000);app.locals.paymentAlertTimer.unref();
   app.get('/event/:eventId/admin',loginRequired,owner,(req,res)=>res.redirect('/dashboard'));
   app.get('/event/:eventId/design',loginRequired,owner,(req,res)=>{
     if(!readable(req.event))return res.redirect(`/dashboard?event=${encodeURIComponent(req.event.id)}`);
@@ -591,7 +741,7 @@ function createApp(options = {}) {
   });
   for(const [suffix,file] of [['','gallery.html'],['/upload','upload.html'],['/gallery','gallery.html'],['/slideshow','slideshow.html'],['/games','games.html'],['/guestbook','guestbook.html']]) app.get(`/event/:eventId${suffix}`,access,(req,res)=>res.sendFile(path.join(pub,file)));
   // Only intended public assets; source code and generic HTML routes cannot bypass guards.
-  for(const file of ['style.css','design-editor.css','design-editor.js','upload.js','slideshow.js','guest-access.js','account.js','verify-email.js','password-recovery.js','games.js','guestbook.js','johanna-bastian.png','photographer.webp','event-wedding.jpg','event-birthday.jpg','event-summer.jpg','event-company.jpg']) app.get(`/${file}`,(req,res)=>res.sendFile(path.join(pub,file)));
+  for(const file of ['style.css','design-editor.css','design-editor.js','upload.js','slideshow.js','guest-access.js','account.js','verify-email.js','password-recovery.js','games.js','guestbook.js','payments-admin.js','johanna-bastian.png','photographer.webp','event-wedding.jpg','event-birthday.jpg','event-summer.jpg','event-company.jpg']) app.get(`/${file}`,(req,res)=>res.sendFile(path.join(pub,file)));
   // Liveness stays cheap for the host's restart check. Readiness checks critical dependencies.
   app.get('/health',(req,res)=>res.json({ok:true}));
   app.get('/ready',async(req,res)=>{
@@ -608,7 +758,7 @@ function createApp(options = {}) {
   });
   app.use((req,res)=>fail(res,404,'Nicht gefunden.'));
   app.use((err,req,res,next)=>{console.error(err.message);if(!res.headersSent) fail(res,500,'Interner Fehler.');});
-  app.locals.db=db;app.locals.cleanup=cleanup;app.locals.fulfill=fulfill;app.locals.photoStorage=photoStorage;
+  app.locals.db=db;app.locals.cleanup=cleanup;app.locals.fulfill=fulfill;app.locals.flushPaymentAlerts=flushPaymentAlerts;app.locals.photoStorage=photoStorage;
   return app;
 }
 if(require.main===module) {

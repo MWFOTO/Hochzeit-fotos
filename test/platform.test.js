@@ -187,6 +187,7 @@ test('Account deletion verifies password, removes albums and separates retained 
   for(const eventId of ['delete-free','delete-open','delete-paid']) assert.equal((await request('/api/events',{method:'POST',user:account,body:{eventId,title:'Private Event',eventDate,plan:'event',trial:false}})).status,201);
   const openCheckout=await request('/api/checkout',{method:'POST',user:account,body:{eventId:'delete-open'}});assert.equal(openCheckout.status,200);
   const openPaymentId=app.locals.db.prepare('SELECT id FROM payments WHERE event_id=?').get('delete-open').id;
+  const openSessionId=app.locals.db.prepare('SELECT stripe_session_id FROM payments WHERE id=?').get(openPaymentId).stripe_session_id;
   app.locals.db.prepare("INSERT INTO payments (id,event_id,amount_cents,months,status) VALUES (?,?,?,?,?)").run('paid-record','delete-paid',4990,3,'paid');
   const photoFile=path.join(tmp,'uploads','delete-free','guest.jpg');fs.mkdirSync(path.dirname(photoFile),{recursive:true});fs.writeFileSync(photoFile,'guest photo');
   app.locals.db.prepare('INSERT INTO photos (id,event_id,filename,bytes,approved,created_at) VALUES (?,?,?,?,?,?)').run('delete-photo','delete-free','guest.jpg',11,1,Date.now());
@@ -194,7 +195,7 @@ test('Account deletion verifies password, removes albums and separates retained 
   assert.equal((await request('/api/auth/account',{method:'DELETE',user:account,body:{password:'wrong-password',confirm:'KONTO LÖSCHEN'}})).status,401);
   assert.equal((await request('/api/auth/account',{method:'DELETE',user:account,body:{password:'a-good-long-password',confirm:'DELETE'}})).status,400);
   const deleted=await request('/api/auth/account',{method:'DELETE',user:account,body:{password:'a-good-long-password',confirm:'KONTO LÖSCHEN'}});assert.equal(deleted.status,200);assert.equal(deleted.data.deletedEvents,3);assert.equal(deleted.data.retainedPayments,1);
-  assert.equal(sessions.get('cs_test_payment-'+openPaymentId).status,'expired');
+  assert.equal(sessions.get(openSessionId).status,'expired');
   assert.equal(app.locals.db.prepare('SELECT COUNT(*) n FROM users WHERE id=?').get(account.id).n,0);
   assert.equal(app.locals.db.prepare('SELECT COUNT(*) n FROM sessions WHERE user_id=?').get(account.id).n,0);
   assert.equal(app.locals.db.prepare('SELECT COUNT(*) n FROM photos WHERE event_id=?').get('delete-free').n,0);
