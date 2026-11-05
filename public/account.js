@@ -16,7 +16,7 @@
     const registering=location.pathname==='/register';
     document.body.classList.toggle('login-page', !registering);
     const selectedPlan=new URLSearchParams(location.search).get('plan');
-    if(new URLSearchParams(location.search).get('deleted')==='1')message.textContent='Dein FinalSnap-Konto und deine Alben wurden gelöscht. Eine erneute Anmeldung ist nicht mehr möglich.';
+    if(new URLSearchParams(location.search).get('deleted')==='1')message.textContent='Dein FinalSnap-Konto und deine Albumdaten wurden dauerhaft gelöscht. Die Bestätigung wird an deine hinterlegte E-Mail-Adresse gesendet. Sicherungskopien können gelöschte Daten noch bis zu 30 Tage enthalten; Foto-Versionen laufen spätestens nach sieben Tagen ab. Erforderliche Rechnungsdaten bleiben getrennt und gesetzlich vorgeschrieben aufbewahrt.';
     if(selectedPlan==='event'){document.getElementById('auth-description').textContent='Deine Paketauswahl wird übernommen. Jede neue Veranstaltung kannst du mit bis zu 25 Fotos kostenlos testen.';const switchLink=document.querySelector('#auth-switch a');if(switchLink)switchLink.href=`/${registering?'login':'register'}?plan=${encodeURIComponent(selectedPlan)}`;}
     const password=document.getElementById('password');
     const confirmation=document.getElementById('password-confirm');
