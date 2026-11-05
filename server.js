@@ -76,6 +76,17 @@ const readable = e => e && ['paid','trial','pilot'].includes(e.status) && retent
 function createApp(options = {}) {
   const cfg = {...process.env, ...options};
   const mailer=options.mailer||require('./mailer').createMailer(cfg);
+  const invoicePdfFetcher=options.invoicePdfFetcher||(async(url)=>{
+    const response=await fetch(url,{signal:AbortSignal.timeout(15000)});
+    if(!response.ok)throw new Error(`Stripe-PDF konnte nicht geladen werden (${response.status}).`);
+    const finalUrl=new URL(response.url||url);
+    if(finalUrl.protocol!=='https:'||!(finalUrl.hostname==='stripe.com'||finalUrl.hostname.endsWith('.stripe.com')))throw new Error('Stripe-PDF wurde von einem nicht freigegebenen Host geladen.');
+    const contentType=String(response.headers.get('content-type')||'').split(';')[0].trim().toLowerCase();
+    const content=Buffer.from(await response.arrayBuffer());
+    if(content.length>15*1024*1024)throw new Error('Stripe-PDF überschreitet die zulässige Dateigröße.');
+    if(contentType!=='application/pdf'||content.subarray(0,5).toString()!=='%PDF-')throw new Error('Stripe hat keine gültige PDF-Rechnung geliefert.');
+    return content;
+  });
   if (cfg.STRIPE_SECRET_KEY && !cfg.STRIPE_SECRET_KEY.startsWith('sk_test_')) throw new Error('Phase 1 erlaubt ausschließlich Stripe-Testschlüssel.');
   const configuredBase = String(cfg.BASE_URL || cfg.RENDER_EXTERNAL_URL || '').trim();
   const platformDomain = String(cfg.SLIPLANE_DOMAIN || '').trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
@@ -173,9 +184,10 @@ function createApp(options = {}) {
         if(invoice.status!=='paid'||!invoice.invoice_pdf)throw new Error('Die bezahlte Stripe-PDF-Rechnung ist noch nicht verfügbar.');
         const invoiceUrl=new URL(invoice.invoice_pdf);
         if(invoiceUrl.protocol!=='https:'||!['invoice.stripe.com','pay.stripe.com'].includes(invoiceUrl.hostname))throw new Error('Stripe hat keinen gültigen sicheren Rechnungslink geliefert.');
+        const invoicePdf=await invoicePdfFetcher(invoice.invoice_pdf);
         const message=createContractConfirmation({confirmation,baseUrl:baseUrl.origin,storageLimitBytes:eventStorageLimit({status:confirmation.event_status,event_date:confirmation.event_date,created_at:confirmation.created_at},cfg),invoiceNumber:invoice.number,invoiceUrl:invoice.invoice_pdf,isTestMode:testMode({status:confirmation.event_status,event_date:confirmation.event_date,created_at:confirmation.created_at})});
         const safeInvoiceName=String(invoice.number||confirmation.album_id).replace(/[^a-zA-Z0-9_-]/g,'-');
-        await mailer({to:confirmation.recipient,...message,attachments:[{name:`FinalSnap-Rechnung-${safeInvoiceName}.pdf`,url:invoice.invoice_pdf}]});
+        await mailer({to:confirmation.recipient,...message,attachments:[{name:`FinalSnap-Rechnung-${safeInvoiceName}.pdf`,content:invoicePdf.toString('base64')}]});
         db.prepare("UPDATE contract_confirmations SET status='sent',recipient='',attempts=attempts+1,last_error=NULL,sent_at=? WHERE payment_id=?").run(Date.now(),confirmation.payment_id);
       }catch(error){
         db.prepare("UPDATE contract_confirmations SET attempts=attempts+1,last_error=? WHERE payment_id=?").run(String(error.message||error).slice(0,300),confirmation.payment_id);
