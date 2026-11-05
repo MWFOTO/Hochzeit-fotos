@@ -824,7 +824,17 @@ function createApp(options = {}) {
         const payment=db.prepare('SELECT * FROM payments WHERE event_id=?').get(event.id);
         if(!payment?.stripe_session_id||['paid','partially_refunded','refunded','disputed','disputed_lost'].includes(payment.status)) continue;
         if(!stripe) return fail(res,503,'Ein offener Zahlungs-Checkout kann gerade nicht geprüft werden. Bitte später erneut versuchen.');
-        const session=await stripe.checkout.sessions.retrieve(payment.stripe_session_id);
+        let session;
+        try {
+          session=await stripe.checkout.sessions.retrieve(payment.stripe_session_id);
+        } catch(error) {
+          // A checkout created in an older Stripe test account cannot be looked up
+          // with the current account's key. Such sessions are test-only legacy data;
+          // mark their attempts stale and let account deletion continue.
+          if(error.code!=='resource_missing') throw error;
+          db.prepare("UPDATE payment_attempts SET status='expired',updated_at=? WHERE payment_id=? AND status='open'").run(Date.now(),payment.id);
+          continue;
+        }
         if(session.status==='open') await stripe.checkout.sessions.expire(session.id);
         if(session.payment_status==='paid'&&payment.status!=='paid') db.prepare("UPDATE payments SET status='paid' WHERE id=?").run(payment.id);
       }
