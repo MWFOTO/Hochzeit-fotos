@@ -264,9 +264,10 @@ Backups nach vereinbarter Frist löschen. Restore regelmäßig auf einer Kopie t
   Freitextbegründung, Betrag, Bearbeiter, Stripe-Status und Webhook-Verlauf
   bleiben im lokalen Zahlungsjournal erhalten. Stripe-Dashboard bleibt
   maßgeblich, falls der API-Aufruf in einen unklaren Status läuft.
-- Policy: bestätigter Vollrefund beendet sofort Gäste- und Veranstalterzugang;
-  die Fotos werden weiterhin spätestens zum ursprünglich ausgewiesenen
-  Löschtermin entfernt. Teilrefunds ändern den Albumzugang nicht. Während eines
+- Policy: bestätigter Vollrefund ändert den Zahlungsstatus, beendet aber nicht
+  den Gäste- und Veranstalterzugang. Dieser bleibt bis zum gebuchten
+  Ablaufdatum bestehen; die Fotos werden weiterhin spätestens zum ursprünglich
+  ausgewiesenen Löschtermin entfernt. Teilrefunds ändern den Albumzugang nicht. Während eines
   offenen Kartenstreitfalls bleibt der Zugang bis zur Entscheidung bestehen;
   bei verlorenem Streitfall endet er, bei gewonnenem Streitfall bleibt er aktiv.
   Diese Vertragsregel muss in AGB/Widerrufsinformationen widerspruchsfrei erklärt
