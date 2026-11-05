@@ -82,10 +82,9 @@ function createApp(options = {}) {
     const finalUrl=new URL(response.url||url);
     const allowedPdfHost=finalUrl.hostname==='invoice.stripe.com'||finalUrl.hostname==='pay.stripe.com'||finalUrl.hostname==='stripe-upload-api.s3.us-west-1.amazonaws.com';
     if(finalUrl.protocol!=='https:'||!allowedPdfHost)throw new Error(`Stripe-PDF wurde von einem nicht freigegebenen Host geladen (${finalUrl.protocol}//${finalUrl.hostname}).`);
-    const contentType=String(response.headers.get('content-type')||'').split(';')[0].trim().toLowerCase();
     const content=Buffer.from(await response.arrayBuffer());
     if(content.length>15*1024*1024)throw new Error('Stripe-PDF überschreitet die zulässige Dateigröße.');
-    if(contentType!=='application/pdf'||content.subarray(0,5).toString()!=='%PDF-')throw new Error('Stripe hat keine gültige PDF-Rechnung geliefert.');
+    if(content.subarray(0,5).toString()!=='%PDF-')throw new Error('Stripe hat keine gültige PDF-Rechnung geliefert.');
     return content;
   });
   if (cfg.STRIPE_SECRET_KEY && !cfg.STRIPE_SECRET_KEY.startsWith('sk_test_')) throw new Error('Phase 1 erlaubt ausschließlich Stripe-Testschlüssel.');
