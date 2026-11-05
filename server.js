@@ -15,6 +15,7 @@ const { createPhotoStorage } = require('./photo-storage');
 const { createBackupService } = require('./backup-service');
 const { createOperationsMonitor } = require('./operations-monitor');
 const { createContractConfirmation } = require('./contract-confirmation');
+const { createPaymentReceipt } = require('./payment-receipt');
 const { createUploadCapacity, GiB, MiB, MIN_UPLOAD_FREE_BYTES, uploadDiskWarningThreshold } = require('./upload-capacity');
 const scrypt = promisify(crypto.scrypt);
 const PLANS = { event:{label:'FinalSnap Fotoalbum',months:3,retentionDays:90,priceCents:4990}, '1m':{label:'1 Monat (alt)',months:1,priceCents:1900,legacy:true}, '3m':{label:'3 Monate (alt)',months:3,priceCents:2900,legacy:true}, '6m':{label:'6 Monate (alt)',months:6,priceCents:3900,legacy:true}, '12m':{label:'12 Monate (alt)',months:12,priceCents:5900,legacy:true} };
@@ -185,9 +186,13 @@ function createApp(options = {}) {
         const invoiceUrl=new URL(invoice.invoice_pdf);
         if(invoiceUrl.protocol!=='https:'||!['invoice.stripe.com','pay.stripe.com'].includes(invoiceUrl.hostname))throw new Error('Stripe hat keinen gültigen sicheren Rechnungslink geliefert.');
         const invoicePdf=await invoicePdfFetcher(invoice.invoice_pdf);
-        const message=createContractConfirmation({confirmation,baseUrl:baseUrl.origin,storageLimitBytes:eventStorageLimit({status:confirmation.event_status,event_date:confirmation.event_date,created_at:confirmation.created_at},cfg),invoiceNumber:invoice.number,invoiceUrl:invoice.invoice_pdf,isTestMode:testMode({status:confirmation.event_status,event_date:confirmation.event_date,created_at:confirmation.created_at})});
+        const receiptPdf=createPaymentReceipt({invoice,isTestMode:invoice.livemode===false});
+        const message=createContractConfirmation({confirmation,baseUrl:baseUrl.origin,storageLimitBytes:eventStorageLimit({status:confirmation.event_status,event_date:confirmation.event_date,created_at:confirmation.created_at},cfg),invoiceNumber:invoice.number,invoiceUrl:invoice.invoice_pdf,isTestMode:invoice.livemode===false});
         const safeInvoiceName=String(invoice.number||confirmation.album_id).replace(/[^a-zA-Z0-9_-]/g,'-');
-        await mailer({to:confirmation.recipient,...message,attachments:[{name:`FinalSnap-Rechnung-${safeInvoiceName}.pdf`,content:invoicePdf.toString('base64')}]});
+        await mailer({to:confirmation.recipient,...message,attachments:[
+          {name:`FinalSnap-Rechnung-${safeInvoiceName}.pdf`,content:invoicePdf.toString('base64')},
+          {name:`FinalSnap-Zahlungsbestaetigung-${safeInvoiceName}.pdf`,content:receiptPdf.toString('base64')}
+        ]});
         db.prepare("UPDATE contract_confirmations SET status='sent',recipient='',attempts=attempts+1,last_error=NULL,sent_at=? WHERE payment_id=?").run(Date.now(),confirmation.payment_id);
       }catch(error){
         db.prepare("UPDATE contract_confirmations SET attempts=attempts+1,last_error=? WHERE payment_id=?").run(String(error.message||error).slice(0,300),confirmation.payment_id);
