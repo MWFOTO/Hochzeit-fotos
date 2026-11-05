@@ -998,7 +998,7 @@ label { color: #e7e8ec; font-size: 1rem; }
 .upgrade-panel .plan-card .primary { color: #101a1d; background: var(--color-accent); }
 #message:not(:empty) { color: var(--color-text); background: #30333a; border: 1px solid #ffffff25; }
 .privacy-note a, .upload-page a, .guest-feature-page a { color: #b9eaf0; }
-.login-page .auth-art img { transform: scaleX(-1); }
+.auth-page .auth-art img { transform: scaleX(-1); }
 body[data-design-theme="midnight"] { --color-bg: #1b2027; --color-text: #f2f3f5; --color-muted: #c0c6cd; }
 body[data-design-theme="garden"] { --color-bg: #222923; --color-text: #f2f5f0; --color-muted: #c3ccc2; }
 body[data-design-theme="afterglow"] { --color-bg: #262324; --color-text: #f5f1ef; --color-muted: #cac1bd; }
