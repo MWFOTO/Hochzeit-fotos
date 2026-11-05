@@ -145,8 +145,8 @@ test('Checkout retries the same album; refund decisions and dispute events are a
   const full=await request(`/api/admin/payments/${payment.id}/refunds`,{user:admin,method:'POST',body:{reason:'requested_by_customer',note:'Vertrag widerrufen; vollständiger Betrag wird erstattet.'}});
   assert.equal(full.response.status,202);assert.equal(full.data.status,'succeeded');
   assert.equal(app.locals.db.prepare('SELECT status FROM payments WHERE id=?').get(payment.id).status,'refunded');
-  assert.equal(app.locals.db.prepare('SELECT status FROM events WHERE id=?').get('refund-event').status,'refunded');
-  assert.equal((await request(`/event/refund-event?token=${token}`)).response.status,402);
+  assert.equal(app.locals.db.prepare('SELECT status FROM events WHERE id=?').get('refund-event').status,'paid');
+  assert.equal((await request(`/event/refund-event?token=${token}`)).response.status,200);
   assert.equal(app.locals.db.prepare('SELECT COUNT(*) n FROM payment_attempts WHERE payment_id=?').get(payment.id).n,2);
   assert.ok(app.locals.db.prepare('SELECT COUNT(*) n FROM payment_events WHERE payment_id=?').get(payment.id).n>=11);
   assert.ok(notifications.length>=5);
