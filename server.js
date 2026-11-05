@@ -212,7 +212,6 @@ function createApp(options = {}) {
     const refunded=Number(db.prepare("SELECT COALESCE(SUM(amount_cents),0) amount FROM refunds WHERE payment_id=? AND status='succeeded'").get(paymentId).amount);
     if(refunded>=payment.amount_cents){
       db.prepare("UPDATE payments SET status='refunded',refunded_at=COALESCE(refunded_at,?) WHERE id=?").run(Date.now(),paymentId);
-      db.prepare("UPDATE events SET status='refunded' WHERE id=? AND status='paid'").run(payment.event_id);
     }else if(refunded>0){
       db.prepare("UPDATE payments SET status='partially_refunded' WHERE id=? AND status!='disputed'").run(paymentId);
     }else{
