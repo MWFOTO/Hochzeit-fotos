@@ -12,9 +12,11 @@ Prüfung: acht Integrationstests einschließlich geschützter Galerie- und Uploa
 
 Die damaligen offenen Preis- und Speicherfragen wurden später im Arbeitsmodell
 aktualisiert. Maßgeblich ist jetzt [der Preis- und Angebotsentwurf](PRICING-DESIGN.md):
-ein Paket, bis zu 25 GB, Start am Veranstaltungsdatum, zwölf Monate online plus
-90 Tage Downloadphase. Vor Live-Verkauf bleiben Kosten und Hosting-Konfiguration
-zu bestätigen.
+einmalig 49,90 € inklusive 19 % USt., bis zu 25 GB, Start am
+Veranstaltungsdatum und 90 Tage Upload, Ansicht und Download. Danach endet der
+Zugang und die automatische Löschung beginnt; eine zusätzliche Downloadphase
+gibt es nicht. Vor Live-Verkauf bleiben Kosten und Hosting-Konfiguration zu
+bestätigen.
 
 - **Private Gästegalerie:** Gäste sehen auf ihrem Gerät nur Fotos, die im gleichen Browser mit ihrem anonymen Event-Cookie hochgeladen wurden. Upload, Galerie, Diashow, Einzelabruf und ZIP-Download müssen alle dieselbe Berechtigung anwenden. Veranstalter sehen und verwalten alle Bilder. Bestehende Fotos ohne Zuordnung bleiben Gästen verborgen, bis der Veranstalter sie bewusst neu zuordnet oder hochlädt.
 - **Grenze der anonymen Zuordnung:** Mehrere Personen, die denselben Browser oder dasselbe Gerät benutzen, teilen dort dieselbe Gästegalerie. Eindeutige Identität pro Person würde ein Konto, einen Einmalcode oder eine andere Anmeldung voraussetzen. Gäste benötigen im aktuellen Konzept weiterhin kein Konto.
