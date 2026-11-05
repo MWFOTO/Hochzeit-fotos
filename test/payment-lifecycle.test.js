@@ -32,7 +32,7 @@ const fake={
 const app=createApp({
   DB_PATH:path.join(tmp,'events.db'),UPLOAD_DIR:path.join(tmp,'uploads'),BASE_URL:'http://localhost:3000',
   STRIPE_WEBHOOK_SECRET:signing,STRIPE_TAX_ENABLED:'1',STRIPE_PRODUCT_TAX_CODE:'txcd_10103000',PAYMENT_ADMIN_EMAILS:'admin@finalsnap.de',PAYMENT_ALERT_EMAIL:'admin@finalsnap.de',
-  stripe:fake,mailer:async message=>{if(failWithdrawalMail&&message.subject.includes('Eingangsbestätigung deines Widerrufs'))throw new Error('Testfehler: Maildienst vorübergehend nicht erreichbar');notifications.push(message);}
+  stripe:fake,invoicePdfFetcher:async()=>Buffer.from('%PDF-1.4 test invoice'),mailer:async message=>{if(failWithdrawalMail&&message.subject.includes('Eingangsbestätigung deines Widerrufs'))throw new Error('Testfehler: Maildienst vorübergehend nicht erreichbar');notifications.push(message);}
 });
 const server=app.listen(0),origin=`http://127.0.0.1:${server.address().port}`;
 after(()=>{server.close();app.locals.db.close();fs.rmSync(tmp,{recursive:true,force:true});});
