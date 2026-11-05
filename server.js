@@ -224,6 +224,32 @@ function createApp(options = {}) {
       }finally{sending.delete(notice.payment_id);}
     }
   }
+  async function flushAccountDeletionConfirmations() {
+    const now=Date.now();
+    db.prepare('DELETE FROM account_deletion_confirmations WHERE created_at<?').run(now-7*86400000);
+    const pending=db.prepare('SELECT * FROM account_deletion_confirmations ORDER BY created_at LIMIT 20').all();
+    const sending=app.locals.accountDeletionEmailsInFlight||(app.locals.accountDeletionEmailsInFlight=new Set());
+    for(const notice of pending){
+      if(sending.has(notice.id))continue;
+      sending.add(notice.id);
+      try{
+        if(!mailer)throw new Error('Brevo-Versand ist nicht eingerichtet.');
+        const deletedAt=new Date(notice.created_at).toLocaleString('de-DE',{dateStyle:'long',timeStyle:'short',timeZone:'Europe/Berlin'});
+        await mailer({to:notice.recipient,subject:'Dein FinalSnap-Konto wurde gelöscht',text:[
+          'Bestätigung der Kontolöschung bei FinalSnap','',
+          `Dein Veranstalterkonto wurde am ${deletedAt} dauerhaft gelöscht.`,
+          'Deine Anmeldedaten und Sitzungen sowie deine Veranstaltungsalben, Fotos, Gästebucheinträge und Gästelinks wurden aus dem aktiven Dienst gelöscht. Foto-Sicherungskopien werden bei der Löschung ebenfalls zur Entfernung vorgemerkt; frühere Objektversionen laufen spätestens nach sieben Tagen ab. Ältere Datenbank-Sicherungskopien können gelöschte Kontodaten noch bis zu 30 Tage enthalten.',
+          'Erforderliche Rechnungs- und Buchungsbelege zu bereits bezahlten Bestellungen bleiben getrennt vom Konto so lange aufbewahrt, wie es gesetzlich vorgeschrieben ist. Rechnungen sind grundsätzlich acht Jahre aufzubewahren (§ 14b UStG).',
+          'Die Löschung kann nicht rückgängig gemacht werden. Du kannst ein neues Konto erstellen; frühere Alben und Fotos lassen sich nicht wiederherstellen.',
+          '',`Fragen: info@finalsnap.de · ${baseUrl.origin}`
+        ].join('\n')});
+        db.prepare('DELETE FROM account_deletion_confirmations WHERE id=?').run(notice.id);
+      }catch(error){
+        db.prepare('UPDATE account_deletion_confirmations SET attempts=attempts+1,last_error=? WHERE id=?').run(String(error.message||error).slice(0,300),notice.id);
+        console.error('Kontolöschungsbestätigung konnte nicht versendet werden:',String(error.message||error));
+      }finally{sending.delete(notice.id);}
+    }
+  }
   function refreshRefundState(paymentId) {
     const payment=db.prepare('SELECT * FROM payments WHERE id=?').get(paymentId);
     const refunded=Number(db.prepare("SELECT COALESCE(SUM(amount_cents),0) amount FROM refunds WHERE payment_id=? AND status='succeeded'").get(paymentId).amount);
@@ -820,6 +846,7 @@ function createApp(options = {}) {
     const [salt,stored]=(user?.password_hash||`${'0'.repeat(64)}:${'0'.repeat(128)}`).split(':');
     const derived=await scrypt(password,salt,64);
     if(!user||!crypto.timingSafeEqual(Buffer.from(stored,'hex'),derived)) return fail(res,401,'Das Passwort stimmt nicht.');
+    const confirmationRecipient=user.email;
     const events=db.prepare('SELECT * FROM events WHERE owner_id=?').all(req.user.id);
     if(events.some(event=>busy.has(event.id))) return fail(res,409,'Für eine Veranstaltung läuft gerade ein Foto-Upload. Bitte warte kurz und versuche es erneut.');
     deletingUsers.add(req.user.id);
@@ -854,12 +881,14 @@ function createApp(options = {}) {
           if(db.prepare("SELECT 1 FROM payments WHERE event_id=? AND status IN ('paid','partially_refunded','refunded','disputed','disputed_lost')").get(event.id)) updatePaid.run(Date.now(),event.id);
           else deleteUnpaid.run(event.id);
         }
+        db.prepare('INSERT INTO account_deletion_confirmations (id,recipient,created_at) VALUES (?,?,?)').run(crypto.randomUUID(),confirmationRecipient,Date.now());
         db.prepare('DELETE FROM sessions WHERE user_id=?').run(req.user.id);
         db.prepare('DELETE FROM password_resets WHERE user_id=?').run(req.user.id);
         db.prepare('DELETE FROM email_verifications WHERE user_id=?').run(req.user.id);
         db.prepare('DELETE FROM users WHERE id=?').run(req.user.id);
       })();
       res.clearCookie('event_session',{path:'/'});
+      await flushAccountDeletionConfirmations();
       res.json({success:true,deletedEvents:events.length,retainedPayments});
     } finally {deletingUsers.delete(req.user.id);}
   }));
@@ -886,7 +915,7 @@ function createApp(options = {}) {
   app.get('/login',(req,res)=>res.sendFile(path.join(pub,'login.html')));
   app.get('/dashboard',(req,res)=>req.user?res.sendFile(path.join(pub,'dashboard.html')):res.redirect('/login'));
   app.get('/success',(req,res)=>req.user?res.sendFile(path.join(pub,'success.html')):res.redirect('/login'));
-  app.locals.paymentAlertTimer=setInterval(()=>{flushPaymentAlerts().catch(error=>console.error('Zahlungsalarme konnten nicht verarbeitet werden:',error.message));flushContractConfirmations().catch(error=>console.error('Vertragsbestätigungen konnten nicht verarbeitet werden:',error.message));flushWithdrawalConfirmations().catch(error=>console.error('Widerrufsbestätigungen konnten nicht verarbeitet werden:',error.message));},60000);app.locals.paymentAlertTimer.unref();
+  app.locals.paymentAlertTimer=setInterval(()=>{flushPaymentAlerts().catch(error=>console.error('Zahlungsalarme konnten nicht verarbeitet werden:',error.message));flushContractConfirmations().catch(error=>console.error('Vertragsbestätigungen konnten nicht verarbeitet werden:',error.message));flushWithdrawalConfirmations().catch(error=>console.error('Widerrufsbestätigungen konnten nicht verarbeitet werden:',error.message));flushAccountDeletionConfirmations().catch(error=>console.error('Kontolöschungsbestätigungen konnten nicht verarbeitet werden:',error.message));},60000);app.locals.paymentAlertTimer.unref();
   app.get('/event/:eventId/admin',loginRequired,owner,(req,res)=>res.redirect('/dashboard'));
   app.get('/event/:eventId/design',loginRequired,owner,(req,res)=>{
     if(!readable(req.event))return res.redirect(`/dashboard?event=${encodeURIComponent(req.event.id)}`);
@@ -926,7 +955,7 @@ function createApp(options = {}) {
   });
   app.use((req,res)=>fail(res,404,'Nicht gefunden.'));
   app.use((err,req,res,next)=>{console.error(err.message);if(!res.headersSent) fail(res,500,'Interner Fehler.');});
-  app.locals.db=db;app.locals.cleanup=cleanup;app.locals.fulfill=fulfill;app.locals.flushPaymentAlerts=flushPaymentAlerts;app.locals.flushContractConfirmations=flushContractConfirmations;app.locals.flushWithdrawalConfirmations=flushWithdrawalConfirmations;app.locals.photoStorage=photoStorage;app.locals.backupService=backupService;app.locals.operationsMonitor=operationsMonitor;
+  app.locals.db=db;app.locals.cleanup=cleanup;app.locals.fulfill=fulfill;app.locals.flushPaymentAlerts=flushPaymentAlerts;app.locals.flushContractConfirmations=flushContractConfirmations;app.locals.flushWithdrawalConfirmations=flushWithdrawalConfirmations;app.locals.flushAccountDeletionConfirmations=flushAccountDeletionConfirmations;app.locals.photoStorage=photoStorage;app.locals.backupService=backupService;app.locals.operationsMonitor=operationsMonitor;
   return app;
 }
 if(require.main===module) {
