@@ -43,6 +43,7 @@
   const link=(parent,label,url)=>{const el=element('a',label);el.href=url;el.className='button secondary';parent.append(el);};
   let availablePlans={};
   let activeEvent=null;
+  let displayName='';
   async function manage(event) {
     const section=document.getElementById('photo-manager');section.hidden=false;
     document.getElementById('manager-title').textContent=`Fotos: ${event.title}`;
@@ -112,7 +113,7 @@
       if(event.guestUrl) {
         const photosSection=element('div');photosSection.className='event-section';photosSection.append(element('h3','Fotos & Live-Diashow'));card.append(photosSection);const photoActions=element('div');photoActions.className='actions';photosSection.append(photoActions);
         const accessSection=element('div');accessSection.className='event-section';accessSection.append(element('h3','QR-Code & Gästezugang'));card.append(accessSection);const accessActions=element('div');accessActions.className='actions';accessSection.append(accessActions);
-        const settings=element('details');settings.className='event-section event-settings';settings.open=true;settings.append(element('summary','Einstellungen & Freigabe'));card.append(settings);const settingsActions=element('div');settingsActions.className='actions';settings.append(element('p',event.readOnly?'Die Uploadzeit ist beendet. Gäste können die vorhandenen Fotos noch bis zum Ende der Downloadphase ansehen.':event.moderation?'Neue Fotos warten auf deine Freigabe.':'Gäste sehen auf ihrem Gerät nur ihre eigenen Uploads.'),settingsActions);if(event.event_date&&event.startsAt>Date.now()){const dateLabel=element('label','Veranstaltungsdatum ändern');const dateField=element('input');dateField.type='date';dateField.value=event.event_date;dateField.min=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Berlin'}).format(new Date());dateLabel.append(dateField);settingsActions.append(dateLabel);button(settingsActions,'Datum speichern',async()=>{await api(`/api/event/${event.id}`,'PATCH',{eventDate:dateField.value});message.textContent='Veranstaltungsdatum gespeichert. Der Albumzeitraum wurde angepasst.';await load();});}
+        const settings=element('details');settings.className='event-section event-settings';settings.open=true;settings.append(element('summary','Einstellungen & Freigabe'));card.append(settings);const settingsActions=element('div');settingsActions.className='actions';settings.append(element('p',event.readOnly?'Die Uploadzeit ist beendet. Gäste können die vorhandenen Fotos noch bis zum Ende der Downloadphase ansehen.':event.moderation?'Neue Fotos werden erst nach deiner Freigabe für alle Gäste mit Gästelink sichtbar.':'Neue Fotos werden automatisch freigegeben und sind für alle Gäste mit Gästelink sichtbar.'),settingsActions);if(event.event_date&&event.startsAt>Date.now()){const dateLabel=element('label','Veranstaltungsdatum ändern');const dateField=element('input');dateField.type='date';dateField.value=event.event_date;dateField.min=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Berlin'}).format(new Date());dateLabel.append(dateField);settingsActions.append(dateLabel);button(settingsActions,'Datum speichern',async()=>{await api(`/api/event/${event.id}`,'PATCH',{eventDate:dateField.value});message.textContent='Veranstaltungsdatum gespeichert. Der Albumzeitraum wurde angepasst.';await load();});}
         if(event.videoAvailable||event.video_greetings_enabled){
           const videoPanel=element('details');
           videoPanel.className='event-section';
@@ -157,7 +158,7 @@
           }
         }
         panels.push(photosSection,accessSection,settings);
-        ['Fotos','Gästezugang','Einstellungen'].forEach((label,i)=>button(tabs,label,()=>showPanel(i)));
+        ['1 · Fotos','2 · Gäste einladen','3 · Einstellungen'].forEach((label,i)=>button(tabs,label,()=>showPanel(i)));
         button(accessActions,'Gästelink kopieren',async()=>{try{await navigator.clipboard.writeText(event.guestUrl);message.textContent='Gästelink kopiert.';}catch{const input=element('input');input.value=event.guestUrl;input.readOnly=true;accessSection.append(input);input.select();message.textContent='Bitte den markierten Gästelink kopieren.';}});
         link(accessActions,'Gästeansicht öffnen',event.guestUrl);
         link(photoActions,'Galerie öffnen',event.guestUrl.replace('?','/gallery?'));
@@ -179,8 +180,8 @@
         button(settingsActions,event.guestbook_moderation?'Gästebuch: Freigabe ausschalten':'Gästebuch: Freigabe einschalten',async()=>{await api(`/api/event/${event.id}`,'PATCH',{guestbookModeration:!event.guestbook_moderation});await load();});
         button(settingsActions,'Gästelink erneuern',async()=>{if(confirm('Alte Links und QR-Codes werden dadurch ungültig. Fortfahren?')){await api(`/api/event/${event.id}/rotate-token`,'POST');await load();}});
       }
-      const danger=element('details');danger.className='event-section event-settings';danger.append(element('summary','Veranstaltung löschen'));card.append(danger);
-      button(danger,'Event und Fotos löschen',async()=>{if(confirm('Event und alle Fotos endgültig löschen?')){await api(`/api/event/${event.id}`,'DELETE');document.getElementById('photo-manager').hidden=true;await load();}}).className='danger';
+      const danger=element('details');danger.className='event-delete-bar';danger.append(element('summary','Veranstaltung entfernen'));card.append(danger);
+      button(danger,'Event und Fotos endgültig löschen',async()=>{if(confirm('Event und alle Fotos endgültig löschen?'){await api(`/api/event/${event.id}`,'DELETE');document.getElementById('photo-manager').hidden=true;await load();}}).className='danger';
       section.append(card);
       if(activeEvent){card.hidden=event.id!==activeEvent;open.hidden=true;if(event.id===activeEvent){tabs.hidden=false;if(event.guestUrl)await showPanel(0);else document.getElementById('photo-manager').hidden=true;}}else{tabs.hidden=true;panels.forEach(panel=>panel.hidden=true);danger.hidden=true;}
 
@@ -198,8 +199,41 @@
     catch(err){report(err);submit.disabled=false;}
   };
   const eventIdInput=document.getElementById('event-id');
+  const organizerNameInput=document.getElementById('organizer-name');
+  const eventTitleInput=document.getElementById('title');
+  const eventSteps=[...document.querySelectorAll('.event-step')];
+  const eventStepLabel=document.getElementById('event-step-label');
+  const eventStepProgress=document.getElementById('event-step-progress');
+  const eventStepBack=document.getElementById('event-step-back');
+  const eventStepNext=document.getElementById('event-step-next');
+  const eventStepSubmit=document.getElementById('event-step-submit');
+  const eventStepTitles=['Dein Name','Name der Veranstaltung','Veranstaltungsdatum','Freigabe und Paket'];
+  let eventStepIndex=0, slugEdited=false;
+  const renderEventStep=()=>{
+    eventSteps.forEach((step,index)=>step.hidden=index!==eventStepIndex);
+    eventStepLabel.textContent=`Schritt ${eventStepIndex+1} von ${eventSteps.length} · ${eventStepTitles[eventStepIndex]}`;
+    eventStepProgress.value=eventStepIndex+1;
+    eventStepBack.hidden=eventStepIndex===0;
+    eventStepNext.hidden=eventStepIndex===eventSteps.length-1;
+    eventStepSubmit.hidden=eventStepIndex!==eventSteps.length-1;
+  };
+  const accountGreeting=document.getElementById('account-greeting');
+  const showGreeting=()=>{if(displayName){accountGreeting.textContent=`Willkommen, ${displayName}. Hier richtest du dein Event ein und verwaltest dein Album.`;accountGreeting.hidden=false;}};
+  eventStepBack.addEventListener('click',()=>{eventStepIndex=Math.max(0,eventStepIndex-1);renderEventStep();});
+  eventStepNext.addEventListener('click',async()=>{
+    const panel=eventSteps[eventStepIndex], invalid=[...panel.querySelectorAll('input,select')].find(input=>!input.checkValidity());
+    if(invalid){invalid.reportValidity();return;}
+    if(eventStepIndex===0){
+      try{const profile=await api('/api/auth/profile','PATCH',{displayName:organizerNameInput.value});displayName=profile.displayName;showGreeting();}
+      catch(error){report(error);return;}
+    }
+    eventStepIndex=Math.min(eventSteps.length-1,eventStepIndex+1);renderEventStep();
+  });
+  eventTitleInput.addEventListener('input',()=>{if(!slugEdited)eventIdInput.value=normalizeEventId(eventTitleInput.value);});
+  eventIdInput.addEventListener('input',()=>{slugEdited=true;});
   const normalizeEventId=value=>value.trim().toLowerCase().replace(/ä/g,'ae').replace(/ö/g,'oe').replace(/ü/g,'ue').replace(/ß/g,'ss').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9_-]+/g,'-').replace(/^[-_]+|[-_]+$/g,'');
   eventIdInput.addEventListener('blur',()=>{eventIdInput.value=normalizeEventId(eventIdInput.value);});
+  renderEventStep();
   const eventDateInput=document.getElementById('event-date');
   const timelinePreview=document.getElementById('event-timeline-preview');
   const shiftDate=(value,months=0,days=0)=>{
@@ -225,9 +259,9 @@
   eventDateInput.addEventListener('change',updateTimelinePreview);
   updateTimelinePreview();
   document.getElementById('event-form').onsubmit=async e=>{
-    e.preventDefault();eventIdInput.value=normalizeEventId(eventIdInput.value);if(!/^[a-z0-9][a-z0-9_-]{2,63}$/.test(eventIdInput.value)){message.textContent='Bitte einen Kurznamen mit mindestens 3 Buchstaben oder Zahlen eingeben.';message.scrollIntoView({block:'center'});eventIdInput.focus();return;}try{const created=await api('/api/events','POST',{title:document.getElementById('title').value,eventId:document.getElementById('event-id').value,plan:'event',eventDate:document.getElementById('event-date').value,moderation:document.getElementById('moderation').checked,guestbookModeration:document.getElementById('guestbook-moderation').checked});activeEvent=created.eventId;history.replaceState(null,'',`/dashboard?event=${encodeURIComponent(activeEvent)}`);message.textContent='Veranstaltung erstellt. Du kannst jetzt kostenlos mit bis zu 25 Fotos testen.';e.target.reset();document.getElementById('guestbook-moderation').checked=true;await load();message.scrollIntoView({block:'center',behavior:'smooth'});}catch(err){report(err);message.scrollIntoView({block:'center',behavior:'smooth'});}
+    e.preventDefault();eventIdInput.value=normalizeEventId(eventIdInput.value);if(!/^[a-z0-9][a-z0-9_-]{2,63}$/.test(eventIdInput.value)){message.textContent='Bitte einen Kurznamen mit mindestens 3 Buchstaben oder Zahlen eingeben.';message.scrollIntoView({block:'center'});eventIdInput.focus();return;}try{const created=await api('/api/events','POST',{title:document.getElementById('title').value,eventId:document.getElementById('event-id').value,plan:'event',eventDate:document.getElementById('event-date').value,moderation:document.getElementById('moderation').checked,guestbookModeration:document.getElementById('guestbook-moderation').checked});activeEvent=created.eventId;history.replaceState(null,'',`/dashboard?event=${encodeURIComponent(activeEvent)}`);message.textContent='Veranstaltung erstellt. Als Nächstes kannst du Fotos prüfen und deinen QR-Code teilen.';e.target.reset();organizerNameInput.value=displayName;document.getElementById('guestbook-moderation').checked=true;slugEdited=false;eventStepIndex=displayName?1:0;renderEventStep();await load();message.scrollIntoView({block:'center',behavior:'smooth'});}catch(err){report(err);message.scrollIntoView({block:'center',behavior:'smooth'});}
   };
   (async()=>{
-    try{const account=await api('/api/auth/me');if(account.emailDeliveryAvailable&&!account.emailVerified){const notice=element('div');notice.className='test-notice';notice.append(element('p','Bitte bestätige deine E-Mail-Adresse über den Link in deiner Mail.'));button(notice,'Bestätigungsmail erneut senden',async()=>{await api('/api/auth/request-verification','POST');message.textContent='Bestätigungsmail angefordert. Bitte auch im Spamordner nachsehen.';});document.getElementById('events').before(notice);}const storage=await api('/api/storage');if(storage.warning)message.textContent=storage.uploadsPaused?'Uploads sind wegen des knappen temporären Speichers vorübergehend pausiert. Bitte in einigen Minuten erneut versuchen.':'Der Speicher wird knapp. Bitte vor weiteren Uploads Speicherbelegung prüfen.';const photoUsed=storage.usedBytes??storage.totalBytes-storage.freeBytes;const photoLabel=storage.location==='object-storage'?'Hetzner-Fotospeicher':'Fotospeicher auf der App-Disk';const diskNote=element('p',`${photoLabel}: ${(photoUsed/1024**3).toFixed(2)} GB von ${(storage.totalBytes/1024**3).toFixed(1)} GB belegt. Temporärer Render-Uploadpuffer: ${(storage.uploadDisk.freeBytes/1024**3).toFixed(2)} GB frei; bei weniger als ${(storage.uploadDisk.minimumFreeBytes/1024**3).toFixed(0)} GB pausiert FinalSnap neue Uploads.`);diskNote.className='small';document.getElementById('events').before(diskNote);const plans=await api('/api/plans');availablePlans=plans;const dateInput=document.getElementById('event-date');const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Berlin'}).format(new Date());dateInput.min=today;const maxDate=new Date(`${today}T12:00:00Z`);maxDate.setUTCMonth(maxDate.getUTCMonth()+24);dateInput.max=maxDate.toISOString().slice(0,10);if(new URLSearchParams(location.search).get('plan')==='event')document.querySelector('.create-panel').open=true;await load();}catch(err){report(err);}
+    try{const account=await api('/api/auth/me');displayName=account.user.displayName||'';if(displayName){organizerNameInput.value=displayName;eventStepIndex=1;renderEventStep();showGreeting();}if(account.emailDeliveryAvailable&&!account.emailVerified){const notice=element('div');notice.className='test-notice';notice.append(element('p','Bitte bestätige deine E-Mail-Adresse über den Link in deiner Mail.'));button(notice,'Bestätigungsmail erneut senden',async()=>{await api('/api/auth/request-verification','POST');message.textContent='Bestätigungsmail angefordert. Bitte auch im Spamordner nachsehen.';});document.getElementById('events').before(notice);}const storage=await api('/api/storage');if(storage.warning)message.textContent=storage.uploadsPaused?'Uploads sind wegen des knappen temporären Speichers vorübergehend pausiert. Bitte in einigen Minuten erneut versuchen.':'Der Speicher wird knapp. Bitte vor weiteren Uploads Speicherbelegung prüfen.';const photoUsed=storage.usedBytes??storage.totalBytes-storage.freeBytes;const photoLabel=storage.location==='object-storage'?'Hetzner-Fotospeicher':'Fotospeicher auf der App-Disk';const diskNote=element('p',`${photoLabel}: ${(photoUsed/1024**3).toFixed(2)} GB von ${(storage.totalBytes/1024**3).toFixed(1)} GB belegt. Temporärer Render-Uploadpuffer: ${(storage.uploadDisk.freeBytes/1024**3).toFixed(2)} GB frei; bei weniger als ${(storage.uploadDisk.minimumFreeBytes/1024**3).toFixed(0)} GB pausiert FinalSnap neue Uploads.`);diskNote.className='small';document.getElementById('events').before(diskNote);const plans=await api('/api/plans');availablePlans=plans;const dateInput=document.getElementById('event-date');const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Berlin'}).format(new Date());dateInput.min=today;const maxDate=new Date(`${today}T12:00:00Z`);maxDate.setUTCMonth(maxDate.getUTCMonth()+24);dateInput.max=maxDate.toISOString().slice(0,10);if(new URLSearchParams(location.search).get('plan')==='event')document.querySelector('.create-panel').open=true;await load();}catch(err){report(err);}
   })();
 })();
