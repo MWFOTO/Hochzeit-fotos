@@ -75,8 +75,6 @@ function openDatabase(filename) {
       alert_key TEXT PRIMARY KEY, active INTEGER NOT NULL DEFAULT 0,
       last_sent_at INTEGER, last_value INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE IF NOT EXISTS webhook_receipts (id TEXT PRIMARY KEY, created_at INTEGER NOT NULL);`);
-  const userColumns=new Set(db.prepare('PRAGMA table_info(users)').all().map(x=>x.name));
-  if(!userColumns.has('display_name'))db.exec('ALTER TABLE users ADD COLUMN display_name TEXT');
   const paymentColumns=new Set(db.prepare('PRAGMA table_info(payments)').all().map(x=>x.name));
   if(!paymentColumns.has('stripe_payment_intent_id'))db.exec('ALTER TABLE payments ADD COLUMN stripe_payment_intent_id TEXT');
   if(!paymentColumns.has('stripe_invoice_id'))db.exec('ALTER TABLE payments ADD COLUMN stripe_invoice_id TEXT');
@@ -96,6 +94,7 @@ function openDatabase(filename) {
     if (!columns.has(name)) db.exec(`ALTER TABLE events ADD COLUMN ${name} ${type}`);
   }
   const userColumns=new Set(db.prepare('PRAGMA table_info(users)').all().map(x=>x.name));
+  if(!userColumns.has('display_name'))db.exec('ALTER TABLE users ADD COLUMN display_name TEXT');
   if(!userColumns.has('email_verified_at'))db.exec('ALTER TABLE users ADD COLUMN email_verified_at INTEGER');
   const photoColumns=new Set(db.prepare('PRAGMA table_info(photos)').all().map(x=>x.name));
   if(!photoColumns.has('uploader_token_hash'))db.exec('ALTER TABLE photos ADD COLUMN uploader_token_hash TEXT');
