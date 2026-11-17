@@ -372,7 +372,16 @@ function createApp(options = {}) {
     if(!crypto.timingSafeEqual(Buffer.from(stored,'hex'),derived) || !user) return fail(res,401,'Anmeldedaten stimmen nicht.');
     startSession(req,res,user);
   }));
-  app.get('/api/auth/me',loginRequired,(req,res)=>res.json({user:req.user,csrf:req.session.csrf,emailVerified:!!db.prepare('SELECT email_verified_at FROM users WHERE id=?').get(req.user.id).email_verified_at,emailDeliveryAvailable:!!mailer}));
+  app.get('/api/auth/me',loginRequired,(req,res)=>{
+    const profile=db.prepare('SELECT display_name,email_verified_at FROM users WHERE id=?').get(req.user.id);
+    res.json({user:{...req.user,displayName:profile?.display_name||''},csrf:req.session.csrf,emailVerified:!!profile?.email_verified_at,emailDeliveryAvailable:!!mailer});
+  });
+  app.patch('/api/auth/profile',loginRequired,(req,res)=>{
+    const displayName=String(req.body.displayName||'').trim().replace(/\s+/g,' ');
+    if(!displayName||displayName.length>60||/[<>\x00-\x1f]/.test(displayName))return fail(res,400,'Bitte gib deinen Vornamen ein (höchstens 60 Zeichen).');
+    db.prepare('UPDATE users SET display_name=? WHERE id=?').run(displayName,req.user.id);
+    res.json({displayName});
+  });
   app.post('/api/auth/forgot-password',authLimit,wrap(async(req,res)=>{
     if(!mailer)return fail(res,503,'Passwort zurücksetzen ist noch nicht verfügbar: Der E-Mail-Versand wird gerade eingerichtet.');
     const user=db.prepare('SELECT * FROM users WHERE email=?').get(String(req.body.email||'').trim().toLowerCase());
@@ -893,13 +902,12 @@ function createApp(options = {}) {
     const admin=own(req,req.event)&&req.query.manage==='1';
     const photos=own(req,req.event)
       ? db.prepare(`SELECT * FROM photos WHERE event_id=? ${admin?'':'AND approved=1'} ORDER BY created_at,id`).all(req.event.id)
-      : db.prepare('SELECT * FROM photos WHERE event_id=? AND approved=1 AND uploader_token_hash=? ORDER BY created_at,id').all(req.event.id,req.guestTokenHash);
+      : db.prepare('SELECT * FROM photos WHERE event_id=? AND approved=1 ORDER BY created_at,id').all(req.event.id);
     res.json({photos:photos.map(p=>({id:p.id,url:photoUrl(req,p),timestamp:p.created_at,approved:!!p.approved})),serverTime:Date.now()});
   });
   app.get('/uploads/:eventId/:filename',access,wrap(async(req,res)=>{
     const p=db.prepare('SELECT * FROM photos WHERE event_id=? AND filename=?').get(req.event.id,req.params.filename);
     if(!p || (!p.approved && !own(req,req.event))) return fail(res,404,'Foto nicht gefunden.');
-    if(!own(req,req.event) && p.uploader_token_hash!==req.guestTokenHash) return fail(res,404,'Foto nicht gefunden.');
     if(photoStorage.mode==='local') return res.sendFile(path.join(root,req.event.id,p.filename));
     const stream=await photoStorage.getStream(req.event.id,p.filename);
     res.type('jpeg');res.set('Cache-Control','private, no-store');stream.on('error',()=>res.destroy());stream.pipe(res);
@@ -917,7 +925,7 @@ function createApp(options = {}) {
   app.get('/api/event/:eventId/download',access,wrap(async(req,res)=>{
     const photos=own(req,req.event)
       ? db.prepare('SELECT * FROM photos WHERE event_id=?').all(req.event.id)
-      : db.prepare('SELECT * FROM photos WHERE event_id=? AND approved=1 AND uploader_token_hash=?').all(req.event.id,req.guestTokenHash);
+      : db.prepare('SELECT * FROM photos WHERE event_id=? AND approved=1 ORDER BY created_at,id').all(req.event.id);
     if(!photos.length) return fail(res,404,'Keine Fotos vorhanden.');
     res.attachment(`event-${req.event.id}-fotos.zip`);
     const archive=new archiver.ZipArchive({zlib:{level:1}});
