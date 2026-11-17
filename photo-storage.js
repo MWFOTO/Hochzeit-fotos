@@ -69,18 +69,18 @@ function createPhotoStorage(config = {}, dependencies = {}) {
     mode: 's3',
     bucket,
     check: async () => send(new HeadBucketCommand({Bucket: bucket}), {abortSignal: AbortSignal.timeout(3000)}),
-    put: async (eventId, filename, filePath) => {
+    put: async (eventId, filename, filePath, contentType = 'image/jpeg') => {
       await send(new PutObjectCommand({
         Bucket: bucket,
         Key: keyFor(eventId, filename),
         Body: fs.createReadStream(filePath),
-        ContentType: 'image/jpeg',
+        ContentType: contentType,
         CacheControl: 'private, no-store',
         ...encryption,
       }));
     },
-    getStream: async (eventId, filename) => {
-      const result = await send(new GetObjectCommand({Bucket: bucket, Key: keyFor(eventId, filename), ...encryption}));
+    getStream: async (eventId, filename, range) => {
+      const result = await send(new GetObjectCommand({Bucket: bucket, Key: keyFor(eventId, filename), ...(range && {Range:range}), ...encryption}));
       if (!result.Body) throw new Error('Foto konnte aus dem Object Storage nicht gelesen werden.');
       return result.Body;
     },

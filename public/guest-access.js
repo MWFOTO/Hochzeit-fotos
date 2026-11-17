@@ -81,6 +81,11 @@
       if(emptyMessage)emptyMessage.textContent=info.canManage?'Noch keine Fotos vorhanden.':'Du hast mit diesem Browser noch keine Fotos hochgeladen.';
       const downloadButton=document.getElementById('download-all-btn');
       if(downloadButton)downloadButton.textContent=info.canManage?'Alle Fotos als ZIP herunterladen':'Meine Fotos als ZIP herunterladen';
+      const videoGreetingsLink=document.getElementById('video-greetings-link');
+      if(videoGreetingsLink){
+        videoGreetingsLink.hidden=!info.videoGreetings||info.readOnly;
+        videoGreetingsLink.href=window.guestUrl(`/event/${encodeURIComponent(eventId)}/video-grussbox`);
+      }
       const uploadLink=document.getElementById('upload-link');if(uploadLink)uploadLink.hidden=info.readOnly;
       for(const id of ['upload-trigger','camera-trigger']){const button=document.getElementById(id);if(button)button.hidden=info.readOnly;}
       const hint = document.getElementById('retention-hint');

@@ -113,6 +113,49 @@
         const photosSection=element('div');photosSection.className='event-section';photosSection.append(element('h3','Fotos & Live-Diashow'));card.append(photosSection);const photoActions=element('div');photoActions.className='actions';photosSection.append(photoActions);
         const accessSection=element('div');accessSection.className='event-section';accessSection.append(element('h3','QR-Code & Gästezugang'));card.append(accessSection);const accessActions=element('div');accessActions.className='actions';accessSection.append(accessActions);
         const settings=element('details');settings.className='event-section event-settings';settings.open=true;settings.append(element('summary','Einstellungen & Freigabe'));card.append(settings);const settingsActions=element('div');settingsActions.className='actions';settings.append(element('p',event.readOnly?'Die Uploadzeit ist beendet. Gäste können die vorhandenen Fotos noch bis zum Ende der Downloadphase ansehen.':event.moderation?'Neue Fotos warten auf deine Freigabe.':'Gäste sehen auf ihrem Gerät nur ihre eigenen Uploads.'),settingsActions);if(event.event_date&&event.startsAt>Date.now()){const dateLabel=element('label','Veranstaltungsdatum ändern');const dateField=element('input');dateField.type='date';dateField.value=event.event_date;dateField.min=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Berlin'}).format(new Date());dateLabel.append(dateField);settingsActions.append(dateLabel);button(settingsActions,'Datum speichern',async()=>{await api(`/api/event/${event.id}`,'PATCH',{eventDate:dateField.value});message.textContent='Veranstaltungsdatum gespeichert. Der Albumzeitraum wurde angepasst.';await load();});}
+        if(event.videoAvailable||event.video_greetings_enabled){
+          const videoPanel=element('details');
+          videoPanel.className='event-section';
+          videoPanel.append(element('summary','Videogrüße'));
+          const videoList=element('div');
+          const route=`/api/event/${encodeURIComponent(event.id)}/video-greetings`;
+          const loadVideos=async()=>{
+            const {videos}=await api(route);
+            videoList.replaceChildren();
+            if(!videos.length)videoList.append(element('p','Bisher sind keine Videogrüße angekommen.'));
+            for(const item of videos){
+              const card=element('div');
+              const url=`${route}/${encodeURIComponent(item.id)}`;
+              const player=element('video');
+              player.className='event-video-player';
+              player.controls=true;
+              player.playsInline=true;
+              player.preload='none';
+              player.src=url;
+              player.width=300;
+              card.append(element('p',`Videogruß · ${Math.ceil(item.duration)} Sek. · ${new Date(item.created_at).toLocaleDateString('de-DE')}`),player);
+              const actions=element('div');
+              actions.className='actions';
+              link(actions,'Herunterladen',url+'?download=1');
+              button(actions,'Videogruß löschen',async()=>{
+                if(!window.confirm('Diesen Videogruß löschen?'))return;
+                await api(url,'DELETE');
+                await loadVideos();
+              });
+              card.append(actions);
+              videoList.append(card);
+            }
+          };
+          videoPanel.append(videoList);
+          videoPanel.addEventListener('toggle',()=>{if(videoPanel.open)loadVideos().catch(report);});
+          photosSection.append(videoPanel);
+          if(event.videoAvailable&&!event.readOnly){
+            button(settingsActions,event.video_greetings_enabled?'Videogrußbox schließen':'Videogrußbox einschalten',async()=>{
+              await api(`/api/event/${event.id}`,'PATCH',{videoGreetings:!event.video_greetings_enabled});
+              await load();
+            });
+          }
+        }
         panels.push(photosSection,accessSection,settings);
         ['Fotos','Gästezugang','Einstellungen'].forEach((label,i)=>button(tabs,label,()=>showPanel(i)));
         button(accessActions,'Gästelink kopieren',async()=>{try{await navigator.clipboard.writeText(event.guestUrl);message.textContent='Gästelink kopiert.';}catch{const input=element('input');input.value=event.guestUrl;input.readOnly=true;accessSection.append(input);input.select();message.textContent='Bitte den markierten Gästelink kopieren.';}});

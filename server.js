@@ -11,6 +11,7 @@ const { promisify } = require('node:util');
 const fs = require('node:fs');
 const path = require('node:path');
 const { openDatabase } = require('./db');
+const { prepareVideo, MAX_VIDEO_BYTES, MAX_VIDEOS_PER_EVENT } = require('./video-greetings');
 const { createPhotoStorage } = require('./photo-storage');
 const { createBackupService } = require('./backup-service');
 const { createOperationsMonitor } = require('./operations-monitor');
@@ -100,6 +101,7 @@ function createApp(options = {}) {
   if (cfg.NODE_ENV === 'production' && (baseUrl.protocol !== 'https:' || !cfg.DB_PATH || !cfg.UPLOAD_DIR)) throw new Error('HTTPS, DB_PATH und UPLOAD_DIR sind im Hosting erforderlich.');
   const root = path.resolve(cfg.UPLOAD_DIR || path.join(__dirname,'uploads'));
   fs.mkdirSync(root, {recursive:true});
+  const videoAvailable=cfg.VIDEO_GREETINGS_ENABLED==='1';
   const photoStorage = options.photoStorage || createPhotoStorage(cfg);
   const storageLimit = Number(cfg.S3_MAX_STORAGE_BYTES || 900 * 1024 ** 3);
   if (!Number.isSafeInteger(storageLimit) || storageLimit <= 100 * 1024 ** 2) throw new Error('S3_MAX_STORAGE_BYTES muss größer als 100 MiB sein.');
@@ -419,7 +421,7 @@ function createApp(options = {}) {
     const events=db.prepare(`SELECT e.*, COUNT(p.id) photoCount, COALESCE(SUM(p.bytes),0) storageBytes
       FROM events e LEFT JOIN photos p ON p.event_id=e.id
       WHERE e.owner_id=? AND e.deleted_at IS NULL GROUP BY e.id ORDER BY e.created_at DESC`).all(req.user.id);
-    res.json({events:events.map(e=>{const payment=db.prepare('SELECT id,status,customer_type,paid_at,early_start_requested_at,early_start_acknowledged_at,terms_accepted_at,terms_version,stripe_invoice_id FROM payments WHERE event_id=?').get(e.id);const withdrawal=payment?db.prepare('SELECT submitted_at,status FROM withdrawal_confirmations WHERE payment_id=?').get(payment.id):null;return {...e,expires_at:e.event_date?retentionUntil(e):e.expires_at,storageLimitBytes:eventStorageLimit(e,cfg),photoLimit:eventPhotoLimit(e,cfg),checkoutStarted:!!payment,customerType:payment?.customer_type||null,paymentStatus:payment?.status||null,paymentConcludedAt:payment?.paid_at||null,withdrawalSubmittedAt:withdrawal?.submitted_at||null,withdrawalConfirmationStatus:withdrawal?.status||null,earlyStartRequested:!!payment?.early_start_requested_at,earlyStartAcknowledged:!!payment?.early_start_acknowledged_at,termsAccepted:!!payment?.terms_accepted_at,termsVersion:payment?.terms_version||null,hasInvoice:!!payment?.stripe_invoice_id,readOnly:!active(e)&&readable(e),retentionUntil:retentionUntil(e),startsAt:startAt(e),guestUrl:readable(e)?`${baseUrl.origin}/event/${e.id}?token=${e.guest_token}`:null};})});
+    res.json({events:events.map(e=>{const payment=db.prepare('SELECT id,status,customer_type,paid_at,early_start_requested_at,early_start_acknowledged_at,terms_accepted_at,terms_version,stripe_invoice_id FROM payments WHERE event_id=?').get(e.id);const withdrawal=payment?db.prepare('SELECT submitted_at,status FROM withdrawal_confirmations WHERE payment_id=?').get(payment.id):null;return {...e,videoAvailable,expires_at:e.event_date?retentionUntil(e):e.expires_at,storageLimitBytes:eventStorageLimit(e,cfg),photoLimit:eventPhotoLimit(e,cfg),checkoutStarted:!!payment,customerType:payment?.customer_type||null,paymentStatus:payment?.status||null,paymentConcludedAt:payment?.paid_at||null,withdrawalSubmittedAt:withdrawal?.submitted_at||null,withdrawalConfirmationStatus:withdrawal?.status||null,earlyStartRequested:!!payment?.early_start_requested_at,earlyStartAcknowledged:!!payment?.early_start_acknowledged_at,termsAccepted:!!payment?.terms_accepted_at,termsVersion:payment?.terms_version||null,hasInvoice:!!payment?.stripe_invoice_id,readOnly:!active(e)&&readable(e),retentionUntil:retentionUntil(e),startsAt:startAt(e),guestUrl:readable(e)?`${baseUrl.origin}/event/${e.id}?token=${e.guest_token}`:null};})});
   });
   app.post('/api/events/:eventId/withdrawal',loginRequired,owner,wrap(async(req,res)=>{
     const customerName=String(req.body.customerName||'').trim().replace(/\s+/g,' ');
@@ -659,6 +661,7 @@ function createApp(options = {}) {
     }
     if(typeof req.body.moderation==='boolean')updates.push(['moderation',req.body.moderation?1:0]);
     if(typeof req.body.guestbookModeration==='boolean')updates.push(['guestbook_moderation',req.body.guestbookModeration?1:0]);
+    if(videoAvailable&&typeof req.body.videoGreetings==='boolean')updates.push(['video_greetings_enabled',req.body.videoGreetings?1:0]);
     if(!updates.length)return fail(res,400,'Mindestens eine gültige Freigabeeinstellung ist erforderlich.');
     for(const [column,value] of updates)db.prepare(`UPDATE events SET ${column}=? WHERE id=?`).run(value,req.event.id);
     res.json({success:true});
@@ -710,6 +713,102 @@ function createApp(options = {}) {
   }));
   const busy=new Set();
   let remoteStorageReservedBytes=0;
+  const storedObjectBytes=()=>db.prepare(`SELECT
+    (SELECT COALESCE(SUM(bytes),0) FROM photos)+(SELECT COALESCE(SUM(bytes),0) FROM video_greetings) AS bytes`).get().bytes;
+  const videoUpload=multer({dest:temp,limits:{fileSize:MAX_VIDEO_BYTES,files:1,fields:0,parts:1}}).single('video');
+  const videoRoute='/api/event/:eventId/video-greetings';
+
+  app.post(videoRoute,uploadLimit,access,(req,res)=>{
+    const event=req.event;
+    if(!videoAvailable||!event.video_greetings_enabled)return fail(res,404,'Die Videogrußbox ist ausgeschaltet.');
+    if(!active(event)||deletingUsers.has(event.owner_id))return fail(res,409,'Diese Feier nimmt gerade keine Videogrüße an.');
+    if(busy.has(event.id))return fail(res,429,'Ein Upload läuft bereits. Bitte versuche es gleich erneut.');
+    const count=db.prepare('SELECT COUNT(*) AS total FROM video_greetings WHERE event_id=?');
+    const limit=event.status==='trial'?3:MAX_VIDEOS_PER_EVENT;
+    if(count.get(event.id).total>=limit)return fail(res,409,'Die Videogrußbox dieser Feier ist voll.');
+    const capacity=uploadCapacity.acquire();
+    if(!capacity.ok)return fail(res,capacity.reason==='disk'?503:429,'Die Videoverarbeitung ist gerade ausgelastet. Bitte versuche es erneut.');
+    busy.add(event.id);
+    videoUpload(req,res,async uploadError=>{
+      const id=crypto.randomUUID();
+      const filename=`video-${id}.mp4`;
+      const output=path.join(temp,filename);
+      let stored=false;
+      let reserved=0;
+      try {
+        if(uploadError?.code==='LIMIT_FILE_SIZE')return fail(res,413,'Bitte ein Video mit höchstens 50 MB auswählen.');
+        if(uploadError||!req.file)return fail(res,400,'Bitte genau ein Video auswählen.');
+        const {duration,size}=await prepareVideo(req.file.path,output,cfg);
+        const current=lookup(event.id);
+        if(!active(current)||!current.video_greetings_enabled||deletingUsers.has(event.owner_id)) {
+          return fail(res,409,'Diese Feier nimmt gerade keine Videogrüße an.');
+        }
+        if(photoStorage.mode==='s3'){
+          if(storedObjectBytes()+remoteStorageReservedBytes+size>storageLimit)return fail(res,503,'Der gemeinsame Speicher ist ausgeschöpft.');
+          remoteStorageReservedBytes+=size;
+          reserved=size;
+          stored=true;
+          await photoStorage.put(event.id,filename,output,'video/mp4');
+        }else{
+          const dir=path.join(root,event.id);
+          fs.mkdirSync(dir,{recursive:true});
+          fs.renameSync(output,path.join(dir,filename));
+          stored=true;
+        }
+        const latest=lookup(event.id);
+        if(!active(latest)||!latest.video_greetings_enabled)throw Error('Diese Feier nimmt gerade keine Videogrüße an.');
+        db.prepare('INSERT INTO video_greetings (id,event_id,filename,bytes,duration,created_at) VALUES (?,?,?,?,?,?)')
+          .run(id,event.id,filename,size,duration,Date.now());
+        stored=false;
+        res.status(201).json({success:true});
+      }catch(error){
+        if(stored)try{await photoStorage.deletePhoto(event.id,filename);await backupService.deletePhoto(event.id,filename);}
+        catch{console.error('FinalSnap: Videodatei konnte nach fehlgeschlagenem Upload nicht entfernt werden.');}
+        const unavailable=error.code==='PHOTO_STORAGE_UNAVAILABLE'||error.message==='Die Videoverarbeitung ist momentan nicht verfügbar.';
+        fail(res,unavailable?503:400,error.message);
+      }finally{
+        remoteStorageReservedBytes-=reserved;
+        if(req.file)fs.rmSync(req.file.path,{force:true});
+        fs.rmSync(output,{force:true});
+        busy.delete(event.id);
+        capacity.release();
+      }
+    });
+  });
+  app.get(videoRoute,loginRequired,owner,(req,res)=>{
+    if(!readable(req.event))return fail(res,404,'Dieses Album ist abgelaufen.');
+    const videos=db.prepare('SELECT id,duration,bytes,created_at FROM video_greetings WHERE event_id=? ORDER BY created_at DESC').all(req.event.id);
+    res.json({videos});
+  });
+  app.get(`${videoRoute}/:videoId`,loginRequired,owner,wrap(async(req,res)=>{
+    const video=readable(req.event)&&db.prepare('SELECT * FROM video_greetings WHERE event_id=? AND id=?').get(req.event.id,req.params.videoId);
+    if(!video)return fail(res,404,'Videogruß nicht gefunden.');
+    res.set('Cache-Control','private, no-store');
+    res.type('video/mp4');
+    if(req.query.download==='1')res.attachment(video.filename);
+    if(photoStorage.mode==='local')return res.sendFile(path.join(root,req.event.id,video.filename));
+    const ranges=req.headers.range&&req.range(video.bytes);
+    if(ranges===-1){
+      res.set('Content-Range',`bytes */${video.bytes}`);
+      return res.sendStatus(416);
+    }
+    const range=Array.isArray(ranges)&&ranges.type==='bytes'&&ranges.length===1?ranges[0]:null;
+    const stream=await photoStorage.getStream(req.event.id,video.filename,range&&`bytes=${range.start}-${range.end}`);
+    res.set('Accept-Ranges','bytes');
+    if(range)res.status(206).set('Content-Range',`bytes ${range.start}-${range.end}/${video.bytes}`);
+    res.set('Content-Length',String(range?range.end-range.start+1:video.bytes));
+    res.on('close',()=>stream.destroy());
+    stream.on('error',()=>res.destroy());
+    stream.pipe(res);
+  }));
+  app.delete(`${videoRoute}/:videoId`,loginRequired,owner,wrap(async(req,res)=>{
+    const video=db.prepare('SELECT * FROM video_greetings WHERE event_id=? AND id=?').get(req.event.id,req.params.videoId);
+    if(!video)return fail(res,404,'Videogruß nicht gefunden.');
+    await photoStorage.deletePhoto(req.event.id,video.filename);
+    await backupService.deletePhoto(req.event.id,video.filename);
+    db.prepare('DELETE FROM video_greetings WHERE event_id=? AND id=?').run(req.event.id,video.id);
+    res.json({success:true});
+  }));
   app.post('/api/event/:eventId/upload',uploadLimit,access,(req,res,next)=>{
     if(req.event.owner_id && deletingUsers.has(req.event.owner_id)) return fail(res,409,'Das Konto wird gerade gelöscht. Uploads sind gesperrt.');
     if(!active(req.event)) return fail(res,402,'Der Albumzeitraum ist beendet. Fotos können noch während der Downloadphase angesehen und heruntergeladen werden.');
@@ -742,7 +841,7 @@ function createApp(options = {}) {
           if(bytes>storageLimit) throw new Error('Der Fotospeicher dieses Albums ist ausgeschöpft. Bitte den Veranstalter informieren.');
         }
         if(photoStorage.mode==='s3') {
-          const usedBytes=Number(db.prepare('SELECT COALESCE(SUM(bytes),0) bytes FROM photos').get().bytes);
+          const usedBytes=storedObjectBytes();
           const incomingBytes=written.reduce((sum,file)=>sum+file.bytes,0);
           if(usedBytes+remoteStorageReservedBytes+incomingBytes>storageLimit) throw new Error('Der gemeinsame Fotospeicher ist ausgeschöpft. Bitte den Veranstalter informieren.');
           remoteStorageReservedBytes+=incomingBytes;
@@ -764,7 +863,7 @@ function createApp(options = {}) {
     const photoCount=canManage
       ? db.prepare('SELECT COUNT(*) count FROM photos WHERE event_id=?').get(req.event.id).count
       : db.prepare('SELECT COUNT(*) count FROM photos WHERE event_id=? AND uploader_token_hash=?').get(req.event.id,req.guestTokenHash).count;
-    res.json({title:req.event.title,eventDate:req.event.event_date,startsAt:startAt(req.event),expiresAt:req.event.event_date?retentionUntil(req.event):req.event.expires_at,retentionUntil:retentionUntil(req.event),readOnly:!active(req.event),moderation:!!req.event.moderation,guestbookModeration:!!req.event.guestbook_moderation,trial:req.event.status==='trial',preEventTest:req.event.status==='paid'&&startAt(req.event)>Date.now(),testMode:testMode(req.event),photoCount,photoLimit:eventPhotoLimit(req.event,cfg),storageBytes:Number(db.prepare('SELECT COALESCE(SUM(bytes),0) bytes FROM photos WHERE event_id=?').get(req.event.id).bytes),storageLimitBytes:eventStorageLimit(req.event,cfg),pilot:req.event.status==='pilot',canManage,design:publicDesign(req.event)});
+    res.json({title:req.event.title,eventDate:req.event.event_date,startsAt:startAt(req.event),expiresAt:req.event.event_date?retentionUntil(req.event):req.event.expires_at,retentionUntil:retentionUntil(req.event),readOnly:!active(req.event),moderation:!!req.event.moderation,guestbookModeration:!!req.event.guestbook_moderation,videoGreetings:videoAvailable&&!!req.event.video_greetings_enabled,trial:req.event.status==='trial',preEventTest:req.event.status==='paid'&&startAt(req.event)>Date.now(),testMode:testMode(req.event),photoCount,photoLimit:eventPhotoLimit(req.event,cfg),storageBytes:Number(db.prepare('SELECT COALESCE(SUM(bytes),0) bytes FROM photos WHERE event_id=?').get(req.event.id).bytes),storageLimitBytes:eventStorageLimit(req.event,cfg),pilot:req.event.status==='pilot',canManage,design:publicDesign(req.event)});
   });
   app.get('/api/event/:eventId/guestbook',access,(req,res)=>{
     const entries=own(req,req.event)
@@ -834,7 +933,7 @@ function createApp(options = {}) {
     // Legacy unowned events are never removed automatically: review/import first.
     await photoStorage.deleteEvent(e.id);
     await backupService.deleteEvent(e.id);
-    db.transaction(()=>{db.prepare('DELETE FROM photos WHERE event_id=?').run(e.id);db.prepare('DELETE FROM guestbook_entries WHERE event_id=?').run(e.id);db.prepare("UPDATE events SET status='expired', deleted_at=?, guest_token=NULL WHERE id=?").run(Date.now(),e.id);})();
+    db.transaction(()=>{db.prepare('DELETE FROM photos WHERE event_id=?').run(e.id);db.prepare('DELETE FROM guestbook_entries WHERE event_id=?').run(e.id);db.prepare('DELETE FROM video_greetings WHERE event_id=?').run(e.id);db.prepare("UPDATE events SET status='expired', deleted_at=?, guest_token=NULL WHERE id=?").run(Date.now(),e.id);})();
     return true;
   }
   app.delete('/api/event/:eventId',loginRequired,owner,wrap(async(req,res)=>{if(!await erase(req.event)) return fail(res,409,'Upload läuft. Bitte erneut versuchen.');res.json({success:true});}));
@@ -900,7 +999,7 @@ function createApp(options = {}) {
       db.prepare('DELETE FROM password_resets WHERE expires_at<=?').run(Date.now());
       for(const entry of fs.readdirSync(temp)) {const file=path.join(temp,entry);if(fs.statSync(file).mtimeMs<Date.now()-86400000) fs.rmSync(file,{force:true});}
     };
-    if(photoStorage.mode==='local') {for(const e of expired) {if(!busy.has(e.id)){fs.rmSync(path.join(root,e.id),{recursive:true,force:true});db.transaction(()=>{db.prepare('DELETE FROM photos WHERE event_id=?').run(e.id);db.prepare('DELETE FROM guestbook_entries WHERE event_id=?').run(e.id);db.prepare("UPDATE events SET status='expired', deleted_at=?, guest_token=NULL WHERE id=?").run(Date.now(),e.id);})();}}pruneRecords();return;}
+    if(photoStorage.mode==='local') {for(const e of expired) {if(!busy.has(e.id)){fs.rmSync(path.join(root,e.id),{recursive:true,force:true});db.transaction(()=>{db.prepare('DELETE FROM photos WHERE event_id=?').run(e.id);db.prepare('DELETE FROM guestbook_entries WHERE event_id=?').run(e.id);db.prepare('DELETE FROM video_greetings WHERE event_id=?').run(e.id);db.prepare("UPDATE events SET status='expired', deleted_at=?, guest_token=NULL WHERE id=?").run(Date.now(),e.id);})();}}pruneRecords();return;}
     return (async()=>{for(const e of expired) await erase(e);pruneRecords();})();
   }
   const pub=path.join(__dirname,'public');
@@ -937,8 +1036,15 @@ function createApp(options = {}) {
     res.sendFile(path.join(pub,'design-editor.html'));
   });
   for(const [suffix,file] of [['','gallery.html'],['/upload','upload.html'],['/gallery','gallery.html'],['/slideshow','slideshow.html'],['/games','games.html'],['/guestbook','guestbook.html']]) app.get(`/event/:eventId${suffix}`,access,(req,res)=>res.sendFile(path.join(pub,file)));
+  app.get('/event/:eventId/video-grussbox',access,(req,res)=>{
+    if(!videoAvailable||!req.event.video_greetings_enabled||!active(req.event))return fail(res,404,'Die Videogrußbox ist für diese Feier geschlossen.');
+    res.set('Permissions-Policy','camera=(self), microphone=(self)');
+    const policy=res.get('Content-Security-Policy');
+    if(policy)res.set('Content-Security-Policy',policy+";media-src 'self' blob:");
+    res.sendFile(path.join(pub,'video-grussbox.html'));
+  });
   // Only intended public assets; source code and generic HTML routes cannot bypass guards.
-  for(const file of ['style.css','design-editor.css','design-editor.js','upload.js','slideshow.js','guest-access.js','account.js','verify-email.js','password-recovery.js','games.js','guestbook.js','payments-admin.js','backups-admin.js','landing.js','success.js','gallery-init.js','admin.js','johanna-bastian.png','photographer.webp','event-wedding.jpg','event-birthday.jpg','event-summer.jpg','event-company.jpg']) app.get(`/${file}`,(req,res)=>res.sendFile(path.join(pub,file)));
+  for(const file of ['style.css','design-editor.css','design-editor.js','upload.js','slideshow.js','guest-access.js','account.js','verify-email.js','password-recovery.js','games.js','guestbook.js','video-grussbox.js','payments-admin.js','backups-admin.js','landing.js','success.js','gallery-init.js','admin.js','johanna-bastian.png','photographer.webp','event-wedding.jpg','event-birthday.jpg','event-summer.jpg','event-company.jpg']) app.get(`/${file}`,(req,res)=>res.sendFile(path.join(pub,file)));
   // Liveness stays cheap for the host's restart check. Readiness checks critical dependencies.
   app.get('/health',(req,res)=>res.json({ok:true}));
   app.get('/ready',async(req,res)=>{

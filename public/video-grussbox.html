@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Videogrußbox · FinalSnap</title>
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    main { max-width: 36rem; margin: 3rem auto; padding: 1.5rem; }
+    video { display: block; width: 100%; max-height: 55vh; margin-block: 1rem; background: #141622; border-radius: 1rem; }
+    [hidden] { display: none !important; }
+    #status { min-height: 2.75rem; }
+    .choice { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; }
+  </style>
+  <script src="/guest-access.js" defer></script>
+  <script src="/video-grussbox.js" defer></script>
+</head>
+<body>
+  <main>
+    <p>FinalSnap · Videogrußbox</p>
+    <h1>Ein Videogruß für euch</h1>
+    <p>Was möchtest du den Gastgebern mit auf den Weg geben? Sag es in einem kurzen Video von bis zu 30 Sekunden.</p>
+    <video id="preview" playsinline hidden></video>
+    <p id="status" role="status">Du kannst einen Gruß aufnehmen oder ein Video vom Handy auswählen.</p>
+    <div class="choice">
+      <button id="camera" type="button" class="button secondary">Kamera öffnen</button>
+      <button id="record" type="button" class="button primary" hidden>Aufnahme starten</button>
+      <button id="stop" type="button" class="button secondary" hidden>Aufnahme beenden</button>
+      <button id="reset" type="button" class="button secondary" hidden>Verwerfen</button>
+      <button id="file-label" type="button" class="button secondary">Video auswählen</button>
+      <input id="file" type="file" accept="video/*" hidden>
+      <button id="send" type="button" class="button primary" hidden>Gruß abschicken</button>
+    </div>
+    <p>Deinen Videogruß kann der Veranstalter ansehen und herunterladen.</p>
+    <a id="back" class="button secondary" href="/">Zurück zum Event</a>
+  </main>
+</body>
+</html>
