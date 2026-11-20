@@ -1168,3 +1168,8 @@ body[data-design-theme="afterglow"] { --color-bg: #262324; --color-text: #f5f1ef
  .booking-panel[open] { padding:0 15px 18px; }
  .booking-panel[open]>summary { margin:0 -15px 14px; }
 }
+.withdrawal-action { margin-top:14px; padding:10px 4px 0; border-top:1px solid var(--line); background:transparent; }
+.withdrawal-action>summary { color:var(--color-muted); font-size:.9rem; font-weight:700; cursor:pointer; }
+.withdrawal-action .withdrawal-start { min-height:40px; margin-top:10px; padding:8px 14px; color:var(--color-text); background:#353941; border:1px solid #ffffff32; box-shadow:none; font-size:.9rem; }
+.withdrawal-action .withdrawal-start:hover { background:#41454e; }
+.withdrawal-action .withdrawal-form { margin-top:12px; }
