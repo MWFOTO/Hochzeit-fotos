@@ -59,7 +59,7 @@
   async function manage(event) {
     const section=document.getElementById('photo-manager');section.hidden=false;
     document.getElementById('manager-title').textContent=`Fotos: ${event.title}`;
-    if(!section.dataset.opened){section.scrollIntoView({behavior:'smooth',block:'start'});section.dataset.opened='1';}
+    if(!section.dataset.opened){if(!section.closest('dialog'))section.scrollIntoView({behavior:'smooth',block:'start'});section.dataset.opened='1';}
     const {photos}=await api(`/api/event/${event.id}/photos?manage=1`);
     const list=document.getElementById('managed-photos');list.replaceChildren();
     if(!photos.length)list.textContent='Noch keine Fotos vorhanden.';
@@ -77,6 +77,7 @@
     }
   }
   async function load() {
+    const photoManager=document.getElementById('photo-manager');const photoSlot=document.getElementById('photo-manager-slot');if(photoManager&&photoSlot&&!photoSlot.contains(photoManager)){photoManager.hidden=true;photoSlot.append(photoManager);}
     const {events}=await api('/api/events');if(activeEvent&&!events.some(e=>e.id===activeEvent))activeEvent=null;document.querySelector('.create-panel').hidden=!!activeEvent;document.getElementById('dashboard-overview').hidden=!!activeEvent;document.getElementById('event-list-heading').hidden=!!activeEvent;document.querySelector('.event-list-section').classList.toggle('is-managing-event',!!activeEvent);if(activeEvent)setSection('Veranstaltung');else if(document.getElementById('topbar-section').textContent==='Veranstaltung')setSection('Übersicht');document.getElementById('metric-events').textContent=String(events.length);document.getElementById('metric-photos').textContent=String(events.reduce((sum,event)=>sum+(Number(event.photoCount)||0),0));const section=document.getElementById('events');section.replaceChildren();
     if(!events.length){section.append(element('p','Dein erstes Album wartet auf dich. Erstelle oben eine Veranstaltung.'));document.querySelector('.create-panel').open=true;}
     for(const event of events) {
@@ -100,9 +101,29 @@
       }
       const tabs=element('nav');tabs.className='event-tabs';tabs.setAttribute('aria-label','Veranstaltungsbereiche');card.append(tabs);
       const panels=[];
-      const showPanel=index=>{panels.forEach((panel,i)=>panel.hidden=i!==index);tabs.querySelectorAll('button').forEach((b,i)=>b.setAttribute('aria-pressed',String(i===index)));document.getElementById('photo-manager').hidden=index!==1;if(index===1)return manage(event);};
+      const panelStore=element('div');panelStore.hidden=true;panelStore.className='event-panel-store';card.append(panelStore);
+      let eventDialog=null,dialogContent=null,dialogTitle=null;
+      const resetDialogContent=()=>{
+        const photoManager=document.getElementById('photo-manager');const photoSlot=document.getElementById('photo-manager-slot');
+        panels.forEach((panel,index)=>{if(panel.parentElement===dialogContent){if(index===0)card.insertBefore(panel,tabs);else panelStore.append(panel);}panel.hidden=index!==0;});
+        if(photoManager.parentElement===dialogContent){photoManager.hidden=true;photoSlot.append(photoManager);}
+      };
+      const showPanel=async(index,openDialog=true)=>{
+        if(eventDialog?.open){resetDialogContent();eventDialog.close();}
+        const photoManager=document.getElementById('photo-manager');const photoSlot=document.getElementById('photo-manager-slot');
+        const panel=panels[index];if(!panel)return;
+        panel.hidden=false;
+        if(index!==0){panelStore.append(panel);panel.hidden=false;}
+        dialogContent.append(panel);
+        if(index===1){dialogContent.append(photoManager);photoManager.hidden=false;}else{photoManager.hidden=true;photoSlot.append(photoManager);}
+        dialogTitle.textContent=['Übersicht','Fotos','Gästezugang & QR','Einstellungen'][index];
+        tabs.querySelectorAll('button').forEach((b,i)=>b.setAttribute('aria-pressed',String(i===index)));
+        if(openDialog)eventDialog.showModal();
+        if(index===1)await manage(event);
+      };
+      let chooser=null;
       if(['pending','trial'].includes(event.status)&&!event.readOnly){
-        const chooser=element('details');chooser.className='upgrade-panel';chooser.open=activeEvent===event.id;chooser.append(element('summary','Paket & Buchung'));
+        chooser=element('details');chooser.className='upgrade-panel';chooser.open=false;chooser.append(element('summary','Paket & Buchung'));
         chooser.append(element('p','Kostenlos testen braucht keine Zahlung: Bis zu 25 Fotos kannst du direkt über „Fotos verwalten“ hochladen. Der Endpreis beträgt 49,90 € inkl. 19 % USt. für Privat- und Geschäftskunden. „Testzahlung starten“ öffnet den Stripe-Testcheckout; es wird kein echtes Geld eingezogen.'));
         const buyerLabel=element('label','Kauf als');const buyerType=element('select');for(const [value,label] of [['consumer','Privatkunde'],['business','Geschäftskunde']]){const option=element('option',label);option.value=value;buyerType.append(option);}buyerType.value=event.customerType||'consumer';buyerLabel.append(buyerType);chooser.append(buyerLabel);
         const termsLabel=element('label');termsLabel.className='check-label';const termsAcceptance=element('input');termsAcceptance.type='checkbox';termsAcceptance.checked=event.termsAccepted&&event.termsVersion===TERMS_VERSION;const termsText=document.createTextNode(' Ich habe die ');const termsLink=element('a','Leistungsbedingungen');termsLink.href='/bedingungen';termsLink.target='_blank';termsLink.rel='noopener';termsLabel.append(termsAcceptance,termsText,termsLink,document.createTextNode(' gelesen und akzeptiere sie.'));
@@ -120,13 +141,12 @@
           const actionLabel=`${event.checkoutStarted&&event.plan===key?'Testzahlung fortsetzen':'Testzahlung starten'} · ${priceLabel} inkl. USt.`;const choose=button(item,actionLabel,async()=>{if(!termsAcceptance.checked){consentMessage.textContent='Bitte lies und akzeptiere vor der Bestellung die Leistungsbedingungen.';termsAcceptance.focus();return;}const needsConsent=buyerType.value==='consumer'&&earlyStartRequired;if(needsConsent&&(!earlyStartRequest.checked||!earlyStartAcknowledgement.checked)){consentMessage.textContent='Bitte bestätige beide Hinweise zum vorzeitigen Leistungsbeginn und Widerruf, bevor du fortfährst.';return;}choose.disabled=true;try{const data=await api('/api/checkout','POST',{eventId:event.id,plan:key,customerType:buyerType.value,termsAccepted:termsAcceptance.checked,earlyStartRequest:needsConsent&&earlyStartRequest.checked,earlyStartAcknowledged:needsConsent&&earlyStartAcknowledgement.checked});if(!data.url)throw new Error('Der Test-Checkout hat keinen Link zurückgegeben. Bitte später erneut versuchen.');location.href=data.url;}finally{choose.disabled=false;}});choose.className='primary';choose.disabled=event.checkoutStarted&&event.plan!==key;grid.append(item);
         }
         if(event.checkoutStarted)chooser.append(element('p','Die begonnene Testzahlung ist an das einmalige FinalSnap-Fotoalbum gebunden.'));
-        card.append(chooser);
       }
       if(event.guestUrl) {
         const summarySection=element('div');summarySection.className='event-section event-overview-panel';summarySection.append(element('h3','Dein Album auf einen Blick'));
         const summaryCopy=element('p',`${event.photoCount} ${event.photoCount===1?'Foto':'Fotos'} im Album · ${event.upload_successes} Uploads erfolgreich. Hier kannst du dein Album gestalten, den QR-Code teilen und die Freigabe verwalten.`);summarySection.append(summaryCopy);
         const summaryActions=element('div');summaryActions.className='actions';summarySection.append(summaryActions);
-        button(summaryActions,'Fotos ansehen & verwalten',()=>showPanel(1)).className='primary';button(summaryActions,'Gästezugang & QR öffnen',()=>showPanel(2));link(summaryActions,'Design-Editor öffnen',`/event/${encodeURIComponent(event.id)}/design`);
+        link(summaryActions,'Design-Editor öffnen',`/event/${encodeURIComponent(event.id)}/design`);
         card.append(summarySection);
         const photosSection=element('div');photosSection.className='event-section';photosSection.append(element('h3','Fotos & Live-Diashow'));card.append(photosSection);const photoActions=element('div');photoActions.className='actions';photosSection.append(photoActions);
         const accessSection=element('div');accessSection.className='event-section';accessSection.append(element('h3','QR-Code & Gästezugang'));card.append(accessSection);const accessActions=element('div');accessActions.className='actions';accessSection.append(accessActions);
@@ -175,7 +195,15 @@
           }
         }
         panels.push(summarySection,photosSection,accessSection,settings);
-        ['Übersicht','Fotos','Gästezugang & QR','Einstellungen'].forEach((label,i)=>button(tabs,label,()=>showPanel(i)));
+        photosSection.hidden=true;accessSection.hidden=true;settings.hidden=true;panelStore.append(photosSection,accessSection,settings);
+        eventDialog=element('dialog');eventDialog.className='event-feature-dialog';eventDialog.setAttribute('aria-labelledby',`event-dialog-title-${event.id}`);
+        const dialogHeader=element('div');dialogHeader.className='event-dialog-header';dialogTitle=element('h2');dialogTitle.id=`event-dialog-title-${event.id}`;const dialogClose=element('button','Schließen ✕');dialogClose.type='button';dialogClose.className='secondary event-dialog-close';dialogClose.addEventListener('click',()=>eventDialog.close());dialogHeader.append(dialogTitle,dialogClose);
+        dialogContent=element('div');dialogContent.className='event-dialog-content';eventDialog.append(dialogHeader,dialogContent);card.append(eventDialog);
+        eventDialog.addEventListener('close',()=>{if(eventDialog.open)return;resetDialogContent();tabs.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed','false'));});
+        eventDialog.addEventListener('click',e=>{if(e.target===eventDialog)eventDialog.close();});
+        ['Übersicht','Fotos','Gästezugang & QR','Einstellungen'].forEach((label,i)=>button(tabs,label,()=>showPanel(i,true)));
+        button(summaryActions,'Fotos ansehen & verwalten',()=>showPanel(1,true)).className='primary';
+        button(summaryActions,'Gästezugang & QR öffnen',()=>showPanel(2,true));
         button(accessActions,'Gästelink kopieren',async()=>{try{await navigator.clipboard.writeText(event.guestUrl);message.textContent='Gästelink kopiert.';}catch{const input=element('input');input.value=event.guestUrl;input.readOnly=true;accessSection.append(input);input.select();message.textContent='Bitte den markierten Gästelink kopieren.';}});
         link(accessActions,'Gästeansicht öffnen',event.guestUrl);
         link(photoActions,'Galerie öffnen',event.guestUrl.replace('?','/gallery?'));
@@ -199,12 +227,13 @@
       }
       const danger=element('details');danger.className='event-delete-bar';danger.append(element('summary','Veranstaltung entfernen'));card.append(danger);
       button(danger,'Event und Fotos endgültig löschen',async()=>{if(confirm('Event und alle Fotos endgültig löschen?')){await api(`/api/event/${event.id}`,'DELETE');document.getElementById('photo-manager').hidden=true;await load();}}).className='danger';
+      if(chooser){chooser.classList.add('booking-panel');card.append(chooser);}
       section.append(card);
-      if(activeEvent){card.hidden=event.id!==activeEvent;open.hidden=true;if(event.id===activeEvent){tabs.hidden=false;if(event.guestUrl)await showPanel(0);else document.getElementById('photo-manager').hidden=true;}}else{tabs.hidden=true;panels.forEach(panel=>panel.hidden=true);danger.hidden=true;}
+      if(activeEvent){card.hidden=event.id!==activeEvent;open.hidden=true;if(event.id===activeEvent){tabs.hidden=false;if(event.guestUrl){summarySection.hidden=false;photoManager.hidden=true;}else photoManager.hidden=true;}}else{tabs.hidden=true;panels.forEach(panel=>panel.hidden=true);danger.hidden=true;}
 
     }
   }
-  document.getElementById('close-manager').onclick=()=>{activeEvent=null;history.replaceState(null,'','/dashboard');document.getElementById('photo-manager').hidden=true;load().catch(report);};
+  document.getElementById('close-manager').onclick=()=>{document.getElementById('photo-manager').hidden=true;};
   activeEvent=new URLSearchParams(location.search).get('event');
   document.getElementById('logout').onclick=()=>api('/api/auth/logout','POST').then(()=>location.href='/login').catch(report);
   const deleteAccountForm=document.getElementById('delete-account-form');
