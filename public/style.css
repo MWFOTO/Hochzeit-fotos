@@ -1038,3 +1038,29 @@ body[data-design-theme="afterglow"] { --color-bg: #262324; --color-text: #f5f1ef
 
 .event-form>.onboarding-progress,.event-form>.event-step,.event-form>.step-actions{grid-column:1/-1}
 .account-greeting{color:var(--color-muted);font-size:1.05rem}
+
+/* Clear navigation for the public landing page and organizer area. */
+.landing-body .site-header { max-width: 1320px; }
+.landing-body .brand img, body:not(.landing-body) .site-header .brand img { display:block; width:clamp(138px, 15vw, 190px); height:auto; }
+.landing-body .brand { display:inline-flex; align-items:center; }
+.landing-body .landing-nav { display:flex; align-items:center; justify-content:flex-end; gap:clamp(14px, 2.4vw, 32px); }
+.landing-body .landing-nav > a:not(.button) { color:#c5c8d0; text-decoration:none; font-weight:700; }
+.landing-body .landing-nav > a:not(.button):hover { color:#49d5e8; }
+.account-nav { max-width:1240px; margin:0 auto; padding:10px 28px; display:flex; align-items:center; gap:10px; border:1px solid #ffffff20; border-radius:18px; background:#25272d; }
+.account-nav a { display:inline-flex; justify-content:center; align-items:center; min-height:48px; padding:10px 22px; border:1px solid transparent; border-radius:12px; color:#c4c8d0; text-decoration:none; font-weight:800; }
+.account-nav a:hover, .account-nav a[aria-current="page"] { border-color:#1263d6; background:#15334a; color:#70dff0; box-shadow:0 0 0 2px #1263d688; }
+.account-page { scroll-margin-top:24px; }
+#create-event, #account-settings, #events { scroll-margin-top:24px; }
+.event-tabs { display:flex; flex-direction:column; align-items:stretch; gap:8px; width:min(100%, 330px); margin:22px 0; padding:10px; border:1px solid #ffffff26; border-radius:16px; background:#22242a; }
+.event-tabs button { justify-content:flex-start; width:100%; min-height:48px; text-align:left; border:1px solid transparent; border-radius:10px; color:#b8bdc7; background:transparent; }
+.event-tabs button:hover { background:#ffffff0b; }
+.event-tabs button[aria-pressed="true"] { color:#72dff0!important; background:#15334a!important; border-color:#1263d6!important; box-shadow:0 0 0 2px #1263d688; }
+@media(max-width:760px) {
+ .landing-body .site-header { align-items:center; flex-wrap:wrap; }
+ .landing-body .brand img { width:140px; }
+ .landing-body .landing-nav { flex:1 1 100%; justify-content:space-between; gap:8px; flex-wrap:wrap; }
+ .landing-body .landing-nav > a:not(.button) { font-size:.88rem; }
+ .account-nav { margin:0 16px; padding:8px; gap:6px; flex-wrap:wrap; }
+ .account-nav a { flex:1 1 auto; min-height:44px; padding:9px 12px; font-size:.9rem; }
+ .event-tabs { width:100%; }
+}

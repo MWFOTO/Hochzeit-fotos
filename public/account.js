@@ -2,6 +2,12 @@
   const TERMS_VERSION='2026-11-04-2';
   let csrf;
   const message = document.getElementById('message');
+  const navEvents=document.getElementById('account-nav-events');
+  const navNew=document.getElementById('account-nav-new');
+  const navAccount=document.getElementById('account-nav-account');
+  if(navEvents?.addEventListener)navEvents.addEventListener('click',async e=>{e.preventDefault();activeEvent=null;history.replaceState(null,'','/dashboard');document.getElementById('photo-manager').hidden=true;await load();document.getElementById('events').scrollIntoView({behavior:'smooth',block:'start'});});
+  if(navNew?.addEventListener)navNew.addEventListener('click',async e=>{e.preventDefault();activeEvent=null;history.replaceState(null,'','/dashboard');await load();const panel=document.querySelector('.create-panel');panel.open=true;panel.scrollIntoView({behavior:'smooth',block:'start'});});
+  if(navAccount?.addEventListener)navAccount.addEventListener('click',e=>{e.preventDefault();const panel=document.getElementById('account-settings');panel.open=true;panel.scrollIntoView({behavior:'smooth',block:'start'});});
   const report = error => {message.textContent = error.message;};
   async function api(url, method='GET', body) {
     if(method!=='GET'&&!csrf){const me=await fetch('/api/auth/me');if(me.ok)csrf=(await me.json()).csrf;}
@@ -86,7 +92,7 @@
         }
         card.append(withdrawal);
       }
-      const tabs=element('nav');tabs.className='actions event-tabs';tabs.setAttribute('aria-label','Veranstaltungsbereiche');card.append(tabs);
+      const tabs=element('nav');tabs.className='event-tabs';tabs.setAttribute('aria-label','Veranstaltungsbereiche');card.append(tabs);
       const panels=[];
       const showPanel=index=>{panels.forEach((panel,i)=>panel.hidden=i!==index);tabs.querySelectorAll('button').forEach((b,i)=>b.setAttribute('aria-pressed',String(i===index)));document.getElementById('photo-manager').hidden=index!==0;if(index===0)return manage(event);};
       if(['pending','trial'].includes(event.status)&&!event.readOnly){
