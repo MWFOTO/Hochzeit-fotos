@@ -5,9 +5,15 @@
   const navEvents=document.getElementById('account-nav-events');
   const navNew=document.getElementById('account-nav-new');
   const navAccount=document.getElementById('account-nav-account');
-  if(navEvents?.addEventListener)navEvents.addEventListener('click',async e=>{e.preventDefault();activeEvent=null;history.replaceState(null,'','/dashboard');document.getElementById('photo-manager').hidden=true;await load();document.getElementById('events').scrollIntoView({behavior:'smooth',block:'start'});});
-  if(navNew?.addEventListener)navNew.addEventListener('click',async e=>{e.preventDefault();activeEvent=null;history.replaceState(null,'','/dashboard');await load();const panel=document.querySelector('.create-panel');panel.open=true;panel.scrollIntoView({behavior:'smooth',block:'start'});});
-  if(navAccount?.addEventListener)navAccount.addEventListener('click',e=>{e.preventDefault();const panel=document.getElementById('account-settings');panel.open=true;panel.scrollIntoView({behavior:'smooth',block:'start'});});
+  const sidebar=document.getElementById('account-sidebar');
+  const menuToggle=document.getElementById('sidebar-toggle');
+  const closeSidebar=()=>{sidebar?.classList.remove('is-open');menuToggle?.setAttribute('aria-expanded','false');};
+  const setSection=(section)=>{document.getElementById('topbar-section').textContent=section;[navEvents,navNew,navAccount].forEach((link,index)=>{if(link)link.toggleAttribute('aria-current',['Übersicht','Neues Event','Konto & Profil'][index]===section);});closeSidebar();};
+  if(menuToggle?.addEventListener)menuToggle.addEventListener('click',()=>{const open=sidebar.classList.toggle('is-open');menuToggle.setAttribute('aria-expanded',String(open));});
+  if(navEvents?.addEventListener)navEvents.addEventListener('click',async e=>{e.preventDefault();activeEvent=null;history.replaceState(null,'','/dashboard');document.getElementById('photo-manager').hidden=true;setSection('Übersicht');await load();document.getElementById('dashboard-overview').scrollIntoView({behavior:'smooth',block:'start'});});
+  if(navNew?.addEventListener)navNew.addEventListener('click',async e=>{e.preventDefault();activeEvent=null;history.replaceState(null,'','/dashboard');setSection('Neues Event');await load();const panel=document.querySelector('.create-panel');panel.open=true;panel.scrollIntoView({behavior:'smooth',block:'start'});});
+  if(navAccount?.addEventListener)navAccount.addEventListener('click',e=>{e.preventDefault();setSection('Konto & Profil');const panel=document.getElementById('account-settings');panel.open=true;panel.scrollIntoView({behavior:'smooth',block:'start'});});
+  for(const id of ['dashboard-new-event','list-new-event']){const action=document.getElementById(id);if(action?.addEventListener)action.addEventListener('click',()=>navNew?.click());}
   const report = error => {message.textContent = error.message;};
   async function api(url, method='GET', body) {
     if(method!=='GET'&&!csrf){const me=await fetch('/api/auth/me');if(me.ok)csrf=(await me.json()).csrf;}
@@ -71,7 +77,7 @@
     }
   }
   async function load() {
-    const {events}=await api('/api/events');if(activeEvent&&!events.some(e=>e.id===activeEvent))activeEvent=null;document.querySelector('.create-panel').hidden=!!activeEvent;const section=document.getElementById('events');section.replaceChildren();
+    const {events}=await api('/api/events');if(activeEvent&&!events.some(e=>e.id===activeEvent))activeEvent=null;document.querySelector('.create-panel').hidden=!!activeEvent;document.getElementById('dashboard-overview').hidden=!!activeEvent;document.getElementById('event-list-heading').hidden=!!activeEvent;document.querySelector('.event-list-section').classList.toggle('is-managing-event',!!activeEvent);if(activeEvent)setSection('Veranstaltung');else if(document.getElementById('topbar-section').textContent==='Veranstaltung')setSection('Übersicht');document.getElementById('metric-events').textContent=String(events.length);document.getElementById('metric-photos').textContent=String(events.reduce((sum,event)=>sum+(Number(event.photoCount)||0),0));const section=document.getElementById('events');section.replaceChildren();
     if(!events.length){section.append(element('p','Dein erstes Album wartet auf dich. Erstelle oben eine Veranstaltung.'));document.querySelector('.create-panel').open=true;}
     for(const event of events) {
       const card=element('article');card.className='event-card';const heading=element('div');heading.className='page-heading';const badge=element('span',event.paymentStatus==='disputed'?'Zahlungsstreitfall · Zugang vorerst aktiv':event.status==='refunded'&&event.paymentStatus==='disputed_lost'?'Streitfall verloren · Zugang beendet':event.status==='refunded'?'Erstattet · Zugang beendet':event.paymentStatus==='refunded'?'Erstattet · Zugang bis Ablaufdatum':event.readOnly?'Downloadphase':event.status==='trial'?'Kostenlos testen':event.status==='pilot'?'Geschlossener Praxistest':event.status==='paid'?(event.startsAt>Date.now()?'Start geplant':'Aktiv'):event.status==='pending'?'Zahlung offen':'Abgelaufen');badge.className='status-pill '+(event.status==='pending'||event.paymentStatus==='disputed'?'pending':'');heading.append(element('h2',event.title),badge);card.append(heading);if(activeEvent===event.id){const back=element('a','← Zur Veranstaltungsübersicht');back.href='/dashboard';back.className='button secondary event-back';back.onclick=e=>{e.preventDefault();activeEvent=null;history.replaceState(null,'','/dashboard');document.getElementById('photo-manager').hidden=true;load();};card.append(back);}card.append(element('p',`${event.id}${event.event_date?` · Start ${new Date(event.startsAt).toLocaleDateString('de-DE')}`:''}${event.expires_at?` · Online bis ${new Date(event.expires_at).toLocaleDateString('de-DE')}${event.retentionUntil&&event.retentionUntil!==event.expires_at?` · Downloads bis ${new Date(event.retentionUntil).toLocaleDateString('de-DE')}`:''}`:''}`));card.lastChild.className='event-meta';if(event.paymentStatus==='disputed')card.append(element('p','Der Zahlungsstreitfall wird geprüft. Der Albumzugang bleibt bis zur Entscheidung bestehen.'));if(event.status==='refunded')card.append(element('p',event.paymentStatus==='disputed_lost'?`Die Bank hat den Streitfall zu Gunsten des Karteninhabers entschieden; der Albumzugang wurde beendet. Fotos werden spätestens am ${new Date(event.retentionUntil||event.expires_at).toLocaleDateString('de-DE')} gemäß der Album-Aufbewahrungsfrist gelöscht.`:`Der Vollrefund ist bestätigt; der Gäste- und Veranstalterzugang wurde beendet. Die gespeicherten Fotos werden spätestens am ${new Date(event.retentionUntil||event.expires_at).toLocaleDateString('de-DE')} gemäß der Album-Aufbewahrungsfrist gelöscht.`));if(event.hasInvoice){const invoiceLink=element('a','Rechnung / Zahlungsbeleg öffnen');invoiceLink.href=`/api/event/${encodeURIComponent(event.id)}/invoice`;invoiceLink.target='_blank';invoiceLink.rel='noopener';invoiceLink.className='button secondary';card.append(invoiceLink);}
@@ -94,7 +100,7 @@
       }
       const tabs=element('nav');tabs.className='event-tabs';tabs.setAttribute('aria-label','Veranstaltungsbereiche');card.append(tabs);
       const panels=[];
-      const showPanel=index=>{panels.forEach((panel,i)=>panel.hidden=i!==index);tabs.querySelectorAll('button').forEach((b,i)=>b.setAttribute('aria-pressed',String(i===index)));document.getElementById('photo-manager').hidden=index!==0;if(index===0)return manage(event);};
+      const showPanel=index=>{panels.forEach((panel,i)=>panel.hidden=i!==index);tabs.querySelectorAll('button').forEach((b,i)=>b.setAttribute('aria-pressed',String(i===index)));document.getElementById('photo-manager').hidden=index!==1;if(index===1)return manage(event);};
       if(['pending','trial'].includes(event.status)&&!event.readOnly){
         const chooser=element('details');chooser.className='upgrade-panel';chooser.open=activeEvent===event.id;chooser.append(element('summary','Paket & Buchung'));
         chooser.append(element('p','Kostenlos testen braucht keine Zahlung: Bis zu 25 Fotos kannst du direkt über „Fotos verwalten“ hochladen. Der Endpreis beträgt 49,90 € inkl. 19 % USt. für Privat- und Geschäftskunden. „Testzahlung starten“ öffnet den Stripe-Testcheckout; es wird kein echtes Geld eingezogen.'));
@@ -117,6 +123,11 @@
         card.append(chooser);
       }
       if(event.guestUrl) {
+        const summarySection=element('div');summarySection.className='event-section event-overview-panel';summarySection.append(element('h3','Dein Album auf einen Blick'));
+        const summaryCopy=element('p',`${event.photoCount} ${event.photoCount===1?'Foto':'Fotos'} im Album · ${event.upload_successes} Uploads erfolgreich. Hier kannst du dein Album gestalten, den QR-Code teilen und die Freigabe verwalten.`);summarySection.append(summaryCopy);
+        const summaryActions=element('div');summaryActions.className='actions';summarySection.append(summaryActions);
+        button(summaryActions,'Fotos ansehen & verwalten',()=>showPanel(1)).className='primary';button(summaryActions,'Gästezugang & QR öffnen',()=>showPanel(2));link(summaryActions,'Design-Editor öffnen',`/event/${encodeURIComponent(event.id)}/design`);
+        card.append(summarySection);
         const photosSection=element('div');photosSection.className='event-section';photosSection.append(element('h3','Fotos & Live-Diashow'));card.append(photosSection);const photoActions=element('div');photoActions.className='actions';photosSection.append(photoActions);
         const accessSection=element('div');accessSection.className='event-section';accessSection.append(element('h3','QR-Code & Gästezugang'));card.append(accessSection);const accessActions=element('div');accessActions.className='actions';accessSection.append(accessActions);
         const settings=element('details');settings.className='event-section event-settings';settings.open=true;settings.append(element('summary','Einstellungen & Freigabe'));card.append(settings);const settingsActions=element('div');settingsActions.className='actions';settings.append(element('p',event.readOnly?'Die Uploadzeit ist beendet. Gäste können die vorhandenen Fotos noch bis zum Ende der Downloadphase ansehen.':event.moderation?'Neue Fotos werden erst nach deiner Freigabe für alle Gäste mit Gästelink sichtbar.':'Neue Fotos werden automatisch freigegeben und sind für alle Gäste mit Gästelink sichtbar.'),settingsActions);if(event.event_date&&event.startsAt>Date.now()){const dateLabel=element('label','Veranstaltungsdatum ändern');const dateField=element('input');dateField.type='date';dateField.value=event.event_date;dateField.min=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Berlin'}).format(new Date());dateLabel.append(dateField);settingsActions.append(dateLabel);button(settingsActions,'Datum speichern',async()=>{await api(`/api/event/${event.id}`,'PATCH',{eventDate:dateField.value});message.textContent='Veranstaltungsdatum gespeichert. Der Albumzeitraum wurde angepasst.';await load();});}
@@ -163,8 +174,8 @@
             });
           }
         }
-        panels.push(photosSection,accessSection,settings);
-        ['1 · Fotos','2 · Gäste einladen','3 · Einstellungen'].forEach((label,i)=>button(tabs,label,()=>showPanel(i)));
+        panels.push(summarySection,photosSection,accessSection,settings);
+        ['Übersicht','Fotos','Gästezugang & QR','Einstellungen'].forEach((label,i)=>button(tabs,label,()=>showPanel(i)));
         button(accessActions,'Gästelink kopieren',async()=>{try{await navigator.clipboard.writeText(event.guestUrl);message.textContent='Gästelink kopiert.';}catch{const input=element('input');input.value=event.guestUrl;input.readOnly=true;accessSection.append(input);input.select();message.textContent='Bitte den markierten Gästelink kopieren.';}});
         link(accessActions,'Gästeansicht öffnen',event.guestUrl);
         link(photoActions,'Galerie öffnen',event.guestUrl.replace('?','/gallery?'));
@@ -224,7 +235,7 @@
     eventStepSubmit.hidden=eventStepIndex!==eventSteps.length-1;
   };
   const accountGreeting=document.getElementById('account-greeting');
-  const showGreeting=()=>{if(displayName){accountGreeting.textContent=`Willkommen, ${displayName}. Hier richtest du dein Event ein und verwaltest dein Album.`;accountGreeting.hidden=false;}};
+  const showGreeting=()=>{document.getElementById('welcome-name').textContent=displayName?`, ${displayName}`:'';};
   eventStepBack.addEventListener('click',()=>{eventStepIndex=Math.max(0,eventStepIndex-1);renderEventStep();});
   eventStepNext.addEventListener('click',async()=>{
     const panel=eventSteps[eventStepIndex], invalid=[...panel.querySelectorAll('input,select')].find(input=>!input.checkValidity());
