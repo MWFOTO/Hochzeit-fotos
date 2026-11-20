@@ -8,7 +8,7 @@
   const sidebar=document.getElementById('account-sidebar');
   const menuToggle=document.getElementById('sidebar-toggle');
   const closeSidebar=()=>{sidebar?.classList.remove('is-open');menuToggle?.setAttribute('aria-expanded','false');};
-  const setSection=(section)=>{document.getElementById('topbar-section').textContent=section;[navEvents,navNew,navAccount].forEach((link,index)=>{if(link)link.toggleAttribute('aria-current',['Übersicht','Neues Event','Konto & Profil'][index]===section);});closeSidebar();};
+  const setSection=(section)=>{document.getElementById('topbar-section').textContent=section;[navEvents,navNew,navAccount].forEach((link,index)=>{if(!link)return;if(['Übersicht','Neues Event','Konto & Profil'][index]===section)link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');});closeSidebar();};
   if(menuToggle?.addEventListener)menuToggle.addEventListener('click',()=>{const open=sidebar.classList.toggle('is-open');menuToggle.setAttribute('aria-expanded',String(open));});
   if(navEvents?.addEventListener)navEvents.addEventListener('click',async e=>{e.preventDefault();activeEvent=null;history.replaceState(null,'','/dashboard');document.getElementById('photo-manager').hidden=true;setSection('Übersicht');await load();document.getElementById('dashboard-overview').scrollIntoView({behavior:'smooth',block:'start'});});
   if(navNew?.addEventListener)navNew.addEventListener('click',async e=>{e.preventDefault();activeEvent=null;history.replaceState(null,'','/dashboard');setSection('Neues Event');await load();const panel=document.querySelector('.create-panel');panel.open=true;panel.scrollIntoView({behavior:'smooth',block:'start'});});
