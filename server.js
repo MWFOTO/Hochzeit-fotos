@@ -343,6 +343,7 @@ function createApp(options = {}) {
   const authLimit=rateLimit({windowMs:15*60*1000,limit:20,standardHeaders:'draft-8',legacyHeaders:false});
   const uploadLimit=rateLimit({windowMs:60*1000,limit:20,standardHeaders:'draft-8',legacyHeaders:false});
   const guestbookLimit=rateLimit({windowMs:15*60*1000,limit:5,standardHeaders:'draft-8',legacyHeaders:false});
+  const experienceReviewLimit=rateLimit({windowMs:6*60*60*1000,limit:3,standardHeaders:'draft-8',legacyHeaders:false});
   function loginRequired(req,res,next) { if(!req.user) return fail(res,401,'Bitte anmelden.'); if(deletingUsers.has(req.user.id)) return fail(res,409,'Kontolöschung läuft. Bitte kurz warten.'); next(); }
   async function passwordHash(password,salt=random()) {return `${salt}:${(await scrypt(password,salt,64)).toString('hex')}`;}
   function startSession(req,res,user) {
@@ -426,6 +427,21 @@ function createApp(options = {}) {
     res.json({freeBytes:diskFreeBytes,totalBytes:diskTotalBytes,usedBytes:diskTotalBytes-diskFreeBytes,warning:uploadDisk.warning,uploadsPaused:uploadDisk.uploadsPaused,location:'server-disk',uploadDisk});
   });
   app.get('/api/plans',(req,res)=>{const plan=PLANS.event;res.json({event:{...plan,photoLimit:null,storageLimitMB:Math.floor(Number(cfg.MAX_EVENT_BYTES||25*1024**3)/1024**2),storageLimitGB:Number((Number(cfg.MAX_EVENT_BYTES||25*1024**3)/1024**3).toFixed(1))}});});
+  app.get('/api/reviews',(req,res)=>{
+    const reviews=db.prepare('SELECT rating,message,created_at FROM experience_reviews WHERE approved=1 AND publish_consent=1 ORDER BY created_at DESC LIMIT 30').all();
+    const summary=db.prepare('SELECT COUNT(*) count,AVG(rating) average FROM experience_reviews WHERE approved=1 AND publish_consent=1').get();
+    res.json({reviews,summary:{count:Number(summary.count||0),average:summary.average===null?null:Number(Number(summary.average).toFixed(1))}});
+  });
+  app.post('/api/reviews',experienceReviewLimit,(req,res)=>{
+    if(String(req.body?.website||'').trim())return res.status(201).json({success:true});
+    const rating=Number(req.body?.rating),message=String(req.body?.message||'').trim(),tried=req.body?.tried===true,publishConsent=req.body?.publishConsent===true;
+    if(!Number.isInteger(rating)||rating<1||rating>5)return fail(res,400,'Bitte wähle eine Sternebewertung aus.');
+    if(message.length<12||message.length>1200)return fail(res,400,'Bitte schreibe mindestens 12 und höchstens 1.200 Zeichen.');
+    if(!tried)return fail(res,400,'Bitte bestätige, dass du FinalSnap selbst ausprobiert hast.');
+    const now=Date.now();
+    db.prepare('INSERT INTO experience_reviews (id,rating,message,tester_attested,publish_consent,publish_consent_at,approved,created_at) VALUES (?,?,?,?,?,?,0,?)').run(crypto.randomUUID(),rating,message,1,publishConsent?1:0,publishConsent?now:null,now);
+    res.status(201).json({success:true,message:'Danke für deine Rückmeldung. Wir prüfen sie, bevor etwas öffentlich erscheint.'});
+  });
   app.get('/api/events',loginRequired,(req,res)=>{
     const events=db.prepare(`SELECT e.*, COUNT(p.id) photoCount, COALESCE(SUM(p.bytes),0) storageBytes
       FROM events e LEFT JOIN photos p ON p.event_id=e.id
@@ -479,6 +495,23 @@ function createApp(options = {}) {
     if(!user?.email_verified_at||!paymentAdminEmails.has(String(req.user.email||'').toLowerCase()))return fail(res,403,'Kein Zugriff auf die Zahlungsverwaltung.');
     next();
   }
+  app.get('/ops/reviews',paymentAdminRequired,(req,res)=>res.sendFile(path.join(__dirname,'public','reviews-admin.html')));
+  app.get('/api/admin/reviews',paymentAdminRequired,(req,res)=>{
+    const reviews=db.prepare('SELECT id,rating,message,tester_attested,publish_consent,publish_consent_at,approved,created_at FROM experience_reviews ORDER BY created_at DESC LIMIT 200').all();
+    res.json({reviews});
+  });
+  app.patch('/api/admin/reviews/:reviewId',paymentAdminRequired,(req,res)=>{
+    const review=db.prepare('SELECT * FROM experience_reviews WHERE id=?').get(req.params.reviewId);
+    if(!review)return fail(res,404,'Rückmeldung nicht gefunden.');
+    if(req.body?.approved===true&&!review.publish_consent)return fail(res,409,'Für diese Rückmeldung liegt keine Zustimmung zur Veröffentlichung vor.');
+    db.prepare('UPDATE experience_reviews SET approved=? WHERE id=?').run(req.body?.approved===true?1:0,review.id);
+    res.json({success:true});
+  });
+  app.delete('/api/admin/reviews/:reviewId',paymentAdminRequired,(req,res)=>{
+    const result=db.prepare('DELETE FROM experience_reviews WHERE id=?').run(req.params.reviewId);
+    if(!result.changes)return fail(res,404,'Rückmeldung nicht gefunden.');
+    res.json({success:true});
+  });
   app.get('/ops/payments',paymentAdminRequired,(req,res)=>res.sendFile(path.join(__dirname,'public','payments-admin.html')));
   app.get('/ops/backups',paymentAdminRequired,(req,res)=>res.sendFile(path.join(__dirname,'public','backups-admin.html')));
   app.get('/api/admin/backups',paymentAdminRequired,(req,res)=>{
@@ -1005,6 +1038,7 @@ function createApp(options = {}) {
       db.prepare('DELETE FROM sessions WHERE expires_at<=?').run(Date.now());
       db.prepare('DELETE FROM email_verifications WHERE expires_at<=?').run(Date.now());
       db.prepare('DELETE FROM password_resets WHERE expires_at<=?').run(Date.now());
+      db.prepare('DELETE FROM experience_reviews WHERE created_at<?').run(Date.now()-365*86400000);
       for(const entry of fs.readdirSync(temp)) {const file=path.join(temp,entry);if(fs.statSync(file).mtimeMs<Date.now()-86400000) fs.rmSync(file,{force:true});}
     };
     if(photoStorage.mode==='local') {for(const e of expired) {if(!busy.has(e.id)){fs.rmSync(path.join(root,e.id),{recursive:true,force:true});db.transaction(()=>{db.prepare('DELETE FROM photos WHERE event_id=?').run(e.id);db.prepare('DELETE FROM guestbook_entries WHERE event_id=?').run(e.id);db.prepare('DELETE FROM video_greetings WHERE event_id=?').run(e.id);db.prepare("UPDATE events SET status='expired', deleted_at=?, guest_token=NULL WHERE id=?").run(Date.now(),e.id);})();}}pruneRecords();return;}
@@ -1052,7 +1086,7 @@ function createApp(options = {}) {
     res.sendFile(path.join(pub,'video-grussbox.html'));
   });
   // Only intended public assets; source code and generic HTML routes cannot bypass guards.
-  for(const file of ['style.css','design-editor.css','design-editor.js','upload.js','slideshow.js','guest-access.js','account.js','verify-email.js','password-recovery.js','games.js','guestbook.js','video-grussbox.js','payments-admin.js','backups-admin.js','landing.js','finalsnap-logo.webp','success.js','gallery-init.js','admin.js','johanna-bastian.png','photographer.webp','event-wedding.webp','event-birthday.jpg','event-summer.jpg','event-company.jpg']) app.get(`/${file}`,(req,res)=>res.sendFile(path.join(pub,file)));
+  for(const file of ['style.css','design-editor.css','design-editor.js','upload.js','slideshow.js','guest-access.js','account.js','verify-email.js','password-recovery.js','games.js','guestbook.js','video-grussbox.js','payments-admin.js','backups-admin.js','landing.js','reviews.js','reviews-admin.js','finalsnap-logo.webp','success.js','gallery-init.js','admin.js','johanna-bastian.png','photographer.webp','event-wedding.webp','event-birthday.jpg','event-summer.jpg','event-company.jpg']) app.get(`/${file}`,(req,res)=>res.sendFile(path.join(pub,file)));
   // Liveness stays cheap for the host's restart check. Readiness checks critical dependencies.
   app.get('/health',(req,res)=>res.json({ok:true}));
   app.get('/ready',async(req,res)=>{

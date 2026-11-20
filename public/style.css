@@ -1280,6 +1280,49 @@ body[data-design-theme="afterglow"] { --color-bg: #262324; --color-text: #f5f1ef
 .withdrawal-action .withdrawal-start:hover { background:#41454e; }
 .withdrawal-action .withdrawal-form { margin-top:12px; }
 
+.landing-body .experience-heading { display:flex; align-items:flex-end; justify-content:space-between; gap:24px; }
+.landing-body .experience-heading h2 { max-width:760px; }
+.landing-body .experience-heading .experience-lead { margin-bottom:0; }
+.landing-body .review-summary { flex:0 0 auto; color:var(--landing-muted); font-size:.9rem; text-align:right; }
+.landing-body .review-summary strong { display:block; color:var(--landing-text); font-size:1.5rem; }
+.landing-body .experience-layout { display:grid; grid-template-columns:minmax(0,1.05fr) minmax(320px,.95fr); gap:26px; align-items:start; margin-top:30px; }
+.landing-body .review-list { display:grid; gap:13px; }
+.landing-body .review-empty, .landing-body .review-card { display:flex; gap:15px; padding:20px; border:1px solid #ffffff1c; border-radius:16px; background:#17191c70; }
+.landing-body .review-empty>span { color:var(--landing-cyan); font-size:1.5rem; }
+.landing-body .review-empty strong, .landing-body .review-card strong { color:var(--landing-text); }
+.landing-body .review-empty p, .landing-body .review-card p { margin:5px 0 0; color:var(--landing-muted); font-size:.94rem; line-height:1.6; }
+.landing-body .review-card { display:block; }
+.landing-body .review-card .review-stars { color:#ffd64b; letter-spacing:.08em; font-size:1.05rem; }
+.landing-body .review-card .review-date { margin-top:10px; color:#9ba1ac; font-size:.8rem; }
+.landing-body .experience-form { display:grid; gap:13px; padding:23px; border:1px solid #49d5e83b; border-radius:18px; background:#17191c70; }
+.landing-body .experience-form h3 { margin:0; font-size:1.2rem; }
+.landing-body .rating-fieldset { margin:0; padding:0; border:0; }
+.landing-body .rating-fieldset legend, .landing-body .review-label { margin-bottom:8px; color:#e8e9ed; font-size:.93rem; font-weight:750; }
+.landing-body .rating-input { display:flex; flex-direction:row-reverse; justify-content:flex-end; gap:4px; }
+.landing-body .rating-input input { position:absolute; width:1px; height:1px; opacity:0; }
+.landing-body .rating-input label { padding:0 2px; color:#69707b; font-size:2rem; line-height:1.2; cursor:pointer; }
+.landing-body .rating-input input:checked+label,
+.landing-body .rating-input input:checked+label~label,
+.landing-body .rating-input label:hover,
+.landing-body .rating-input label:hover~label { color:#ffd64b; }
+.landing-body .rating-input input:focus-visible+label { outline:3px solid var(--landing-cyan); outline-offset:2px; border-radius:4px; }
+.landing-body .experience-form textarea { width:100%; min-height:115px; resize:vertical; padding:12px 14px; border:1px solid #ffffff30; border-radius:11px; color:#f1f2f4; background:#101216; font:inherit; font-size:.94rem; }
+.landing-body .experience-form textarea::placeholder { color:#a6aab3; }
+.landing-body .review-check { display:flex; align-items:flex-start; gap:10px; color:#c7cbd2; font-size:.86rem; line-height:1.5; cursor:pointer; }
+.landing-body .review-check input { width:18px; height:18px; flex:0 0 auto; margin:2px 0 0; accent-color:var(--landing-cyan); }
+.landing-body .review-honeypot { position:absolute!important; width:1px!important; height:1px!important; overflow:hidden!important; clip-path:inset(50%)!important; white-space:nowrap!important; }
+.landing-body .review-form-status { min-height:1.45em; margin:0; color:var(--landing-cyan); font-size:.9rem; }
+.landing-body .review-privacy-note { margin:0; color:#aeb3bd; font-size:.79rem; line-height:1.55; }
+.landing-body .review-privacy-note a { color:#9beaf2; }
+@media (max-width: 760px) {
+  .landing-body .experience-heading { display:block; }
+  .landing-body .review-summary { margin-top:15px; text-align:left; }
+  .landing-body .experience-layout { grid-template-columns:1fr; }
+}
+@media (max-width: 540px) {
+  .landing-body .experience-form { padding:19px; }
+}
+
 @media (max-width: 760px) {
   .landing-body .site-header { padding: 12px 18px; }
   .landing-body .landing-nav { flex: 1 1 100%; justify-content: flex-start; flex-wrap: nowrap; overflow-x: auto; padding: 2px 0 7px; scrollbar-width: thin; }

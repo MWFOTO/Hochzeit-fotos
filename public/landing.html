@@ -124,13 +124,38 @@
     <section id="erfahrungen" class="section experience-section">
       <div class="experience-panel">
         <span class="eyebrow">EURE ERFAHRUNGEN</span>
-        <h2>Jede Feier erzählt ihre eigene Geschichte.</h2>
-        <p class="experience-lead">Hier entsteht Platz für echte Rückmeldungen von Gastgebern und Gästen.</p>
-        <div class="experience-note">
-          <span class="experience-mark" aria-hidden="true">★</span>
-          <div><strong>Die ersten Stimmen folgen</strong><p>FinalSnap ist noch neu. Sobald erste Gastgeber ihre Erfahrung mit uns teilen, findest du sie hier – persönlich und unverfälscht.</p></div>
+        <div class="experience-heading">
+          <div><h2>Du hast FinalSnap ausprobiert?</h2><p class="experience-lead">Deine ehrliche Rückmeldung hilft uns, FinalSnap für die nächsten Feiern besser zu machen.</p></div>
+          <div id="review-summary" class="review-summary" aria-live="polite"></div>
         </div>
-        <a class="button secondary" href="mailto:info@finalsnap.de?subject=Meine%20FinalSnap-Erfahrung">Erfahrung mit FinalSnap teilen</a>
+        <div class="experience-layout">
+          <div class="review-column">
+            <div id="review-list" class="review-list" aria-live="polite">
+              <div class="review-empty"><span aria-hidden="true">★</span><div><strong>Deine Erfahrung zählt</strong><p>Freigegebene Rückmeldungen erscheinen hier nach einer kurzen Prüfung.</p></div></div>
+            </div>
+          </div>
+          <form id="experience-form" class="experience-form">
+            <h3>Rückmeldung abgeben</h3>
+            <fieldset class="rating-fieldset">
+              <legend>Wie bewertest du FinalSnap?</legend>
+              <div class="rating-input" role="radiogroup" aria-label="Sternebewertung">
+                <input id="rating-5" type="radio" name="rating" value="5" required><label for="rating-5" aria-label="5 von 5 Sternen" title="5 von 5 Sternen">★</label>
+                <input id="rating-4" type="radio" name="rating" value="4"><label for="rating-4" aria-label="4 von 5 Sternen" title="4 von 5 Sternen">★</label>
+                <input id="rating-3" type="radio" name="rating" value="3"><label for="rating-3" aria-label="3 von 5 Sternen" title="3 von 5 Sternen">★</label>
+                <input id="rating-2" type="radio" name="rating" value="2"><label for="rating-2" aria-label="2 von 5 Sternen" title="2 von 5 Sternen">★</label>
+                <input id="rating-1" type="radio" name="rating" value="1"><label for="rating-1" aria-label="1 von 5 Sternen" title="1 von 5 Sternen">★</label>
+              </div>
+            </fieldset>
+            <label class="review-label" for="review-message">Was hat gut funktioniert oder was können wir verbessern?</label>
+            <textarea id="review-message" name="message" rows="4" minlength="12" maxlength="1200" required placeholder="Erzähl uns kurz von deiner Erfahrung …"></textarea>
+            <label class="review-check"><input type="checkbox" name="tried" required><span>Ich habe FinalSnap selbst ausprobiert und gebe eine ehrliche Rückmeldung.</span></label>
+            <label class="review-check"><input type="checkbox" name="publishConsent"><span>Ich bin einverstanden, dass meine Rückmeldung nach Prüfung anonym auf dieser Website veröffentlicht wird. Diese Zustimmung ist freiwillig.</span></label>
+            <div class="review-honeypot" aria-hidden="true"><label for="review-website">Website</label><input id="review-website" name="website" tabindex="-1" autocomplete="off"></div>
+            <button class="button primary" type="submit">Bewertung senden</button>
+            <p id="review-form-status" class="review-form-status" role="status" aria-live="polite"></p>
+            <p class="review-privacy-note">Wir fragen weder Namen noch E-Mail-Adresse ab. Ohne deine separate Zustimmung bleibt die Rückmeldung intern. Veröffentlichungen werden vorher geprüft. <a href="/datenschutz">Datenschutzhinweise</a></p>
+          </form>
+        </div>
       </div>
     </section>
 
@@ -184,5 +209,6 @@
   </footer>
 
   <script src="/landing.js"></script>
+  <script src="/reviews.js"></script>
 </body>
 </html>
