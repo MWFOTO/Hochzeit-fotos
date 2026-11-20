@@ -240,11 +240,14 @@
   eventStepNext.addEventListener('click',async()=>{
     const panel=eventSteps[eventStepIndex], invalid=[...panel.querySelectorAll('input,select')].find(input=>!input.checkValidity());
     if(invalid){invalid.reportValidity();return;}
-    if(eventStepIndex===0){
-      try{const profile=await api('/api/auth/profile','PATCH',{displayName:organizerNameInput.value});displayName=profile.displayName;showGreeting();}
-      catch(error){report(error);return;}
-    }
-    eventStepIndex=Math.min(eventSteps.length-1,eventStepIndex+1);renderEventStep();
+    eventStepNext.disabled=true;
+    const stepError=document.getElementById('event-step-error');
+    if(stepError){stepError.hidden=true;stepError.textContent='';}
+    try{
+      if(eventStepIndex===0){const profile=await api('/api/auth/profile','PATCH',{displayName:organizerNameInput.value});displayName=profile.displayName;showGreeting();}
+      eventStepIndex=Math.min(eventSteps.length-1,eventStepIndex+1);renderEventStep();
+    }catch(error){report(error);if(stepError){stepError.textContent=error.message||'Dein Name konnte gerade nicht gespeichert werden. Bitte versuche es erneut.';stepError.hidden=false;stepError.scrollIntoView({behavior:'smooth',block:'center'});}}
+    finally{eventStepNext.disabled=false;}
   });
   eventTitleInput.addEventListener('input',()=>{if(!slugEdited)eventIdInput.value=normalizeEventId(eventTitleInput.value);});
   eventIdInput.addEventListener('input',()=>{slugEdited=true;});
