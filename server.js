@@ -1045,7 +1045,24 @@ function createApp(options = {}) {
     return (async()=>{for(const e of expired) await erase(e);pruneRecords();})();
   }
   const pub=path.join(__dirname,'public');
-  app.get('/',(req,res)=>res.sendFile(path.join(pub,'landing.html')));
+  app.get('/',(req,res)=>{
+    res.set('Content-Security-Policy',[
+      "default-src 'self'",
+      "base-uri 'self'",
+      "connect-src 'self' https://*.trustpilot.com",
+      "font-src 'self' https: data:",
+      "form-action 'self'",
+      "frame-ancestors 'self'",
+      "frame-src https://*.trustpilot.com",
+      "img-src 'self' data: blob: https://*.trustpilot.com",
+      "object-src 'none'",
+      "script-src 'self' https://widget.trustpilot.com",
+      "script-src-attr 'none'",
+      "style-src 'self' 'unsafe-inline'",
+      ...(baseUrl.protocol==='https:'?['upgrade-insecure-requests']:[])
+    ].join('; '));
+    res.sendFile(path.join(pub,'landing.html'));
+  });
   app.get(['/forgot-password','/reset-password'],(req,res)=>res.sendFile(path.join(pub,'password-recovery.html')));
   app.get('/verify-email',(req,res)=>res.sendFile(path.join(pub,'verify-email.html')));
   app.get('/impressum',(req,res)=>res.sendFile(path.join(pub,'impressum.html')));

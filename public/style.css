@@ -1287,6 +1287,10 @@ body[data-design-theme="afterglow"] { --color-bg: #262324; --color-text: #f5f1ef
 .landing-body .review-summary strong { display:block; color:var(--landing-text); font-size:1.5rem; }
 .landing-body .experience-layout { display:grid; grid-template-columns:minmax(0,1.05fr) minmax(320px,.95fr); gap:26px; align-items:start; margin-top:30px; }
 .landing-body .review-list { display:grid; gap:13px; }
+.landing-body .trustpilot-invite { display:grid; gap:12px; margin-bottom:16px; padding:18px 20px; border:1px solid #ffffff24; border-radius:16px; background:#17191c70; }
+.landing-body .trustpilot-invite h3 { margin:0; color:var(--landing-text); font-size:1rem; }
+.landing-body .trustpilot-invite p { margin:5px 0 0; color:var(--landing-muted); font-size:.88rem; line-height:1.5; }
+.landing-body .trustpilot-widget { width:100%; min-height:52px; }
 .landing-body .review-empty, .landing-body .review-card { display:flex; gap:15px; padding:20px; border:1px solid #ffffff1c; border-radius:16px; background:#17191c70; }
 .landing-body .review-empty>span { color:var(--landing-cyan); font-size:1.5rem; }
 .landing-body .review-empty strong, .landing-body .review-card strong { color:var(--landing-text); }
