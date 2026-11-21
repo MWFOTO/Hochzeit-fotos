@@ -1405,12 +1405,12 @@ body[data-design-theme="afterglow"] { --color-bg: #262324; --color-text: #f5f1ef
   .landing-body .event-phone-click,.landing-body .event-phone-tap { animation:none; }
 }
 
-/* Give the landing-page navigation its own visual frame. */
-.landing-body .landing-nav { min-width:0; padding:8px; border:1px solid #ffffff24; border-radius:17px; background:#1b1d23b8; box-shadow:0 10px 30px #0002; }
-.landing-body .landing-nav > a:not(.button) { padding:10px 11px; border-radius:10px; white-space:nowrap; }
-.landing-body .landing-nav > a:not(.button):hover { background:#49d5e812; }
+/* Frame each landing-page navigation item individually. */
+.landing-body .landing-nav { min-width:0; padding:0; border:0; border-radius:0; background:transparent; box-shadow:none; }
+.landing-body .landing-nav > a:not(.button) { display:inline-flex; align-items:center; justify-content:center; padding:10px 13px; border:1px solid #ffffff28; border-radius:12px; white-space:nowrap; transition:border-color .16s,background .16s,color .16s; }
+.landing-body .landing-nav > a:not(.button):hover { border-color:#49d5e8aa; background:#49d5e812; }
 .landing-body .landing-nav .button { white-space:nowrap; }
 @media(max-width:760px) {
-  .landing-body .landing-nav { width:100%; padding:7px; gap:7px; border-radius:14px; }
+  .landing-body .landing-nav { width:100%; padding:0; gap:7px; }
   .landing-body .landing-nav > a:not(.button) { padding:8px 10px; }
 }
