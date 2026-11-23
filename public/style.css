@@ -1668,6 +1668,29 @@ body[data-design-theme="afterglow"] { --color-bg: #262324; --color-text: #f5f1ef
   background: #090a0b;
   object-fit: contain;
 }
+.landing-body .mascot-motion-play {
+  position: absolute;
+  z-index: 3;
+  top: 50%;
+  left: 50%;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 48px;
+  padding: 10px 17px;
+  border: 1px solid #ffffff70;
+  border-radius: 999px;
+  color: #101a1d;
+  background: var(--landing-cyan);
+  box-shadow: 0 8px 30px #0008, 0 0 0 8px #49d5e82b;
+  font-size: .88rem;
+  font-weight: 800;
+  white-space: nowrap;
+  transform: translate(-50%,-50%);
+  cursor: pointer;
+}
+.landing-body .mascot-motion-play:hover { background: #72e4f1; }
+.landing-body .mascot-motion-play span:first-child { font-size: 1.1rem; }
 .landing-body .motion-video-tall { display: none; }
 .landing-body .motion-bolt {
   position: absolute;

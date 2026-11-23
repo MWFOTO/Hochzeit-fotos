@@ -167,6 +167,7 @@
         <video class="mascot-motion-video" muted playsinline loop preload="none" poster="/animations/finalsnap-mascot-landscape-poster.jpg" aria-label="Das FinalSnap-Maskottchen fotografiert auf einer Party und zeigt das FinalSnap-Logo">
           <source data-src="/animations/finalsnap-mascot-landscape.mp4" type="video/mp4">
         </video>
+        <button class="mascot-motion-play" type="button" aria-label="FinalSnap-Animation abspielen"><span aria-hidden="true">▶</span><span>Animation abspielen</span></button>
       </div>
     </section>
 
@@ -283,26 +284,33 @@
       }, { once: true });
     });
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (!reducedMotion) {
-      const activateVideo = video => {
-        if (video.dataset.initialized !== 'true') {
-          const source = video.querySelector('source[data-src]');
-          if (source) source.src = source.dataset.src;
-          video.load();
-          video.dataset.initialized = 'true';
-        }
-        video.play().catch(() => {});
-      };
-      const supportingVideos = document.querySelectorAll('.mascot-motion-video');
-      if ('IntersectionObserver' in window) {
-        const motionObserver = new IntersectionObserver(entries => entries.forEach(entry => {
-          if (entry.isIntersecting) activateVideo(entry.target);
-          else entry.target.pause();
-        }), { rootMargin: '80px' });
-        supportingVideos.forEach(video => motionObserver.observe(video));
-      } else {
-        supportingVideos.forEach(activateVideo);
+    const supportingVideos = document.querySelectorAll('.mascot-motion-video');
+    const activateVideo = video => {
+      if (video.dataset.initialized !== 'true') {
+        const source = video.querySelector('source[data-src]');
+        if (source) source.src = source.dataset.src;
+        video.load();
+        video.dataset.initialized = 'true';
       }
+      video.play().catch(() => {
+        const playButton = video.closest('.mascot-motion-stage')?.querySelector('.mascot-motion-play');
+        if (playButton) playButton.hidden = false;
+      });
+    };
+    supportingVideos.forEach(video => {
+      const playButton = video.closest('.mascot-motion-stage')?.querySelector('.mascot-motion-play');
+      video.addEventListener('playing', () => { if (playButton) playButton.hidden = true; });
+      playButton?.addEventListener('click', () => activateVideo(video));
+      if (reducedMotion && playButton) playButton.hidden = false;
+    });
+    if (!reducedMotion && 'IntersectionObserver' in window) {
+      const motionObserver = new IntersectionObserver(entries => entries.forEach(entry => {
+        if (entry.isIntersecting) activateVideo(entry.target);
+        else entry.target.pause();
+      }), { rootMargin: '80px' });
+      supportingVideos.forEach(video => motionObserver.observe(video));
+    } else if (!reducedMotion) {
+      supportingVideos.forEach(activateVideo);
     }
   </script>
 </body>
