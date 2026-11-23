@@ -870,9 +870,9 @@ html { scroll-behavior: smooth; }
   .landing-body .hero-copy > p { max-width: 560px; font-size: 1.03rem; }
   .landing-body .hero-copy .actions { align-items: stretch; }
   .landing-body .hero-copy .actions .button { flex: 1 1 auto; }
-  .landing-body .hero-art { display: flex; flex-direction: column; justify-content: flex-start; width: min(100%, 500px); min-height: 0; margin: 8px auto 0; gap: 14px; }
-  .landing-body .hero-art .mascot { top: auto; bottom: auto; left: auto; width: min(100%, 390px); height: auto; max-height: none; object-position: center; transform: none; }
-  .phone { top: auto; right: auto; bottom: auto; width: min(68vw, 230px); max-width: 230px; transform: none; }
+  .landing-body .hero-art { display: grid; grid-template-columns: minmax(0,1fr) minmax(125px,.72fr); align-items: center; width: min(100%, 460px); min-height: 0; margin: 8px auto 0; gap: 8px; }
+  .landing-body .hero-art .mascot { top: auto; bottom: auto; left: auto; width: 100%; height: auto; max-height: none; object-position: center; transform: none; }
+  .phone { top: auto; right: auto; bottom: auto; width: 100%; max-width: 185px; transform: none; }
   .phone-screen { min-height: 315px; padding: 8px 9px 11px; }
   .phone-status { padding-bottom: 10px; }
   .phone-heading { padding-bottom: 10px; }
@@ -1469,4 +1469,253 @@ body[data-design-theme="afterglow"] { --color-bg: #262324; --color-text: #f5f1ef
     line-height:1.2;
     font-size:.82rem;
   }
+}
+
+/* YouTube explainer preview: request YouTube only after an intentional play click. */
+.landing-body .why-video-section {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 350px);
+  align-items: center;
+  gap: clamp(30px, 7vw, 96px);
+  max-width: 1000px;
+  margin-inline: auto;
+}
+.landing-body .why-video-copy h2 { max-width: 620px; }
+.landing-body .why-video-copy > p:not(.video-privacy-note) {
+  max-width: 560px;
+  margin: 20px 0 0;
+  color: var(--landing-muted);
+  font-size: clamp(1rem, 1.5vw, 1.15rem);
+  line-height: 1.75;
+}
+.landing-body .why-video-copy .video-privacy-note {
+  max-width: 510px;
+  margin: 18px 0 0;
+  color: #aab1bd;
+  font-size: .78rem;
+  line-height: 1.5;
+}
+.landing-body .why-video-card {
+  width: 100%;
+  margin: 0;
+  padding: 9px;
+  border: 1px solid #49d5e85c;
+  border-radius: 24px;
+  background: linear-gradient(145deg,#ffffff12,#ffffff04);
+  box-shadow: 0 22px 60px #0004;
+}
+.landing-body .why-video-frame {
+  width: 100%;
+  overflow: hidden;
+  aspect-ratio: 9 / 16;
+  border-radius: 17px;
+  background: #101216;
+}
+.landing-body .why-video-launch {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: inherit;
+  background: #101216;
+  cursor: pointer;
+}
+.landing-body .why-video-launch::after {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg,#10121600 45%,#10121665 100%);
+  content: "";
+}
+.landing-body .why-video-launch img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.landing-body .why-video-play {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  width: 76px;
+  height: 76px;
+  place-items: center;
+  padding-left: 5px;
+  border: 1px solid #ffffff9c;
+  border-radius: 50%;
+  color: #162128;
+  background: var(--landing-cyan);
+  box-shadow: 0 8px 35px #0008, 0 0 0 10px #49d5e83a;
+  font-size: 1.7rem;
+  transform: translate(-50%,-50%);
+  transition: transform .18s ease, box-shadow .18s ease;
+}
+.landing-body .why-video-launch:hover .why-video-play {
+  box-shadow: 0 8px 35px #0008, 0 0 0 15px #49d5e84a;
+  transform: translate(-50%,-50%) scale(1.06);
+}
+.landing-body .why-video-frame iframe { display:block; width:100%; height:100%; border:0; }
+.landing-body .why-video-card figcaption {
+  padding: 10px 8px 2px;
+  color: #aab1bd;
+  font-size: .78rem;
+  text-align: center;
+}
+.landing-body .why-video-card noscript { display:block; padding:8px; font-size:.85rem; text-align:center; }
+@media (max-width: 760px) {
+  .landing-body .why-video-section { grid-template-columns: 1fr; gap: 26px; }
+  .landing-body .why-video-copy { order: 1; }
+  .landing-body .why-video-card { order: 2; width: min(100%, 340px); justify-self: center; }
+}
+
+/* FinalSnap lightning details and device-specific mascot motion clips. */
+.landing-body .hero-art::before,
+.landing-body .hero-art::after {
+  position: absolute;
+  z-index: 0;
+  display: block;
+  content: "";
+  pointer-events: none;
+  clip-path: polygon(59% 0,100% 0,69% 39%,96% 39%,17% 100%,41% 55%,6% 55%);
+  filter: drop-shadow(0 0 12px #49d5e8a6);
+  animation: finalsnap-lightning 5.2s linear infinite;
+}
+.landing-body .hero-copy { min-width: 0; }
+.landing-body .hero h1 { max-width: 100%; font-size: clamp(2.85rem,4.5vw,4.2rem); }
+.landing-body .hero-art::before {
+  top: 10%;
+  left: 3%;
+  width: 45px;
+  height: 92px;
+  background: linear-gradient(160deg,#8cf3ff,#49d5e8 56%,#ffd43b);
+  opacity: .32;
+}
+.landing-body .hero-art::after {
+  right: 3%;
+  bottom: 18%;
+  width: 34px;
+  height: 70px;
+  background: linear-gradient(150deg,#fff28a,#ffd43b 57%,#49d5e8);
+  opacity: .24;
+  animation-delay: 1.4s;
+}
+@keyframes finalsnap-lightning {
+  0%, 87%, 100% { opacity: .22; }
+  89% { opacity: .95; }
+  91% { opacity: .30; }
+  93% { opacity: .82; }
+  95% { opacity: .24; }
+}
+.landing-body .mascot-motion-section {
+  display: grid;
+  grid-template-columns: minmax(0,.85fr) minmax(0,1.15fr);
+  align-items: center;
+  gap: clamp(28px,6vw,78px);
+  max-width: 1100px;
+  margin-inline: auto;
+}
+.landing-body .mascot-motion-copy h2 { max-width: 520px; }
+.landing-body .mascot-motion-copy > p {
+  max-width: 500px;
+  margin: 18px 0 0;
+  color: var(--landing-muted);
+  font-size: clamp(1rem,1.5vw,1.12rem);
+  line-height: 1.75;
+}
+.landing-body .motion-note {
+  display: inline-block;
+  margin-top: 20px;
+  color: #b9c4ca;
+  font-size: .8rem;
+}
+.landing-body .mascot-motion-stage {
+  position: relative;
+  z-index: 0;
+  display: grid;
+  align-items: center;
+  justify-items: center;
+  width: 100%;
+  overflow: visible;
+  aspect-ratio: 16 / 9;
+  isolation: isolate;
+  border: 1px solid #49d5e866;
+  border-radius: 26px;
+  background: #0d1015 url('/animations/finalsnap-mascot-landscape-poster.jpg') center / cover no-repeat;
+  box-shadow: 0 25px 70px #0006, 0 0 32px #49d5e81a;
+}
+.landing-body .mascot-motion-stage::before {
+  position: absolute;
+  z-index: 0;
+  inset: -13px 10% auto;
+  height: 2px;
+  background: linear-gradient(90deg,transparent,#49d5e8,#ffd43b,transparent);
+  opacity: .75;
+  content: "";
+  filter: drop-shadow(0 0 7px #49d5e8);
+}
+.landing-body .mascot-motion-video {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 25px;
+  background: #090a0b;
+  object-fit: contain;
+}
+.landing-body .motion-video-tall { display: none; }
+.landing-body .motion-bolt {
+  position: absolute;
+  z-index: 2;
+  width: 34px;
+  height: 68px;
+  clip-path: polygon(59% 0,100% 0,69% 39%,96% 39%,17% 100%,41% 55%,6% 55%);
+  filter: drop-shadow(0 0 10px currentColor);
+  pointer-events: none;
+  animation: finalsnap-lightning 5.2s linear infinite;
+}
+.landing-body .motion-bolt-cyan { top: -18px; left: 7%; color: #49d5e8; background: linear-gradient(#b7f8ff,#49d5e8); opacity: .5; }
+.landing-body .motion-bolt-yellow { right: 5%; bottom: -20px; color: #ffd43b; background: linear-gradient(#fff1a1,#ffd43b); opacity: .38; animation-delay: 1.7s; }
+.landing-body .motion-stage-label {
+  position: absolute;
+  z-index: 3;
+  right: 14px;
+  bottom: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 11px;
+  border: 1px solid #ffffff27;
+  border-radius: 999px;
+  color: #f2f4f6;
+  background: #11151cce;
+  font-size: .75rem;
+  font-weight: 750;
+  backdrop-filter: blur(10px);
+}
+.landing-body .motion-stage-label span { color: var(--landing-cyan); font-size: 1rem; }
+@media (max-width: 760px) {
+  .landing-body .hero h1 { font-size: clamp(2rem,8.5vw,2.75rem); }
+  .landing-body .mascot-motion-section { grid-template-columns: 1fr; gap: 24px; }
+  .landing-body .mascot-motion-copy { order: 1; }
+  .landing-body .mascot-motion-stage {
+    order: 2;
+    width: 100%;
+    justify-self: center;
+    aspect-ratio: 16 / 9;
+    background-image: url('/animations/finalsnap-mascot-landscape-poster.jpg');
+  }
+  .landing-body .motion-stage-label { right: 10px; bottom: 10px; font-size: .7rem; }
+  .landing-body .motion-bolt { width: 26px; height: 54px; }
+  .landing-body .hero-art::before { left: 0; top: 5%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .landing-body .hero-art::before,
+  .landing-body .hero-art::after,
+  .landing-body .motion-bolt { animation: none; opacity: .36; }
 }

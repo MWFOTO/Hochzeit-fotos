@@ -1104,7 +1104,8 @@ function createApp(options = {}) {
   });
   // Only intended public assets; source code and generic HTML routes cannot bypass guards.
   for(const file of ['style.css','design-editor.css','design-editor.js','upload.js','slideshow.js','guest-access.js','account.js','verify-email.js','password-recovery.js','games.js','guestbook.js','video-grussbox.js','payments-admin.js','backups-admin.js','landing.js','reviews.js','reviews-admin.js','finalsnap-logo.webp','success.js','gallery-init.js','admin.js','johanna-bastian.png','photographer.webp','event-wedding.webp','event-birthday.jpg','event-summer.jpg','event-company.jpg']) app.get(`/${file}`,(req,res)=>res.sendFile(path.join(pub,file)));
-  for(const file of ['qr-einladung.webp','fotos-sammeln.webp','live-diashow.webp','hochzeit-party.webp','geburtstag.webp','party.webp']) app.get(`/preview-assets/${file}`,(req,res)=>res.sendFile(path.join(pub,'preview-assets',file)));
+  for(const file of ['qr-einladung.webp','fotos-sammeln.webp','live-diashow.webp','hochzeit-party.webp','geburtstag.webp','party.webp','why-finalsnap-poster.jpg']) app.get(`/preview-assets/${file}`,(req,res)=>res.sendFile(path.join(pub,'preview-assets',file)));
+  for(const file of ['finalsnap-mascot-landscape-poster.jpg','finalsnap-mascot-landscape.mp4']) app.get(`/animations/${file}`,(req,res)=>res.sendFile(path.join(pub,'animations',file)));
   // Liveness stays cheap for the host's restart check. Readiness checks critical dependencies.
   app.get('/health',(req,res)=>res.json({ok:true}));
   app.get('/ready',async(req,res)=>{
