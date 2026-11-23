@@ -35,3 +35,52 @@ fetch('/api/plans').then(response => response.json()).then(plans => {
         document.getElementById('plan-grid').append(card);
       }
     }).catch(() => {});
+
+document.querySelectorAll('.why-video-frame[data-youtube-id]').forEach(frame => {
+  const button = frame.querySelector('.why-video-launch');
+  button?.addEventListener('click', () => {
+    const player = document.createElement('iframe');
+    player.src = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(frame.dataset.youtubeId)}?autoplay=1&rel=0`;
+    player.title = 'FinalSnap: Warum FinalSnap?';
+    player.loading = 'lazy';
+    player.referrerPolicy = 'strict-origin-when-cross-origin';
+    player.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share';
+    player.allowFullscreen = true;
+    frame.replaceChildren(player);
+    frame.classList.add('is-playing');
+  }, { once: true });
+});
+
+const supportingVideos = document.querySelectorAll('.mascot-motion-video');
+const activateVideo = video => {
+  video.muted = true;
+  video.defaultMuted = true;
+  video.playsInline = true;
+  if (video.dataset.initialized !== 'true') {
+    const source = video.querySelector('source[data-src]');
+    if (source) source.src = source.dataset.src;
+    video.load();
+    video.dataset.initialized = 'true';
+  }
+  video.play().catch(() => {
+    const playButton = video.closest('.mascot-motion-stage')?.querySelector('.mascot-motion-play');
+    if (playButton) playButton.hidden = false;
+  });
+};
+
+supportingVideos.forEach(video => {
+  const playButton = video.closest('.mascot-motion-stage')?.querySelector('.mascot-motion-play');
+  video.addEventListener('playing', () => { if (playButton) playButton.hidden = true; });
+  video.addEventListener('error', () => { if (playButton) playButton.hidden = false; });
+  playButton?.addEventListener('click', () => activateVideo(video));
+});
+
+if ('IntersectionObserver' in window) {
+  const motionObserver = new IntersectionObserver(entries => entries.forEach(entry => {
+    if (entry.isIntersecting) activateVideo(entry.target);
+    else entry.target.pause();
+  }), { rootMargin: '80px' });
+  supportingVideos.forEach(video => motionObserver.observe(video));
+} else {
+  supportingVideos.forEach(activateVideo);
+}
