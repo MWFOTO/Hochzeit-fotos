@@ -6,9 +6,6 @@
   <meta name="theme-color" content="#202329">
   <title>FinalSnap – Eine Feier. Alle Perspektiven. Ein Album.</title>
   <link rel="stylesheet" href="/style.css">
-  <!-- TrustBox script -->
-  <script type="text/javascript" src="//widget.trustpilot.com/bootstrap/v5/tp.widget.bootstrap.min.js" async></script>
-  <!-- End TrustBox script -->
 </head>
 <body class="landing-body">
   <header class="site-header">
@@ -217,6 +214,7 @@
         <div class="trustpilot-widget" data-locale="de-DE" data-template-id="56278e9abfbbba0bdcd568bc" data-businessunit-id="6b00a73630d26ccd32cb8d7e" data-style-height="52px" data-style-width="100%">
           <a href="https://de.trustpilot.com/review/finalsnap.de" target="_blank" rel="noopener">Trustpilot</a>
         </div>
+        <p class="trustpilot-consent-hint" id="trustpilot-consent-hint">Das Trustpilot-Widget wird erst nach deiner Zustimmung zu externen Medien geladen. <a href="https://de.trustpilot.com/review/finalsnap.de" target="_blank" rel="noopener">Trustpilot direkt öffnen</a>.</p>
         <!-- End TrustBox widget -->
       </div>
     </section>
@@ -267,8 +265,18 @@
 
   <footer class="site-footer">
     <span>FinalSnap · Eine Feier. Alle Perspektiven. Ein Album.</span>
-    <span><a href="/impressum">Impressum</a> · <a href="/datenschutz">Datenschutz</a> · <a href="mailto:info@finalsnap.de">Kontakt</a></span>
+    <span><a href="/impressum">Impressum</a> · <a href="/datenschutz">Datenschutz</a> · <a href="/?cookies=1">Cookie-Einstellungen</a> · <a href="mailto:info@finalsnap.de">Kontakt</a></span>
   </footer>
+
+  <section class="cookie-consent-banner" id="cookie-consent-banner" role="dialog" aria-labelledby="cookie-consent-title" aria-describedby="cookie-consent-copy" hidden>
+    <h2 id="cookie-consent-title">Deine Cookie-Auswahl</h2>
+    <p id="cookie-consent-copy">Notwendige Cookies halten Anmeldung, Albumzugang und deine Auswahl funktionsfähig. Mit „Alle akzeptieren“ erlaubst du außerdem externe Medien von Trustpilot und YouTube. Du kannst deine Auswahl jederzeit ändern. <a href="/datenschutz">Mehr in den Datenschutzhinweisen</a>.</p>
+    <p class="cookie-consent-context" id="cookie-consent-context" aria-live="polite" hidden></p>
+    <div class="cookie-consent-actions">
+      <button type="button" data-cookie-choice="necessary">Nur notwendige</button>
+      <button type="button" data-cookie-choice="all">Alle akzeptieren</button>
+    </div>
+  </section>
 
   <script src="/landing.js"></script>
 </body>
