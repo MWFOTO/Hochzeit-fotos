@@ -56,12 +56,7 @@ const activateVideo = video => {
   video.muted = true;
   video.defaultMuted = true;
   video.playsInline = true;
-  if (video.dataset.initialized !== 'true') {
-    const source = video.querySelector('source[data-src]');
-    if (source) source.src = source.dataset.src;
-    video.load();
-    video.dataset.initialized = 'true';
-  }
+  video.autoplay = true;
   video.play().catch(() => {
     const playButton = video.closest('.mascot-motion-stage')?.querySelector('.mascot-motion-play');
     if (playButton) playButton.hidden = false;
