@@ -1742,3 +1742,10 @@ body[data-design-theme="afterglow"] { --color-bg: #262324; --color-text: #f5f1ef
   .landing-body .hero-art::after,
   .landing-body .motion-bolt { animation: none; opacity: .36; }
 }
+
+/* Small AI labels attached to each generated image and video. */
+.landing-body .hero-mascot-figure { display:grid; align-content:center; justify-items:center; width:100%; margin:0; }
+.landing-body .ai-media-caption { margin-top:6px; color:#aab1bd; font-size:.68rem; line-height:1.35; text-align:center; }
+.landing-body .phone-photo .ai-image-tag { position:absolute; z-index:2; top:5px; right:5px; bottom:auto; left:auto; padding:2px 4px; border:1px solid #ffffff42; border-radius:5px; color:#f4f5f7; background:#15171bcc; font-size:.42rem; font-weight:800; line-height:1.2; }
+.landing-body .why-video-card figcaption strong { color:var(--landing-cyan); }
+.landing-body .ai-video-tag { position:absolute; right:10px; bottom:10px; z-index:2; padding:5px 8px; border:1px solid #ffffff42; border-radius:999px; color:#f4f5f7; background:#15171bcc; font-size:.67rem; font-weight:800; line-height:1.2; pointer-events:none; }
