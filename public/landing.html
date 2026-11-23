@@ -164,7 +164,7 @@
         <h2>Kamera bereit. Blitz geladen.</h2>
       </div>
       <div class="mascot-motion-stage">
-        <video class="mascot-motion-video" muted playsinline loop preload="none" poster="/animations/finalsnap-mascot-landscape-poster.jpg" aria-label="Das FinalSnap-Maskottchen fotografiert auf einer Party und zeigt das FinalSnap-Logo">
+        <video class="mascot-motion-video" autoplay muted playsinline loop preload="none" poster="/animations/finalsnap-mascot-landscape-poster.jpg" aria-label="Das FinalSnap-Maskottchen fotografiert auf einer Party und zeigt das FinalSnap-Logo">
           <source data-src="/animations/finalsnap-mascot-landscape.mp4" type="video/mp4">
         </video>
         <button class="mascot-motion-play" type="button" aria-label="FinalSnap-Animation abspielen"><span aria-hidden="true">▶</span><span>Animation abspielen</span></button>
@@ -283,7 +283,6 @@
         frame.classList.add('is-playing');
       }, { once: true });
     });
-    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const supportingVideos = document.querySelectorAll('.mascot-motion-video');
     const activateVideo = video => {
       if (video.dataset.initialized !== 'true') {
@@ -301,15 +300,14 @@
       const playButton = video.closest('.mascot-motion-stage')?.querySelector('.mascot-motion-play');
       video.addEventListener('playing', () => { if (playButton) playButton.hidden = true; });
       playButton?.addEventListener('click', () => activateVideo(video));
-      if (reducedMotion && playButton) playButton.hidden = false;
     });
-    if (!reducedMotion && 'IntersectionObserver' in window) {
+    if ('IntersectionObserver' in window) {
       const motionObserver = new IntersectionObserver(entries => entries.forEach(entry => {
         if (entry.isIntersecting) activateVideo(entry.target);
         else entry.target.pause();
       }), { rootMargin: '80px' });
       supportingVideos.forEach(video => motionObserver.observe(video));
-    } else if (!reducedMotion) {
+    } else {
       supportingVideos.forEach(activateVideo);
     }
   </script>
