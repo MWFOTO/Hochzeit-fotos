@@ -21,7 +21,7 @@ function addEvent(id,status='paid') {
 async function send(id,{requestId,buffer=image}={}) {
   buffer=await buffer;const form=new FormData();form.append('photos',new Blob([buffer],{type:'image/jpeg'}),'photo.jpg');
   const headers={Origin:'http://localhost:3000'};
-  if(requestId)headers['X-FinalSnap-Upload-Id']=requestId;
+  if(requestId)headers['X-Upload-Id']=requestId;
   const response=await fetch(`${origin()}/api/event/${id}/upload?token=${token}`,{method:'POST',headers,body:form});
   return {status:response.status,body:await response.json()};
 }
