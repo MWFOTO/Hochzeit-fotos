@@ -501,6 +501,15 @@ function createApp(options = {}) {
     if(!user?.email_verified_at||!paymentAdminEmails.has(String(req.user.email||'').toLowerCase()))return fail(res,403,'Kein Zugriff auf die Zahlungsverwaltung.');
     next();
   }
+  app.get('/ops/events',paymentAdminRequired,(req,res)=>res.sendFile(path.join(__dirname,'public','operations-admin.html')));
+  app.get('/api/admin/upcoming-events',paymentAdminRequired,(req,res)=>{
+    const parts=Object.fromEntries(berlinParts.formatToParts(new Date()).map(part=>[part.type,part.value]));
+    const today=`${parts.year}-${parts.month}-${parts.day}`;
+    const untilDate=new Date(`${today}T12:00:00Z`);untilDate.setUTCDate(untilDate.getUTCDate()+3);
+    const through=untilDate.toISOString().slice(0,10);
+    const events=db.prepare("SELECT id,title,event_date eventDate,status,upload_successes uploadSuccesses,upload_failures uploadFailures FROM events WHERE event_date BETWEEN ? AND ? AND deleted_at IS NULL AND status NOT IN ('expired','cancelled') ORDER BY event_date,id").all(today,through);
+    res.json({today,through,events});
+  });
   app.get('/ops/reviews',paymentAdminRequired,(req,res)=>res.sendFile(path.join(__dirname,'public','reviews-admin.html')));
   app.get('/api/admin/reviews',paymentAdminRequired,(req,res)=>{
     const reviews=db.prepare('SELECT id,rating,message,tester_attested,publish_consent,publish_consent_at,approved,created_at FROM experience_reviews ORDER BY created_at DESC LIMIT 200').all();
@@ -791,6 +800,11 @@ function createApp(options = {}) {
     }
   }));
   const isUploadBusy=id=>eventUploads.isBusy(id);
+  function recordUploadFailure(eventId,errorOrReason){
+    const value=typeof errorOrReason==='string'?errorOrReason:String(errorOrReason?.message||'');
+    const reason=/speicher|disk|storage|space|limit_file_size/i.test(value)?'storage':/datei|format|bild|image|heif|jpeg|webp|png|raw|dng/i.test(value)?'format':/timeout|zeitüberschreitung/i.test(value)?'timeout':/warteschlange|queue|zu viele|429/i.test(value)?'queue':'other';
+    try{operationsMonitor.recordUploadAttempt(eventId,'failure',reason);}catch(logError){console.error('Upload-Fehler konnte nicht für den Betriebsmonitor erfasst werden:',logError.message);}
+  }
   let remoteStorageReservedBytes=0;
   const storedObjectBytes=()=>db.prepare(`SELECT
     (SELECT COALESCE(SUM(bytes),0) FROM photos)+(SELECT COALESCE(SUM(bytes),0) FROM video_greetings) AS bytes`).get().bytes;
@@ -885,9 +899,9 @@ function createApp(options = {}) {
     if(initial.owner_id && deletingUsers.has(initial.owner_id)) return fail(res,409,'Das Konto wird gerade gelöscht. Uploads sind gesperrt.');
     if(!active(initial)) return fail(res,402,'Der Albumzeitraum ist beendet. Fotos können noch während der Downloadphase angesehen und heruntergeladen werden.');
     const queued=eventUploads.reserve(initial.id);
-    if(!queued.ok){res.set('Retry-After','3');return fail(res,429,'Viele Gäste laden gerade hoch. Bitte versuche es gleich erneut.');}
+    if(!queued.ok){db.prepare('UPDATE events SET upload_failures=upload_failures+1 WHERE id=?').run(initial.id);recordUploadFailure(initial.id,'queue');res.set('Retry-After','3');return fail(res,429,'Viele Gäste laden gerade hoch. Bitte versuche es gleich erneut.');}
     const staged=uploadCapacity.reserveStaging(req,{maxBytes:10*MAX_UPLOAD_FILE_BYTES+64*1024});
-    if(!staged.ok){queued.release();res.set('Retry-After',staged.reason==='disk'?'10':'3');return fail(res,staged.reason==='disk'?503:429,staged.reason==='disk'?'Der temporäre Uploadspeicher ist gerade stark belegt. Bitte in einigen Minuten erneut versuchen.':'Die Upload-Warteschlange ist voll. Bitte gleich erneut versuchen.');}
+    if(!staged.ok){queued.release();db.prepare('UPDATE events SET upload_failures=upload_failures+1 WHERE id=?').run(initial.id);recordUploadFailure(initial.id,staged.reason==='disk'?'storage':'queue');res.set('Retry-After',staged.reason==='disk'?'10':'3');return fail(res,staged.reason==='disk'?503:429,staged.reason==='disk'?'Der temporäre Uploadspeicher ist gerade stark belegt. Bitte in einigen Minuten erneut versuchen.':'Die Upload-Warteschlange ist voll. Bitte gleich erneut versuchen.');}
     upload(req,res,async err=>{
       const written=[];
       try {
@@ -904,7 +918,7 @@ function createApp(options = {}) {
             const requestId=String(req.get('X-Upload-Id')||req.get('X-FinalSnap-Upload-Id')||crypto.randomUUID());
             if(!/^[A-Za-z0-9_-]{16,80}$/.test(requestId))return {status:400,message:'Ungültige Upload-Kennung.'};
             const existing=db.prepare('SELECT photo_count FROM photo_upload_requests WHERE event_id=? AND request_id=?').get(current.id,requestId);
-            if(existing)return {status:200,body:{success:true,count:existing.photo_count,pending:!!current.moderation}};
+            if(existing){operationsMonitor.recordUploadAttempt(current.id,'success');return {status:200,body:{success:true,count:existing.photo_count,pending:!!current.moderation}};}
             const disk=fs.statfsSync(root);if(Number(disk.bavail)*Number(disk.bsize)<100*1024**2)return {status:503,message:'Fotospeicher vorübergehend ausgelastet. Bitte den Veranstalter informieren.'};
             const dir=photoStorage.mode==='local'?path.join(root,current.id):temp;if(photoStorage.mode==='local')fs.mkdirSync(dir,{recursive:true});
             const total=db.prepare('SELECT COUNT(*) count, COALESCE(SUM(bytes),0) bytes FROM photos WHERE event_id=?').get(current.id);
@@ -936,16 +950,18 @@ function createApp(options = {}) {
               db.prepare('INSERT INTO photo_upload_requests (event_id,request_id,photo_count,pending,created_at) VALUES (?,?,?,?,?)').run(current.id,requestId,written.length,current.moderation?1:0,Date.now());
               for(const f of written)db.prepare('INSERT INTO photos (id,event_id,filename,bytes,approved,created_at,uploader_token_hash,original_filename,original_bytes,original_mime,display_filename,thumb_filename) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)').run(f.id,current.id,f.displayFilename,f.bytes,current.moderation?0:1,Date.now(),req.guestTokenHash||null,f.originalFilename,f.originalBytes,f.originalMime,f.displayFilename,f.thumbFilename);
               db.prepare('UPDATE events SET upload_successes=upload_successes+1 WHERE id=?').run(current.id);
+              operationsMonitor.recordUploadAttempt(current.id,'success');
             })();
             return {status:200,body:{success:true,count:written.length,pending:!!current.moderation}};
           } finally {capacity.release();}
         });
-        if(!queueOutcome.ok){res.set('Retry-After','3');return fail(res,429,'Viele Gäste laden gerade hoch. Dein Foto wartet kurz in der Warteschlange.');}
+        if(!queueOutcome.ok){db.prepare('UPDATE events SET upload_failures=upload_failures+1 WHERE id=?').run(initial.id);recordUploadFailure(initial.id,'queue');res.set('Retry-After','3');return fail(res,429,'Viele Gäste laden gerade hoch. Dein Foto wartet kurz in der Warteschlange.');}
         const queuedResult=queueOutcome.value;
-        if(queuedResult.status!==200){if(queuedResult.status===429||queuedResult.status===503)res.set('Retry-After','3');if(queuedResult.status===400||queuedResult.status===402)db.prepare('UPDATE events SET upload_failures=upload_failures+1 WHERE id=?').run(initial.id);return fail(res,queuedResult.status,queuedResult.message);}
+        if(queuedResult.status!==200){db.prepare('UPDATE events SET upload_failures=upload_failures+1 WHERE id=?').run(initial.id);recordUploadFailure(initial.id,queuedResult.message);if(queuedResult.status===429||queuedResult.status===503)res.set('Retry-After','3');return fail(res,queuedResult.status,queuedResult.message);}
         res.status(queuedResult.status).json(queuedResult.body);
       } catch(error) {
         db.prepare('UPDATE events SET upload_failures=upload_failures+1 WHERE id=?').run(initial.id);
+        recordUploadFailure(initial.id,error);
         for(const f of written){for(const object of f.objects){try{if(photoStorage.mode==='s3'){await photoStorage.deletePhoto(initial.id,object.filename);await backupService.deletePhoto(initial.id,object.filename);}else fs.rmSync(object.path,{force:true});}catch(cleanupError){console.error('Upload-Aufräumen fehlgeschlagen:',cleanupError.message);}}}
         if(error.code==='PHOTO_STORAGE_UNAVAILABLE')console.error('Hetzner Object Storage:',error.cause?.message||error.message);
         fail(res,error.code==='PHOTO_STORAGE_UNAVAILABLE'?503:400,error.message);
@@ -1170,7 +1186,7 @@ function createApp(options = {}) {
     res.sendFile(path.join(pub,'video-grussbox.html'));
   });
   // Only intended public assets; source code and generic HTML routes cannot bypass guards.
-  for(const file of ['style.css','design-editor.css','design-editor.js','upload.js','slideshow.js','guest-access.js','account.js','verify-email.js','password-recovery.js','games.js','guestbook.js','video-grussbox.js','payments-admin.js','backups-admin.js','landing.js','reviews.js','reviews-admin.js','finalsnap-logo.webp','success.js','gallery-init.js','admin.js','johanna-bastian.png','photographer.webp','event-wedding.webp','event-birthday.jpg','event-summer.jpg','event-company.jpg']) app.get(`/${file}`,(req,res)=>res.sendFile(path.join(pub,file)));
+  for(const file of ['style.css','design-editor.css','design-editor.js','upload.js','slideshow.js','guest-access.js','account.js','verify-email.js','password-recovery.js','games.js','guestbook.js','video-grussbox.js','payments-admin.js','backups-admin.js','operations-admin.js','landing.js','reviews.js','reviews-admin.js','finalsnap-logo.webp','success.js','gallery-init.js','admin.js','johanna-bastian.png','photographer.webp','event-wedding.webp','event-birthday.jpg','event-summer.jpg','event-company.jpg']) app.get(`/${file}`,(req,res)=>res.sendFile(path.join(pub,file)));
   for(const file of ['qr-einladung.webp','fotos-sammeln.webp','live-diashow.webp','hochzeit-party.webp','geburtstag.webp','party.webp','why-finalsnap-poster.jpg']) app.get(`/preview-assets/${file}`,(req,res)=>res.sendFile(path.join(pub,'preview-assets',file)));
   for(const file of ['finalsnap-mascot-landscape-poster.jpg','finalsnap-mascot-landscape.mp4']) app.get(`/animations/${file}`,(req,res)=>res.sendFile(path.join(pub,'animations',file)));
   // Liveness stays cheap for the host's restart check. Readiness checks critical dependencies.

@@ -21,7 +21,7 @@ const fake={webhooks:signer.webhooks,invoices:{retrieve:async id=>({id,status:'p
 },retrieve:async id=>sessions.get(id),expire:async id=>{const session=sessions.get(id);session.status='expired';return session;}}}};
 const sentMail=[];
 let failNextContractConfirmation=false;
-const app=createApp({invoicePdfFetcher:async()=>Buffer.from('%PDF-1.4 test invoice'),mailer:async message=>{if(message.subject.includes('Bestellbestätigung')&&failNextContractConfirmation){failNextContractConfirmation=false;throw new Error('temporary delivery failure');}sentMail.push(message);},DB_PATH:path.join(tmp,'events.db'),UPLOAD_DIR:path.join(tmp,'uploads'),BASE_URL:'http://localhost:3000',STRIPE_WEBHOOK_SECRET:signing,stripe:fake,MAX_EVENT_PHOTOS:2,TRUST_PROXY:'1',uploadCapacityStatfs:()=>({bavail:simulatedUploadFreeBytes,bsize:1})});
+const app=createApp({invoicePdfFetcher:async()=>Buffer.from('%PDF-1.4 test invoice'),mailer:async message=>{if(message.subject.includes('Bestellbestätigung')&&failNextContractConfirmation){failNextContractConfirmation=false;throw new Error('temporary delivery failure');}sentMail.push(message);},DB_PATH:path.join(tmp,'events.db'),UPLOAD_DIR:path.join(tmp,'uploads'),BASE_URL:'http://localhost:3000',STRIPE_WEBHOOK_SECRET:signing,stripe:fake,MAX_EVENT_PHOTOS:2,TRUST_PROXY:'1',PAYMENT_ADMIN_EMAILS:'ops@example.com',uploadCapacityStatfs:()=>({bavail:simulatedUploadFreeBytes,bsize:1})});
 const server=app.listen(0);
 const origin=`http://127.0.0.1:${server.address().port}`;
 after(()=>{server.close();app.locals.db.close();fs.rmSync(tmp,{recursive:true,force:true});});
@@ -73,6 +73,16 @@ test('Multiple events, ownership and pending payment gate',async()=>{
   assert.equal((await request('/event/birthday')).status,402);
   assert.equal((await request('/api/event/birthday/qr',{user})).status,402);
   assert.equal((await request('/api/checkout',{method:'POST',user:other,body:{termsAccepted:true,eventId:'birthday'}})).status,404);
+});
+test('Upcoming event operations list is visible only to verified administrators',async()=>{
+  assert.equal((await request('/api/admin/upcoming-events')).status,401);
+  assert.equal((await request('/api/admin/upcoming-events',{user})).status,403);
+  const admin=await register('ops@example.com');app.locals.db.prepare('UPDATE users SET email_verified_at=? WHERE id=?').run(Date.now(),admin.id);
+  const parts=Object.fromEntries(new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/Berlin',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date()).map(part=>[part.type,part.value]));
+  const today=`${parts.year}-${parts.month}-${parts.day}`;
+  app.locals.db.prepare("INSERT INTO events (id,title,event_date,status,created_at) VALUES ('ops-today','Feier heute',?,'paid',?)").run(today,Date.now());
+  const page=await request('/ops/events',{user:admin});assert.equal(page.status,200);assert.match(Buffer.from(page.data).toString(),/Anstehende Feiern/);
+  const list=await request('/api/admin/upcoming-events',{user:admin});assert.equal(list.status,200);assert.ok(list.data.events.some(event=>event.id==='ops-today'));assert.doesNotMatch(JSON.stringify(list.data),/email|guest_token|password_hash/);
 });
 test('Checkout idempotency, signature, unpaid/amount/live rejection and delayed payment',async()=>{
   for(let i=0;i<2;i++)assert.equal((await request('/api/checkout',{method:'POST',user,body:{termsAccepted:true,eventId:'birthday'}})).status,200);

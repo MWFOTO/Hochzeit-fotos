@@ -40,3 +40,19 @@ test('storage monitor retries an undelivered alert without revealing secrets',as
   await monitor.check();assert.equal(calls,2);
   db.close();
 });
+
+test('upload failure monitor warns on event-specific failures without guest or photo data',async()=>{
+  const db=new Database(':memory:');db.exec('CREATE TABLE photos (bytes INTEGER NOT NULL);');
+  let time=1000;const sent=[];
+  const monitor=createOperationsMonitor({config:{UPLOAD_DIR:'/tmp',S3_MAX_STORAGE_BYTES:String(10*GiB),PAYMENT_ALERT_EMAIL:'owner@example.test'},db,mailer:async mail=>sent.push(mail),dependencies:{statfs:()=>({bavail:5*GiB,bsize:1,blocks:10*GiB}),now:()=>time}});
+  monitor.recordUploadAttempt('event-safe','failure','format');
+  monitor.recordUploadAttempt('event-safe','success');
+  monitor.recordUploadAttempt('event-safe','success');
+  await monitor.check();assert.equal(sent.length,1);
+  assert.match(sent[0].text,/Album event-safe/);assert.match(sent[0].text,/Dateiformat: 1/);
+  assert.doesNotMatch(sent[0].text,/guest@example|IMG_123|photo\.jpg|Lisa/);
+  await monitor.check();assert.equal(sent.length,1);
+  time+=60*60*1000+1;monitor.recordUploadAttempt('event-safe','failure','queue');await monitor.check();assert.equal(sent.length,2);
+  assert.match(sent[1].text,/Warteschlange: 1/);
+  db.close();
+});
