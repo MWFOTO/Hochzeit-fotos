@@ -209,17 +209,8 @@
     return `<!doctype html><html lang="de"><head><meta charset="utf-8"><title>${safeText(data.title)} · FinalSnap Druck</title><style>@page{size:${pageSize};margin:0}*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;font-family:Arial,sans-serif;color:#fff}.sheet{position:relative;width:100vw;height:100vh;overflow:hidden;background:#29252a}.tent{display:flex}.panel{position:relative;width:100%;height:100%;display:flex;align-items:center;justify-content:center;text-align:center;background:var(--art);background-position:center;background-size:cover;overflow:hidden}.tent .panel{width:50%;height:100%}.tent .panel.back{transform:rotate(180deg)}.fold{position:absolute;left:50%;top:0;height:100%;border-left:1px dashed #fff9;z-index:2}.wash{position:absolute;inset:0;background:linear-gradient(180deg,#17151952,#171519a6)}.content{position:relative;z-index:1;width:82%;max-width:460px;margin:auto;display:flex;align-items:center;flex-direction:column}.tent .content{width:78%}.brand{font-size:14px;letter-spacing:.22em;font-weight:800;margin-bottom:9%}.brand span{font-weight:400}.kicker{font-size:9px;letter-spacing:.24em;font-weight:700;margin:0 0 12px}.content h1{font-size:clamp(27px,5vw,64px);line-height:1.03;font-weight:500;letter-spacing:-.04em;max-width:100%;margin:0 0 10px;overflow-wrap:anywhere}.tent .content h1{font-size:clamp(20px,3vw,38px)}.date{font-size:10px;letter-spacing:.16em;text-transform:uppercase;margin:0 0 14px}.invite{font-style:italic;font-size:14px;line-height:1.4;max-width:340px;margin:0 0 18px}.tent .invite{font-size:11px}.qr-placeholder{background:#fff;color:#272329;display:flex;align-items:center;justify-content:center;flex-direction:column;border:3px solid #fff;border-radius:3px;box-shadow:0 3px 14px #0003}.qr-hint{font:8px Arial,sans-serif;margin:8px 0 0;opacity:.9}.card .content{width:80%}.card .content h1{font-size:28px}.poster .content h1{font-size:44px}@media screen{body{background:#e9e5de;padding:24px;min-height:100vh}.sheet{margin:auto;box-shadow:0 10px 40px #0004}.tent{width:min(100%,1100px);height:auto;aspect-ratio:297/210}.single{width:min(100%,650px);height:auto;aspect-ratio:${data.format === 'card' ? '105/148' : '210/297'}}.tent .content h1{font-size:clamp(22px,4vw,42px)}.single .content h1{font-size:clamp(25px,5vw,52px)}}@media print{.sheet{width:100vw;height:100vh}.fold{border-color:#fff7}}</style></head><body>${body}<script>window.addEventListener('load',()=>setTimeout(()=>window.print(),250));</script></body></html>`;
   }
 
-  $('#pdfButton').addEventListener('click', () => {
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) { $('#downloadStatus').textContent = 'Erlaube Pop-ups für diese Seite und versuche es erneut.'; return; }
-    printWindow.document.open(); printWindow.document.write(printMarkup(getPrintData())); printWindow.document.close();
-    $('#downloadStatus').textContent = 'Druckansicht geöffnet. Wähle im Druckdialog „Als PDF sichern“. ';
-  });
-
-  $('#pngButton').addEventListener('click', async () => {
-    const data = getPrintData();
-    const width = data.format === 'tent' ? 1600 : 1000;
-    const height = data.format === 'tent' ? 1131 : 1414;
+  async function renderArtwork(data) {
+    const [width,height] = data.format === 'tent' ? [1600,1141] : data.format === 'card' ? [1020,1414] : [1000,1403];
     const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
     const ctx = canvas.getContext('2d');
     let uploadedImage = null; let uploadedQr = null;
@@ -242,8 +233,25 @@
       uploadedQr=new Image();uploadedQr.src=data.qr;await uploadedQr.decode();
       if(data.image){uploadedImage=new Image();uploadedImage.src=data.image;await uploadedImage.decode();}
       panels.forEach(([x,y,w,h,back])=>drawPanel(x,y,w,h,back));
-      canvas.toBlob(blob=>{if(!blob){$('#downloadStatus').textContent='PNG konnte nicht erstellt werden.';return;}const link=document.createElement('a');link.href=URL.createObjectURL(blob);link.download=`finalsnap-${data.format}-${Date.now()}.png`;link.click();setTimeout(()=>URL.revokeObjectURL(link.href),1000);$('#downloadStatus').textContent='PNG mit dem Event-QR heruntergeladen.';},'image/png');
-    } catch { $('#downloadStatus').textContent='PNG konnte nicht erstellt werden. Bitte erneut versuchen.'; }
+      return await new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('PNG konnte nicht erstellt werden.')),'image/png'));
+    } catch { throw new Error('Druckmotiv konnte nicht erstellt werden. Bitte erneut versuchen.'); }
+  }
+  function downloadBlob(blob,name) {
+    const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=name;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  }
+  $('#pngButton').addEventListener('click',async()=>{
+    try {const data=getPrintData(),blob=await renderArtwork(data);downloadBlob(blob,`finalsnap-${data.format}-${Date.now()}.png`);$('#downloadStatus').textContent='PNG mit dem Event-QR heruntergeladen. Der QR hat einen hellen Rand zum sicheren Scannen.';}
+    catch(error){$('#downloadStatus').textContent=error.message;}
+  });
+  $('#pdfButton').addEventListener('click',async()=>{
+    const button=$('#pdfButton');button.disabled=true;$('#downloadStatus').textContent='Druckfertige PDF wird erstellt …';
+    try {
+      const data=getPrintData(),artwork=await renderArtwork(data),formData=new FormData();formData.append('design',artwork,`finalsnap-${data.format}.png`);
+      const response=await api(`${endpoint}/design-print.pdf?format=${encodeURIComponent(data.format)}`,'POST',formData);
+      downloadBlob(await response.blob(),`finalsnap-${data.format}-${Date.now()}.pdf`);
+      $('#downloadStatus').textContent='Druckfertige PDF mit 3 mm Beschnitt heruntergeladen. Tischaufsteller: an der Mittellinie falten.';
+    } catch(error){$('#downloadStatus').textContent=error.message;}
+    finally{button.disabled=false;}
   });
 
   form.addEventListener('submit', async event => {

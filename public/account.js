@@ -211,19 +211,15 @@
         link(photoActions,'Fotoaufgaben',event.guestUrl.replace('?','/games?'));
         link(photoActions,'Gästebuch ansehen',event.guestUrl.replace('?','/guestbook?'));
         link(accessActions,'Gästebuch verwalten',`/event/${encodeURIComponent(event.id)}/guestbook`);
-        link(photoActions,'Design-Editor & QR-Druck',`/event/${encodeURIComponent(event.id)}/design`);
-        link(accessActions,'QR-Code herunterladen',`/api/event/${event.id}/qr`);
-        button(accessActions,'QR-Karte drucken',async()=>{
-          const blob=await (await fetch(`/api/event/${event.id}/qr`)).blob();
-          const url=URL.createObjectURL(blob),frame=document.createElement('iframe');frame.hidden=true;document.body.append(frame);
-          const doc=frame.contentDocument;doc.body.append(element('h1',event.title),element('p','Fotos teilen: QR-Code scannen.'));
-          const img=doc.createElement('img');img.width=350;img.onload=()=>{frame.contentWindow.focus();frame.contentWindow.print();setTimeout(()=>{frame.remove();URL.revokeObjectURL(url);},60000);};img.src=url;doc.body.append(img);
-        });
+        link(accessActions,'QR- & Tischkarten-Studio öffnen',`/event/${encodeURIComponent(event.id)}/design`);
+        link(accessActions,'QR-Code als PNG · 2000 × 2000',`/api/event/${event.id}/qr`);
+        link(accessActions,'QR-Code als SVG · Vektor',`/api/event/${event.id}/qr.svg`);
+        link(accessActions,'QR-Code als PDF · 10 × 10 cm',`/api/event/${event.id}/qr.pdf`);
         link(photoActions,'Alle Fotos herunterladen',`/api/event/${event.id}/download`);
         button(photoActions,'Fotos verwalten',()=>manage(event)).className='primary';
         button(settingsActions,event.moderation?'Automatische Freigabe aktivieren':'Manuelle Freigabe aktivieren',async()=>{await api(`/api/event/${event.id}`,'PATCH',{moderation:!event.moderation});await load();});
         button(settingsActions,event.guestbook_moderation?'Gästebuch: Freigabe ausschalten':'Gästebuch: Freigabe einschalten',async()=>{await api(`/api/event/${event.id}`,'PATCH',{guestbookModeration:!event.guestbook_moderation});await load();});
-        button(settingsActions,'Gästelink erneuern',async()=>{if(confirm('Alte Links und QR-Codes werden dadurch ungültig. Fortfahren?')){await api(`/api/event/${event.id}/rotate-token`,'POST');await load();}});
+        button(settingsActions,'Gästelink erneuern',async()=>{if(confirm('Achtung: Alle bisherigen Gästelinks und bereits gedruckten QR-Karten funktionieren danach nicht mehr. Möchtest du trotzdem einen neuen Link erstellen?')){await api(`/api/event/${event.id}/rotate-token`,'POST');await load();}});
       }
       const danger=element('details');danger.className='event-delete-bar';danger.append(element('summary','Veranstaltung entfernen'));card.append(danger);
       button(danger,'Event und Fotos endgültig löschen',async()=>{if(confirm('Event und alle Fotos endgültig löschen?')){await api(`/api/event/${event.id}`,'DELETE');document.getElementById('photo-manager').hidden=true;await load();}}).className='danger';

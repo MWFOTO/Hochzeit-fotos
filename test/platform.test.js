@@ -117,7 +117,14 @@ test('Content validation, guest upload, moderation, protected files, QR, quota a
   assert.equal((await request(`/api/event/birthday/photos?token=${token}`,{guest:guestB})).data.photos.length,0);
   assert.equal((await request(`/api/event/birthday/info?token=${token}`,{guest:guestA})).data.photoCount,1);
   assert.equal((await request(`/api/event/birthday/info?token=${token}`,{guest:guestB})).data.photoCount,0);
-  const qr=await request('/api/event/birthday/qr',{user});assert.equal(qr.status,200);assert.equal((await sharp(Buffer.from(qr.data)).metadata()).width,1200);
+  const qr=await request('/api/event/birthday/qr',{user});assert.equal(qr.status,200);assert.equal((await sharp(Buffer.from(qr.data)).metadata()).width,2000);assert.match(qr.res.headers.get('content-disposition'),/birthday-qr\.png/);
+  const svgQr=await request('/api/event/birthday/qr.svg',{user});assert.equal(svgQr.status,200);assert.match(Buffer.from(svgQr.data).toString(),/<svg[\s>]/);assert.match(svgQr.res.headers.get('content-disposition'),/birthday-qr\.svg/);
+  const pdfQr=await request('/api/event/birthday/qr.pdf',{user});assert.equal(pdfQr.status,200);assert.equal(Buffer.from(pdfQr.data).subarray(0,5).toString(),'%PDF-');assert.match(pdfQr.res.headers.get('content-disposition'),/birthday-qr-10cm\.pdf/);
+  assert.equal((await request('/api/event/birthday/qr.svg',{user:other})).status,404);
+  const artwork=await sharp({create:{width:1600,height:1141,channels:4,background:'#d98258'}}).png().toBuffer(),printForm=new FormData();printForm.append('design',new Blob([artwork],{type:'image/png'}),'tent.png');
+  const tentPdf=await request('/api/event/birthday/design-print.pdf?format=tent',{method:'POST',user,form:printForm});assert.equal(tentPdf.status,200);assert.equal(Buffer.from(tentPdf.data).subarray(0,5).toString(),'%PDF-');assert.match(tentPdf.res.headers.get('content-disposition'),/finalsnap-tent-birthday\.pdf/);
+  const invalidForm=new FormData();invalidForm.append('design',new Blob([artwork],{type:'image/png'}),'tent.png');assert.equal((await request('/api/event/birthday/design-print.pdf?format=card',{method:'POST',user,form:invalidForm})).status,400);
+  const unauthorizedForm=new FormData();unauthorizedForm.append('design',new Blob([artwork],{type:'image/png'}),'tent.png');assert.equal((await request('/api/event/birthday/design-print.pdf?format=tent',{method:'POST',user:other,form:unauthorizedForm})).status,404);
   assert.equal(app.locals.db.prepare('SELECT moderation FROM events WHERE id=?').get('company').moderation,0);
   assert.equal((await request('/api/event/birthday',{method:'PATCH',user,body:{moderation:false}})).status,200);
   assert.equal((await upload(image)).status,200);
