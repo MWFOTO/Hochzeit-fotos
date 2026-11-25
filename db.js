@@ -19,6 +19,13 @@ function openDatabase(filename) {
       event_id TEXT NOT NULL REFERENCES events(id), filename TEXT NOT NULL,
       bytes INTEGER NOT NULL, approved INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL, UNIQUE(event_id, filename));
+    CREATE TABLE IF NOT EXISTS photo_upload_requests (
+      event_id TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+      request_id TEXT NOT NULL,
+      photo_count INTEGER NOT NULL,
+      pending INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY(event_id,request_id));
     CREATE TABLE IF NOT EXISTS video_greetings (
       id TEXT PRIMARY KEY,
       event_id TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
@@ -100,7 +107,7 @@ function openDatabase(filename) {
   if(!photoColumns.has('uploader_token_hash'))db.exec('ALTER TABLE photos ADD COLUMN uploader_token_hash TEXT');
   db.exec(`CREATE TABLE IF NOT EXISTS guestbook_entries (id TEXT PRIMARY KEY, event_id TEXT NOT NULL REFERENCES events(id), guest_name TEXT NOT NULL DEFAULT '', message TEXT NOT NULL, approved INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS password_resets (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS email_verifications (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS experience_reviews (id TEXT PRIMARY KEY, rating INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5), message TEXT NOT NULL, tester_attested INTEGER NOT NULL DEFAULT 0, publish_consent INTEGER NOT NULL DEFAULT 0, publish_consent_at INTEGER, approved INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);`);
-  db.exec('CREATE INDEX IF NOT EXISTS photos_event ON photos(event_id); CREATE INDEX IF NOT EXISTS guestbook_event ON guestbook_entries(event_id,created_at); CREATE INDEX IF NOT EXISTS events_owner ON events(owner_id); CREATE UNIQUE INDEX IF NOT EXISTS payments_event ON payments(event_id); CREATE INDEX IF NOT EXISTS payment_attempts_payment ON payment_attempts(payment_id,attempt_no); CREATE INDEX IF NOT EXISTS payment_events_payment ON payment_events(payment_id,created_at); CREATE INDEX IF NOT EXISTS payment_alerts_status ON payment_alerts(status,created_at); CREATE INDEX IF NOT EXISTS backup_runs_status ON backup_runs(status,completed_at); CREATE INDEX IF NOT EXISTS backup_photo_deletes_created ON backup_photo_deletes(created_at); CREATE INDEX IF NOT EXISTS account_deletion_confirmations_created ON account_deletion_confirmations(created_at); CREATE INDEX IF NOT EXISTS experience_reviews_public ON experience_reviews(approved,publish_consent,created_at);');
+  db.exec('CREATE INDEX IF NOT EXISTS photos_event ON photos(event_id); CREATE INDEX IF NOT EXISTS photo_upload_requests_created ON photo_upload_requests(created_at); CREATE INDEX IF NOT EXISTS guestbook_event ON guestbook_entries(event_id,created_at); CREATE INDEX IF NOT EXISTS events_owner ON events(owner_id); CREATE UNIQUE INDEX IF NOT EXISTS payments_event ON payments(event_id); CREATE INDEX IF NOT EXISTS payment_attempts_payment ON payment_attempts(payment_id,attempt_no); CREATE INDEX IF NOT EXISTS payment_events_payment ON payment_events(payment_id,created_at); CREATE INDEX IF NOT EXISTS payment_alerts_status ON payment_alerts(status,created_at); CREATE INDEX IF NOT EXISTS backup_runs_status ON backup_runs(status,completed_at); CREATE INDEX IF NOT EXISTS backup_photo_deletes_created ON backup_photo_deletes(created_at); CREATE INDEX IF NOT EXISTS account_deletion_confirmations_created ON account_deletion_confirmations(created_at); CREATE INDEX IF NOT EXISTS experience_reviews_public ON experience_reviews(approved,publish_consent,created_at);');
   return db;
 }
 module.exports = { openDatabase };

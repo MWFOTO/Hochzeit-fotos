@@ -1,7 +1,7 @@
 const express = require('express');
 const multer = require('multer');
 const helmet = require('helmet');
-const { rateLimit } = require('express-rate-limit');
+const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 const Stripe = require('stripe');
 const sharp = require('sharp');
 const QRCode = require('qrcode');
@@ -18,6 +18,7 @@ const { createOperationsMonitor } = require('./operations-monitor');
 const { createContractConfirmation } = require('./contract-confirmation');
 const { createPaymentReceipt } = require('./payment-receipt');
 const { createUploadCapacity, GiB, MiB, MIN_UPLOAD_FREE_BYTES, uploadDiskWarningThreshold } = require('./upload-capacity');
+const { createEventUploadQueues } = require('./upload-queues');
 const scrypt = promisify(crypto.scrypt);
 const PLANS = { event:{label:'FinalSnap Fotoalbum',months:3,retentionDays:90,priceCents:4990}, '1m':{label:'1 Monat (alt)',months:1,priceCents:1900,legacy:true}, '3m':{label:'3 Monate (alt)',months:3,priceCents:2900,legacy:true}, '6m':{label:'6 Monate (alt)',months:6,priceCents:3900,legacy:true}, '12m':{label:'12 Monate (alt)',months:12,priceCents:5900,legacy:true} };
 const TERMS_VERSION = '2026-11-04-2';
@@ -108,7 +109,10 @@ function createApp(options = {}) {
   const db = openDatabase(cfg.DB_PATH || path.join(__dirname,'events.db'));
   const backupService=createBackupService({config:cfg,db,mailer});
   const operationsMonitor=createOperationsMonitor({config:cfg,db,mailer});
-  const uploadCapacity=createUploadCapacity({root,maxConcurrent:2,statfs:options.uploadCapacityStatfs});
+  const uploadCapacity=createUploadCapacity({root,maxConcurrent:2,...options.uploadCapacityOptions,statfs:options.uploadCapacityStatfs});
+  const eventUploads=createEventUploadQueues(options.eventUploadQueueOptions);
+  sharp.concurrency(1);
+  sharp.cache(false);
   // Unpaid draft events from the earlier one-trial-per-account flow can now
   // use the same free 25-photo test as newly created events.
   db.prepare("UPDATE events SET status='trial', trial_used=1 WHERE status='pending' AND owner_id IS NOT NULL AND deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM payments WHERE payments.event_id=events.id)").run();
@@ -341,7 +345,7 @@ function createApp(options = {}) {
     next();
   });
   const authLimit=rateLimit({windowMs:15*60*1000,limit:20,standardHeaders:'draft-8',legacyHeaders:false});
-  const uploadLimit=rateLimit({windowMs:60*1000,limit:20,standardHeaders:'draft-8',legacyHeaders:false});
+  const uploadLimit=rateLimit({windowMs:60*1000,limit:120,standardHeaders:'draft-8',legacyHeaders:false,keyGenerator:req=>`${ipKeyGenerator(req.ip)}:${req.guestTokenHash||req.user?.id||'guest'}`});
   const guestbookLimit=rateLimit({windowMs:15*60*1000,limit:5,standardHeaders:'draft-8',legacyHeaders:false});
   const experienceReviewLimit=rateLimit({windowMs:6*60*60*1000,limit:3,standardHeaders:'draft-8',legacyHeaders:false});
   function loginRequired(req,res,next) { if(!req.user) return fail(res,401,'Bitte anmelden.'); if(deletingUsers.has(req.user.id)) return fail(res,409,'Kontolöschung läuft. Bitte kurz warten.'); next(); }
@@ -753,67 +757,59 @@ function createApp(options = {}) {
       fs.rmSync(processed,{force:true});
     }
   }));
-  const busy=new Set();
+  const isUploadBusy=id=>eventUploads.isBusy(id);
   let remoteStorageReservedBytes=0;
   const storedObjectBytes=()=>db.prepare(`SELECT
     (SELECT COALESCE(SUM(bytes),0) FROM photos)+(SELECT COALESCE(SUM(bytes),0) FROM video_greetings) AS bytes`).get().bytes;
   const videoUpload=multer({dest:temp,limits:{fileSize:MAX_VIDEO_BYTES,files:1,fields:0,parts:1}}).single('video');
   const videoRoute='/api/event/:eventId/video-greetings';
 
-  app.post(videoRoute,uploadLimit,access,(req,res)=>{
-    const event=req.event;
-    if(!videoAvailable||!event.video_greetings_enabled)return fail(res,404,'Die Videogrußbox ist ausgeschaltet.');
-    if(!active(event)||deletingUsers.has(event.owner_id))return fail(res,409,'Diese Feier nimmt gerade keine Videogrüße an.');
-    if(busy.has(event.id))return fail(res,429,'Ein Upload läuft bereits. Bitte versuche es gleich erneut.');
-    const count=db.prepare('SELECT COUNT(*) AS total FROM video_greetings WHERE event_id=?');
-    const limit=event.status==='trial'?3:MAX_VIDEOS_PER_EVENT;
-    if(count.get(event.id).total>=limit)return fail(res,409,'Die Videogrußbox dieser Feier ist voll.');
-    const capacity=uploadCapacity.acquire();
-    if(!capacity.ok)return fail(res,capacity.reason==='disk'?503:429,'Die Videoverarbeitung ist gerade ausgelastet. Bitte versuche es erneut.');
-    busy.add(event.id);
+  app.post(videoRoute,access,uploadLimit,(req,res)=>{
+    const initial=req.event;
+    if(!videoAvailable||!initial.video_greetings_enabled)return fail(res,404,'Die Videogrußbox ist ausgeschaltet.');
+    if(!active(initial)||deletingUsers.has(initial.owner_id))return fail(res,409,'Diese Feier nimmt gerade keine Videogrüße an.');
+    const queued=eventUploads.reserve(initial.id);
+    if(!queued.ok){res.set('Retry-After','3');return fail(res,429,'Viele Gäste laden gerade hoch. Dein Videogruß wartet kurz in der Warteschlange.');}
+    const staged=uploadCapacity.reserveStaging(req,{maxBytes:MAX_VIDEO_BYTES+64*1024});
+    if(!staged.ok){queued.release();res.set('Retry-After','5');return fail(res,staged.reason==='disk'?503:429,'Der Upload ist gerade ausgelastet. Bitte versuche es gleich erneut.');}
     videoUpload(req,res,async uploadError=>{
-      const id=crypto.randomUUID();
-      const filename=`video-${id}.mp4`;
-      const output=path.join(temp,filename);
-      let stored=false;
-      let reserved=0;
+      const id=crypto.randomUUID(),filename=`video-${id}.mp4`,output=path.join(temp,filename);
+      let stored=false,reserved=0;
       try {
         if(uploadError?.code==='LIMIT_FILE_SIZE')return fail(res,413,'Bitte ein Video mit höchstens 50 MB auswählen.');
         if(uploadError||!req.file)return fail(res,400,'Bitte genau ein Video auswählen.');
-        const {duration,size}=await prepareVideo(req.file.path,output,cfg);
-        const current=lookup(event.id);
-        if(!active(current)||!current.video_greetings_enabled||deletingUsers.has(event.owner_id)) {
-          return fail(res,409,'Diese Feier nimmt gerade keine Videogrüße an.');
-        }
-        if(photoStorage.mode==='s3'){
-          if(storedObjectBytes()+remoteStorageReservedBytes+size>storageLimit)return fail(res,503,'Der gemeinsame Speicher ist ausgeschöpft.');
-          remoteStorageReservedBytes+=size;
-          reserved=size;
-          stored=true;
-          await photoStorage.put(event.id,filename,output,'video/mp4');
-        }else{
-          const dir=path.join(root,event.id);
-          fs.mkdirSync(dir,{recursive:true});
-          fs.renameSync(output,path.join(dir,filename));
-          stored=true;
-        }
-        const latest=lookup(event.id);
-        if(!active(latest)||!latest.video_greetings_enabled)throw Error('Diese Feier nimmt gerade keine Videogrüße an.');
-        db.prepare('INSERT INTO video_greetings (id,event_id,filename,bytes,duration,created_at) VALUES (?,?,?,?,?,?)')
-          .run(id,event.id,filename,size,duration,Date.now());
-        stored=false;
-        res.status(201).json({success:true});
+        const queueOutcome=await queued.run(async()=>{
+          const capacity=await uploadCapacity.acquire();
+          if(!capacity.ok)return {status:429,message:'Viele Gäste laden gerade hoch. Dein Videogruß wartet kurz in der Warteschlange.'};
+          try {
+            const current=lookup(initial.id);
+            if(!active(current)||!current.video_greetings_enabled||deletingUsers.has(current.owner_id))return {status:409,message:'Diese Feier nimmt gerade keine Videogrüße an.'};
+            const count=db.prepare('SELECT COUNT(*) AS total FROM video_greetings WHERE event_id=?');
+            const limit=current.status==='trial'?3:MAX_VIDEOS_PER_EVENT;
+            if(count.get(current.id).total>=limit)return {status:409,message:'Die Videogrußbox dieser Feier ist voll.'};
+            const {duration,size}=await prepareVideo(req.file.path,output,cfg);
+            if(photoStorage.mode==='s3'){
+              if(storedObjectBytes()+remoteStorageReservedBytes+size>storageLimit)return {status:503,message:'Der gemeinsame Speicher ist ausgeschöpft.'};
+              remoteStorageReservedBytes+=size;reserved=size;stored=true;await photoStorage.put(current.id,filename,output,'video/mp4');
+            }else{const dir=path.join(root,current.id);fs.mkdirSync(dir,{recursive:true});fs.renameSync(output,path.join(dir,filename));stored=true;}
+            const latest=lookup(current.id);
+            if(!active(latest)||!latest.video_greetings_enabled||deletingUsers.has(latest.owner_id))throw Error('Diese Feier nimmt gerade keine Videogrüße an.');
+            db.prepare('INSERT INTO video_greetings (id,event_id,filename,bytes,duration,created_at) VALUES (?,?,?,?,?,?)').run(id,current.id,filename,size,duration,Date.now());
+            stored=false;return {status:201,body:{success:true}};
+          } finally {capacity.release();}
+        });
+        if(!queueOutcome.ok){res.set('Retry-After','3');return fail(res,429,'Viele Gäste laden gerade hoch. Dein Videogruß wartet kurz in der Warteschlange.');}
+        const result=queueOutcome.value;
+        if(result.status!==201){if(result.status===429||result.status===503)res.set('Retry-After','3');return fail(res,result.status,result.message);}
+        res.status(result.status).json(result.body);
       }catch(error){
-        if(stored)try{await photoStorage.deletePhoto(event.id,filename);await backupService.deletePhoto(event.id,filename);}
-        catch{console.error('FinalSnap: Videodatei konnte nach fehlgeschlagenem Upload nicht entfernt werden.');}
+        if(stored)try{await photoStorage.deletePhoto(initial.id,filename);await backupService.deletePhoto(initial.id,filename);}catch{console.error('FinalSnap: Videodatei konnte nach fehlgeschlagenem Upload nicht entfernt werden.');}
         const unavailable=error.code==='PHOTO_STORAGE_UNAVAILABLE'||error.message==='Die Videoverarbeitung ist momentan nicht verfügbar.';
         fail(res,unavailable?503:400,error.message);
       }finally{
         remoteStorageReservedBytes-=reserved;
-        if(req.file)fs.rmSync(req.file.path,{force:true});
-        fs.rmSync(output,{force:true});
-        busy.delete(event.id);
-        capacity.release();
+        if(req.file)fs.rmSync(req.file.path,{force:true});fs.rmSync(output,{force:true});
+        staged.release();queued.release();
       }
     });
   });
@@ -851,52 +847,78 @@ function createApp(options = {}) {
     db.prepare('DELETE FROM video_greetings WHERE event_id=? AND id=?').run(req.event.id,video.id);
     res.json({success:true});
   }));
-  app.post('/api/event/:eventId/upload',uploadLimit,access,(req,res,next)=>{
-    if(req.event.owner_id && deletingUsers.has(req.event.owner_id)) return fail(res,409,'Das Konto wird gerade gelöscht. Uploads sind gesperrt.');
-    if(!active(req.event)) return fail(res,402,'Der Albumzeitraum ist beendet. Fotos können noch während der Downloadphase angesehen und heruntergeladen werden.');
-    if(busy.has(req.event.id)) return fail(res,429,'Upload läuft bereits. Bitte kurz warten.');
-    const capacity=uploadCapacity.acquire();
-    if(!capacity.ok){
-      if(capacity.reason==='concurrency')res.set('Retry-After','60');
-      return fail(res,capacity.reason==='disk'?503:429,capacity.reason==='disk'?'Der temporäre Uploadspeicher ist gerade stark belegt. Bitte in einigen Minuten erneut versuchen.':'Der Fotospeicher verarbeitet gerade andere Uploads. Bitte in einer Minute erneut versuchen.');
-    }
-    busy.add(req.event.id);
+  app.post('/api/event/:eventId/upload',access,uploadLimit,(req,res)=>{
+    const initial=req.event;
+    if(initial.owner_id && deletingUsers.has(initial.owner_id)) return fail(res,409,'Das Konto wird gerade gelöscht. Uploads sind gesperrt.');
+    if(!active(initial)) return fail(res,402,'Der Albumzeitraum ist beendet. Fotos können noch während der Downloadphase angesehen und heruntergeladen werden.');
+    const queued=eventUploads.reserve(initial.id);
+    if(!queued.ok){res.set('Retry-After','3');return fail(res,429,'Viele Gäste laden gerade hoch. Bitte versuche es gleich erneut.');}
+    const staged=uploadCapacity.reserveStaging(req,{maxBytes:10*MAX_UPLOAD_FILE_BYTES+64*1024});
+    if(!staged.ok){queued.release();res.set('Retry-After',staged.reason==='disk'?'10':'3');return fail(res,staged.reason==='disk'?503:429,staged.reason==='disk'?'Der temporäre Uploadspeicher ist gerade stark belegt. Bitte in einigen Minuten erneut versuchen.':'Die Upload-Warteschlange ist voll. Bitte gleich erneut versuchen.');}
     upload(req,res,async err=>{
       const written=[];
       try {
         if(err) throw err;
-        const disk=fs.statfsSync(root);if(Number(disk.bavail)*Number(disk.bsize)<100*1024**2)throw new Error('Fotospeicher vorübergehend ausgelastet. Bitte den Veranstalter informieren.');
-        if(!req.files?.length) return fail(res,400,'Keine Fotos empfangen.');
-        const dir=photoStorage.mode==='local'?path.join(root,req.event.id):temp;if(photoStorage.mode==='local')fs.mkdirSync(dir,{recursive:true});
-        const total=db.prepare('SELECT COUNT(*) count, COALESCE(SUM(bytes),0) bytes FROM photos WHERE event_id=?').get(req.event.id);
-        const photoLimit=eventPhotoLimit(req.event),storageLimit=eventStorageLimit(req.event,cfg);
-        if(photoLimit!==null&&total.count+req.files.length>photoLimit) throw new Error('Die 25 kostenlosen Testfotos sind genutzt. Nach bestätigter Buchung gilt das Eventpaket ab dem Veranstaltungsdatum.');
-        let bytes=total.bytes;
-        for(const file of req.files) {
-          const image=sharp(file.path,{limitInputPixels:40000000,animated:false});
-          const meta=await image.metadata();
-          if(!['jpeg','png','webp','heif'].includes(meta.format)) throw new Error('Nur JPEG, PNG, WebP und unterstützte HEIF-Bilder erlaubt.');
-          const id=crypto.randomUUID(), filename=`${id}.jpg`, dest=path.join(dir,filename);
-          written.push({id,filename,dest});
-          await image.rotate().resize({width:2560,height:2560,fit:'inside',withoutEnlargement:true}).jpeg({quality:82,mozjpeg:true}).toFile(dest);
-          const size=fs.statSync(dest).size;if(size>MAX_UPLOAD_FILE_BYTES)throw new Error('Dieses Foto ist nach der Verarbeitung zu groß. Bitte eine kleinere Datei hochladen.');bytes+=size;written[written.length-1].bytes=size;
-          if(bytes>storageLimit) throw new Error('Der Fotospeicher dieses Albums ist ausgeschöpft. Bitte den Veranstalter informieren.');
-        }
-        if(photoStorage.mode==='s3') {
-          const usedBytes=storedObjectBytes();
-          const incomingBytes=written.reduce((sum,file)=>sum+file.bytes,0);
-          if(usedBytes+remoteStorageReservedBytes+incomingBytes>storageLimit) throw new Error('Der gemeinsame Fotospeicher ist ausgeschöpft. Bitte den Veranstalter informieren.');
-          remoteStorageReservedBytes+=incomingBytes;
-          try {for(const file of written) await photoStorage.put(req.event.id,file.filename,file.dest);}
-          finally {remoteStorageReservedBytes-=incomingBytes;}
-        }
-        // Recheck expiry after processing and before publication.
-        if(!active(lookup(req.event.id))) throw new Error('Event inzwischen abgelaufen.');
-        db.transaction(()=>{for(const f of written) db.prepare('INSERT INTO photos (id,event_id,filename,bytes,approved,created_at,uploader_token_hash) VALUES (?,?,?,?,?,?,?)').run(f.id,req.event.id,f.filename,f.bytes,req.event.moderation?0:1,Date.now(),req.guestTokenHash||null);})();
-        db.prepare('UPDATE events SET upload_successes=upload_successes+1 WHERE id=?').run(req.event.id);
-        res.json({success:true,count:written.length,pending:!!req.event.moderation});
-      } catch(error) {db.prepare('UPDATE events SET upload_failures=upload_failures+1 WHERE id=?').run(req.event.id);for(const f of written){try{if(photoStorage.mode==='s3'){await photoStorage.deletePhoto(req.event.id,f.filename);await backupService.deletePhoto(req.event.id,f.filename);}else fs.rmSync(f.dest,{force:true});}catch(cleanupError){console.error('Upload-Aufräumen fehlgeschlagen:',cleanupError.message);}}if(error.code==='PHOTO_STORAGE_UNAVAILABLE')console.error('Hetzner Object Storage:',error.cause?.message||error.message);fail(res,error.code==='PHOTO_STORAGE_UNAVAILABLE'?503:400,error.message);}
-      finally {for(const f of req.files||[]) fs.rmSync(f.path,{force:true});if(photoStorage.mode==='s3')for(const f of written)fs.rmSync(f.dest,{force:true});busy.delete(req.event.id);capacity.release();}
+        if(!req.files?.length)return fail(res,400,'Keine Fotos empfangen.');
+        const queueOutcome=await queued.run(async()=>{
+          const capacity=await uploadCapacity.acquire();
+          if(!capacity.ok)return {status:429,message:'Viele Gäste laden gerade hoch. Dein Foto wartet kurz in der Warteschlange.'};
+          try {
+            const current=lookup(initial.id);
+            if(current.owner_id && deletingUsers.has(current.owner_id))return {status:409,message:'Das Konto wird gerade gelöscht. Uploads sind gesperrt.'};
+            if(!active(current))return {status:402,message:'Der Albumzeitraum ist beendet. Fotos können noch während der Downloadphase angesehen und heruntergeladen werden.'};
+            req.event=current;
+            const requestId=String(req.get('X-FinalSnap-Upload-Id')||crypto.randomUUID());
+            if(!/^[A-Za-z0-9_-]{16,80}$/.test(requestId))return {status:400,message:'Ungültige Upload-Kennung.'};
+            const existing=db.prepare('SELECT photo_count FROM photo_upload_requests WHERE event_id=? AND request_id=?').get(current.id,requestId);
+            if(existing)return {status:200,body:{success:true,count:existing.photo_count,pending:!!current.moderation}};
+            const disk=fs.statfsSync(root);if(Number(disk.bavail)*Number(disk.bsize)<100*1024**2)return {status:503,message:'Fotospeicher vorübergehend ausgelastet. Bitte den Veranstalter informieren.'};
+            const dir=photoStorage.mode==='local'?path.join(root,current.id):temp;if(photoStorage.mode==='local')fs.mkdirSync(dir,{recursive:true});
+            const total=db.prepare('SELECT COUNT(*) count, COALESCE(SUM(bytes),0) bytes FROM photos WHERE event_id=?').get(current.id);
+            const photoLimit=eventPhotoLimit(current,cfg),storageLimit=eventStorageLimit(current,cfg);
+            if(photoLimit!==null&&total.count+req.files.length>photoLimit)throw new Error('Die 25 kostenlosen Testfotos sind genutzt. Nach bestätigter Buchung gilt das Eventpaket ab dem Veranstaltungsdatum.');
+            let bytes=total.bytes;
+            for(const file of req.files) {
+              const image=sharp(file.path,{limitInputPixels:40000000,animated:false});
+              const meta=await image.metadata();
+              if(!['jpeg','png','webp','heif'].includes(meta.format))throw new Error('Nur JPEG, PNG, WebP und unterstützte HEIF-Bilder erlaubt.');
+              const id=crypto.randomUUID(),filename=`${id}.jpg`,dest=path.join(dir,filename);
+              written.push({id,filename,dest});
+              await image.rotate().resize({width:2560,height:2560,fit:'inside',withoutEnlargement:true}).jpeg({quality:82,mozjpeg:true}).toFile(dest);
+              const size=fs.statSync(dest).size;if(size>MAX_UPLOAD_FILE_BYTES)throw new Error('Dieses Foto ist nach der Verarbeitung zu groß. Bitte eine kleinere Datei hochladen.');bytes+=size;written.at(-1).bytes=size;
+              if(bytes>storageLimit)throw new Error('Der Fotospeicher dieses Albums ist ausgeschöpft. Bitte den Veranstalter informieren.');
+            }
+            if(photoStorage.mode==='s3') {
+              const usedBytes=storedObjectBytes(),incomingBytes=written.reduce((sum,file)=>sum+file.bytes,0);
+              if(usedBytes+remoteStorageReservedBytes+incomingBytes>storageLimit)throw new Error('Der gemeinsame Fotospeicher ist ausgeschöpft. Bitte den Veranstalter informieren.');
+              remoteStorageReservedBytes+=incomingBytes;
+              try{for(const file of written)await photoStorage.put(current.id,file.filename,file.dest);}
+              finally{remoteStorageReservedBytes-=incomingBytes;}
+            }
+            const latest=lookup(current.id);
+            if(!active(latest)||latest.owner_id&&deletingUsers.has(latest.owner_id))throw new Error('Event inzwischen abgelaufen.');
+            db.transaction(()=>{
+              db.prepare('INSERT INTO photo_upload_requests (event_id,request_id,photo_count,pending,created_at) VALUES (?,?,?,?,?)').run(current.id,requestId,written.length,current.moderation?1:0,Date.now());
+              for(const f of written)db.prepare('INSERT INTO photos (id,event_id,filename,bytes,approved,created_at,uploader_token_hash) VALUES (?,?,?,?,?,?,?)').run(f.id,current.id,f.filename,f.bytes,current.moderation?0:1,Date.now(),req.guestTokenHash||null);
+              db.prepare('UPDATE events SET upload_successes=upload_successes+1 WHERE id=?').run(current.id);
+            })();
+            return {status:200,body:{success:true,count:written.length,pending:!!current.moderation}};
+          } finally {capacity.release();}
+        });
+        if(!queueOutcome.ok){res.set('Retry-After','3');return fail(res,429,'Viele Gäste laden gerade hoch. Dein Foto wartet kurz in der Warteschlange.');}
+        const queuedResult=queueOutcome.value;
+        if(queuedResult.status!==200){if(queuedResult.status===429||queuedResult.status===503)res.set('Retry-After','3');if(queuedResult.status===400||queuedResult.status===402)db.prepare('UPDATE events SET upload_failures=upload_failures+1 WHERE id=?').run(initial.id);return fail(res,queuedResult.status,queuedResult.message);}
+        res.status(queuedResult.status).json(queuedResult.body);
+      } catch(error) {
+        db.prepare('UPDATE events SET upload_failures=upload_failures+1 WHERE id=?').run(initial.id);
+        for(const f of written){try{if(photoStorage.mode==='s3'){await photoStorage.deletePhoto(initial.id,f.filename);await backupService.deletePhoto(initial.id,f.filename);}else fs.rmSync(f.dest,{force:true});}catch(cleanupError){console.error('Upload-Aufräumen fehlgeschlagen:',cleanupError.message);}}
+        if(error.code==='PHOTO_STORAGE_UNAVAILABLE')console.error('Hetzner Object Storage:',error.cause?.message||error.message);
+        fail(res,error.code==='PHOTO_STORAGE_UNAVAILABLE'?503:400,error.message);
+      } finally {
+        for(const f of req.files||[])fs.rmSync(f.path,{force:true});
+        if(photoStorage.mode==='s3')for(const f of written)fs.rmSync(f.dest,{force:true});
+        staged.release();queued.release();
+      }
     });
   });
   function photoUrl(req,p) {return `/uploads/${req.event.id}/${p.filename}${own(req,req.event)?'':`?token=${req.event.guest_token}`}`;}
@@ -935,12 +957,12 @@ function createApp(options = {}) {
     const admin=own(req,req.event)&&req.query.manage==='1';
     const photos=own(req,req.event)
       ? db.prepare(`SELECT * FROM photos WHERE event_id=? ${admin?'':'AND approved=1'} ORDER BY created_at,id`).all(req.event.id)
-      : db.prepare('SELECT * FROM photos WHERE event_id=? AND approved=1 ORDER BY created_at,id').all(req.event.id);
+      : db.prepare('SELECT * FROM photos WHERE event_id=? AND approved=1 AND uploader_token_hash=? ORDER BY created_at,id').all(req.event.id,req.guestTokenHash);
     res.json({photos:photos.map(p=>({id:p.id,url:photoUrl(req,p),timestamp:p.created_at,approved:!!p.approved})),serverTime:Date.now()});
   });
   app.get('/uploads/:eventId/:filename',access,wrap(async(req,res)=>{
     const p=db.prepare('SELECT * FROM photos WHERE event_id=? AND filename=?').get(req.event.id,req.params.filename);
-    if(!p || (!p.approved && !own(req,req.event))) return fail(res,404,'Foto nicht gefunden.');
+    if(!p || (!own(req,req.event)&&(!p.approved||p.uploader_token_hash!==req.guestTokenHash))) return fail(res,404,'Foto nicht gefunden.');
     if(photoStorage.mode==='local') return res.sendFile(path.join(root,req.event.id,p.filename));
     const stream=await photoStorage.getStream(req.event.id,p.filename);
     res.type('jpeg');res.set('Cache-Control','private, no-store');stream.on('error',()=>res.destroy());stream.pipe(res);
@@ -958,7 +980,7 @@ function createApp(options = {}) {
   app.get('/api/event/:eventId/download',access,wrap(async(req,res)=>{
     const photos=own(req,req.event)
       ? db.prepare('SELECT * FROM photos WHERE event_id=?').all(req.event.id)
-      : db.prepare('SELECT * FROM photos WHERE event_id=? AND approved=1 ORDER BY created_at,id').all(req.event.id);
+      : db.prepare('SELECT * FROM photos WHERE event_id=? AND approved=1 AND uploader_token_hash=? ORDER BY created_at,id').all(req.event.id,req.guestTokenHash);
     if(!photos.length) return fail(res,404,'Keine Fotos vorhanden.');
     res.attachment(`event-${req.event.id}-fotos.zip`);
     const archive=new archiver.ZipArchive({zlib:{level:1}});
@@ -970,7 +992,7 @@ function createApp(options = {}) {
     archive.finalize();
   }));
   async function erase(e) {
-    if(busy.has(e.id)) return false;
+    if(isUploadBusy(e.id)) return false;
     // Legacy unowned events are never removed automatically: review/import first.
     await photoStorage.deleteEvent(e.id);
     await backupService.deleteEvent(e.id);
@@ -988,7 +1010,7 @@ function createApp(options = {}) {
     if(!user||!crypto.timingSafeEqual(Buffer.from(stored,'hex'),derived)) return fail(res,401,'Das Passwort stimmt nicht.');
     const confirmationRecipient=user.email;
     const events=db.prepare('SELECT * FROM events WHERE owner_id=?').all(req.user.id);
-    if(events.some(event=>busy.has(event.id))) return fail(res,409,'Für eine Veranstaltung läuft gerade ein Foto-Upload. Bitte warte kurz und versuche es erneut.');
+    if(events.some(event=>isUploadBusy(event.id))) return fail(res,409,'Für eine Veranstaltung läuft gerade ein Foto-Upload. Bitte warte kurz und versuche es erneut.');
     deletingUsers.add(req.user.id);
     try {
       // Prevent a still-open checkout from charging after the owner has deleted the albums.
@@ -1039,9 +1061,10 @@ function createApp(options = {}) {
       db.prepare('DELETE FROM email_verifications WHERE expires_at<=?').run(Date.now());
       db.prepare('DELETE FROM password_resets WHERE expires_at<=?').run(Date.now());
       db.prepare('DELETE FROM experience_reviews WHERE created_at<?').run(Date.now()-365*86400000);
+      db.prepare('DELETE FROM photo_upload_requests WHERE created_at<?').run(Date.now()-30*86400000);
       for(const entry of fs.readdirSync(temp)) {const file=path.join(temp,entry);if(fs.statSync(file).mtimeMs<Date.now()-86400000) fs.rmSync(file,{force:true});}
     };
-    if(photoStorage.mode==='local') {for(const e of expired) {if(!busy.has(e.id)){fs.rmSync(path.join(root,e.id),{recursive:true,force:true});db.transaction(()=>{db.prepare('DELETE FROM photos WHERE event_id=?').run(e.id);db.prepare('DELETE FROM guestbook_entries WHERE event_id=?').run(e.id);db.prepare('DELETE FROM video_greetings WHERE event_id=?').run(e.id);db.prepare("UPDATE events SET status='expired', deleted_at=?, guest_token=NULL WHERE id=?").run(Date.now(),e.id);})();}}pruneRecords();return;}
+    if(photoStorage.mode==='local') {for(const e of expired) {if(!isUploadBusy(e.id)){fs.rmSync(path.join(root,e.id),{recursive:true,force:true});db.transaction(()=>{db.prepare('DELETE FROM photos WHERE event_id=?').run(e.id);db.prepare('DELETE FROM guestbook_entries WHERE event_id=?').run(e.id);db.prepare('DELETE FROM video_greetings WHERE event_id=?').run(e.id);db.prepare("UPDATE events SET status='expired', deleted_at=?, guest_token=NULL WHERE id=?").run(Date.now(),e.id);})();}}pruneRecords();return;}
     return (async()=>{for(const e of expired) await erase(e);pruneRecords();})();
   }
   const pub=path.join(__dirname,'public');
@@ -1122,7 +1145,7 @@ function createApp(options = {}) {
   });
   app.use((req,res)=>fail(res,404,'Nicht gefunden.'));
   app.use((err,req,res,next)=>{console.error(err.message);if(!res.headersSent) fail(res,500,'Interner Fehler.');});
-  app.locals.db=db;app.locals.cleanup=cleanup;app.locals.fulfill=fulfill;app.locals.flushPaymentAlerts=flushPaymentAlerts;app.locals.flushContractConfirmations=flushContractConfirmations;app.locals.flushWithdrawalConfirmations=flushWithdrawalConfirmations;app.locals.flushAccountDeletionConfirmations=flushAccountDeletionConfirmations;app.locals.photoStorage=photoStorage;app.locals.backupService=backupService;app.locals.operationsMonitor=operationsMonitor;
+  app.locals.db=db;app.locals.cleanup=cleanup;app.locals.fulfill=fulfill;app.locals.flushPaymentAlerts=flushPaymentAlerts;app.locals.flushContractConfirmations=flushContractConfirmations;app.locals.flushWithdrawalConfirmations=flushWithdrawalConfirmations;app.locals.flushAccountDeletionConfirmations=flushAccountDeletionConfirmations;app.locals.photoStorage=photoStorage;app.locals.backupService=backupService;app.locals.operationsMonitor=operationsMonitor;app.locals.uploadQueues=eventUploads;app.locals.uploadCapacity=uploadCapacity;
   return app;
 }
 if(require.main===module) {
