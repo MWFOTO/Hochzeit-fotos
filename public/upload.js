@@ -15,8 +15,7 @@
   const thumbsEl = document.getElementById('thumbs');
   const RETRY_STATUS = new Set([429, 503]);
   const MAX_RETRY_MS = 3 * 60 * 1000;
-  const MAX_IMAGE_EDGE = 2560;
-  const SMALL_FILE_BYTES = 1.5 * 1024 * 1024;
+  const MAX_FILE_BYTES = 50 * 1024 * 1024;
   const QUEUE_DB_NAME = 'finalsnap-offline-uploads';
   const QUEUE_DB_VERSION = 1;
   const QUEUE_STORE = 'uploads';
@@ -43,6 +42,10 @@
 
   async function uploadFiles(files) {
     if (!files.length) return;
+    if (files.some(file => file.size > MAX_FILE_BYTES)) {
+      setStatus('Ein Foto ist größer als 50 MB. Bitte wähle eine kleinere Datei aus.', 'error');
+      return;
+    }
     await queueReady;
     while (uploadBusy) await new Promise(resolve => setTimeout(resolve, 50));
     if (uploadBusy) return;
@@ -55,8 +58,8 @@
       for (let index = 0; index < files.length; index++) {
         const originalFile = files[index];
         setStatus(`${index} von ${files.length} Fotos vorbereitet · Foto ${index + 1} von ${files.length} wird vorbereitet …`, 'loading');
-        // Only one bitmap/canvas is held at a time, which keeps older phones responsive.
-        const file = await prepareUploadFile(originalFile);
+        // Keep the upload byte-for-byte original; derivatives are generated server-side.
+        const file = originalFile;
         await storeQueueItem({
           id: crypto.randomUUID(),
           eventId,
@@ -238,49 +241,6 @@
     }
     const cutoff = Date.now() - MAX_QUEUE_AGE_MS;
     for (const item of items) if (item.createdAt < cutoff) await removeQueueItem(item.id);
-  }
-
-  async function prepareUploadFile(file) {
-    if (typeof createImageBitmap !== 'function') return file;
-    let bitmap;
-    try {
-      bitmap = await createImageBitmap(file, {imageOrientation: 'from-image'});
-      const width = bitmap.width;
-      const height = bitmap.height;
-      if (!width || !height) return file;
-      if (width <= MAX_IMAGE_EDGE && height <= MAX_IMAGE_EDGE && file.size < SMALL_FILE_BYTES) return file;
-
-      const scale = Math.min(1, MAX_IMAGE_EDGE / width, MAX_IMAGE_EDGE / height);
-      const targetWidth = Math.max(1, Math.round(width * scale));
-      const targetHeight = Math.max(1, Math.round(height * scale));
-      let canvas;
-      let blob;
-      if (typeof OffscreenCanvas === 'function') {
-        canvas = new OffscreenCanvas(targetWidth, targetHeight);
-        const context = canvas.getContext('2d');
-        if (!context) return file;
-        context.drawImage(bitmap, 0, 0, targetWidth, targetHeight);
-        blob = await canvas.convertToBlob({type: 'image/jpeg', quality: 0.9});
-      } else {
-        canvas = document.createElement('canvas');
-        canvas.width = targetWidth;
-        canvas.height = targetHeight;
-        const context = canvas.getContext('2d');
-        if (!context) return file;
-        context.drawImage(bitmap, 0, 0, targetWidth, targetHeight);
-        blob = await new Promise((resolve, reject) => {
-          canvas.toBlob(result => result ? resolve(result) : reject(new Error('JPEG-Konvertierung fehlgeschlagen.')), 'image/jpeg', 0.9);
-        });
-      }
-      if (!blob || blob.type !== 'image/jpeg') return file;
-      const filename = file.name.replace(/\.[^.]+$/, '') + '.jpg';
-      return new File([blob], filename, {type: 'image/jpeg', lastModified: file.lastModified});
-    } catch (_) {
-      // Unsupported formats (including some HEIF variants) are sent unchanged.
-      return file;
-    } finally {
-      bitmap?.close?.();
-    }
   }
 
   async function sendWithRetry(file, requestId, onProgress, onWaiting) {

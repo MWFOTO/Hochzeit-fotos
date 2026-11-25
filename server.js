@@ -20,6 +20,7 @@ const { createContractConfirmation } = require('./contract-confirmation');
 const { createPaymentReceipt } = require('./payment-receipt');
 const { createUploadCapacity, GiB, MiB, MIN_UPLOAD_FREE_BYTES, uploadDiskWarningThreshold } = require('./upload-capacity');
 const { createEventUploadQueues } = require('./upload-queues');
+const { preparePhoto, originalKey } = require('./photo-processing');
 const scrypt = promisify(crypto.scrypt);
 const PLANS = { event:{label:'FinalSnap Fotoalbum',months:3,retentionDays:90,priceCents:4990}, '1m':{label:'1 Monat (alt)',months:1,priceCents:1900,legacy:true}, '3m':{label:'3 Monate (alt)',months:3,priceCents:2900,legacy:true}, '6m':{label:'6 Monate (alt)',months:6,priceCents:3900,legacy:true}, '12m':{label:'12 Monate (alt)',months:12,priceCents:5900,legacy:true} };
 const TERMS_VERSION = '2026-11-04-2';
@@ -37,7 +38,7 @@ function retentionUntil(e) {
 }
 const TEST_PHOTO_LIMIT = 25;
 const TEST_STORAGE_BYTES = 250*1024**2;
-const MAX_UPLOAD_FILE_BYTES = 20*1024*1024;
+const MAX_UPLOAD_FILE_BYTES = 50*1024*1024;
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
 const random = () => crypto.randomBytes(32).toString('hex');
 const fail = (res, status, error) => res.status(status).json({error});
@@ -736,7 +737,7 @@ function createApp(options = {}) {
     for(let y=0;y<qr.modules.size;y++)for(let x=0;x<qr.modules.size;x++)if(qr.modules.get(x,y))doc.rect((x+quiet)*moduleSize,(y+quiet)*moduleSize,moduleSize+.15,moduleSize+.15).fill();
     doc.end();await done;res.type('pdf').attachment(`${req.event.id}-qr-10cm.pdf`).send(Buffer.concat(chunks));
   }));
-  // Disk staging bounds RAM usage. Re-encoding validates content and strips EXIF/GPS.
+  // Disk staging bounds RAM usage. Original files are retained, with GPS metadata removed.
   const temp=path.join(root,'.tmp');fs.mkdirSync(temp,{recursive:true});
   const upload=multer({dest:temp,limits:{fileSize:MAX_UPLOAD_FILE_BYTES,files:10,fields:0,parts:10}}).array('photos',10);
   const designCoverUpload=multer({dest:temp,limits:{fileSize:8*1024*1024,files:1,fields:0,parts:1}}).single('cover');
@@ -911,27 +912,29 @@ function createApp(options = {}) {
             if(photoLimit!==null&&total.count+req.files.length>photoLimit)throw new Error('Die 25 kostenlosen Testfotos sind genutzt. Nach bestätigter Buchung gilt das Eventpaket ab dem Veranstaltungsdatum.');
             let bytes=total.bytes;
             for(const file of req.files) {
-              const image=sharp(file.path,{limitInputPixels:40000000,animated:false});
-              const meta=await image.metadata();
-              if(!['jpeg','png','webp','heif'].includes(meta.format))throw new Error('Nur JPEG, PNG, WebP und unterstützte HEIF-Bilder erlaubt.');
-              const id=crypto.randomUUID(),filename=`${id}.jpg`,dest=path.join(dir,filename);
-              written.push({id,filename,dest});
-              await image.rotate().resize({width:2560,height:2560,fit:'inside',withoutEnlargement:true}).jpeg({quality:82,mozjpeg:true}).toFile(dest);
-              const size=fs.statSync(dest).size;if(size>MAX_UPLOAD_FILE_BYTES)throw new Error('Dieses Foto ist nach der Verarbeitung zu groß. Bitte eine kleinere Datei hochladen.');bytes+=size;written.at(-1).bytes=size;
+              if(file.size>MAX_UPLOAD_FILE_BYTES)throw new Error('Ein Foto darf höchstens 50 MB groß sein.');
+              const processed=await preparePhoto({inputPath:file.path,outputDirectory:dir,id:crypto.randomUUID(),originalName:file.originalname});
+              const objects=[
+                {filename:processed.originalKey,path:processed.originalPath,contentType:processed.originalMime},
+                {filename:processed.displayFilename,path:processed.displayPath,contentType:'image/jpeg'},
+                {filename:processed.thumbFilename,path:processed.thumbPath,contentType:'image/jpeg'},
+              ];
+              written.push({...processed,objects});
+              bytes+=processed.bytes;
               if(bytes>storageLimit)throw new Error('Der Fotospeicher dieses Albums ist ausgeschöpft. Bitte den Veranstalter informieren.');
             }
             if(photoStorage.mode==='s3') {
               const usedBytes=storedObjectBytes(),incomingBytes=written.reduce((sum,file)=>sum+file.bytes,0);
               if(usedBytes+remoteStorageReservedBytes+incomingBytes>storageLimit)throw new Error('Der gemeinsame Fotospeicher ist ausgeschöpft. Bitte den Veranstalter informieren.');
               remoteStorageReservedBytes+=incomingBytes;
-              try{for(const file of written)await photoStorage.put(current.id,file.filename,file.dest);}
+              try{for(const file of written)for(const object of file.objects)await photoStorage.put(current.id,object.filename,object.path,object.contentType);}
               finally{remoteStorageReservedBytes-=incomingBytes;}
             }
             const latest=lookup(current.id);
             if(!active(latest)||latest.owner_id&&deletingUsers.has(latest.owner_id))throw new Error('Event inzwischen abgelaufen.');
             db.transaction(()=>{
               db.prepare('INSERT INTO photo_upload_requests (event_id,request_id,photo_count,pending,created_at) VALUES (?,?,?,?,?)').run(current.id,requestId,written.length,current.moderation?1:0,Date.now());
-              for(const f of written)db.prepare('INSERT INTO photos (id,event_id,filename,bytes,approved,created_at,uploader_token_hash) VALUES (?,?,?,?,?,?,?)').run(f.id,current.id,f.filename,f.bytes,current.moderation?0:1,Date.now(),req.guestTokenHash||null);
+              for(const f of written)db.prepare('INSERT INTO photos (id,event_id,filename,bytes,approved,created_at,uploader_token_hash,original_filename,original_bytes,original_mime,display_filename,thumb_filename) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)').run(f.id,current.id,f.displayFilename,f.bytes,current.moderation?0:1,Date.now(),req.guestTokenHash||null,f.originalFilename,f.originalBytes,f.originalMime,f.displayFilename,f.thumbFilename);
               db.prepare('UPDATE events SET upload_successes=upload_successes+1 WHERE id=?').run(current.id);
             })();
             return {status:200,body:{success:true,count:written.length,pending:!!current.moderation}};
@@ -943,17 +946,17 @@ function createApp(options = {}) {
         res.status(queuedResult.status).json(queuedResult.body);
       } catch(error) {
         db.prepare('UPDATE events SET upload_failures=upload_failures+1 WHERE id=?').run(initial.id);
-        for(const f of written){try{if(photoStorage.mode==='s3'){await photoStorage.deletePhoto(initial.id,f.filename);await backupService.deletePhoto(initial.id,f.filename);}else fs.rmSync(f.dest,{force:true});}catch(cleanupError){console.error('Upload-Aufräumen fehlgeschlagen:',cleanupError.message);}}
+        for(const f of written){for(const object of f.objects){try{if(photoStorage.mode==='s3'){await photoStorage.deletePhoto(initial.id,object.filename);await backupService.deletePhoto(initial.id,object.filename);}else fs.rmSync(object.path,{force:true});}catch(cleanupError){console.error('Upload-Aufräumen fehlgeschlagen:',cleanupError.message);}}}
         if(error.code==='PHOTO_STORAGE_UNAVAILABLE')console.error('Hetzner Object Storage:',error.cause?.message||error.message);
         fail(res,error.code==='PHOTO_STORAGE_UNAVAILABLE'?503:400,error.message);
       } finally {
         for(const f of req.files||[])fs.rmSync(f.path,{force:true});
-        if(photoStorage.mode==='s3')for(const f of written)fs.rmSync(f.dest,{force:true});
+        if(photoStorage.mode==='s3')for(const f of written)for(const object of f.objects)fs.rmSync(object.path,{force:true});
         staged.release();queued.release();
       }
     });
   });
-  function photoUrl(req,p) {return `/uploads/${req.event.id}/${p.filename}${own(req,req.event)?'':`?token=${req.event.guest_token}`}`;}
+  function photoUrl(req,p,variant='display') {const query=new URLSearchParams();if(variant!=='display')query.set('variant',variant);if(!own(req,req.event))query.set('token',req.event.guest_token);return `/uploads/${req.event.id}/${encodeURIComponent(p.filename)}${query.size?`?${query}`:''}`;}
   app.get('/api/event/:eventId/info',access,(req,res)=>{
     const canManage=own(req,req.event);
     const photoCount=canManage
@@ -990,14 +993,19 @@ function createApp(options = {}) {
     const photos=own(req,req.event)
       ? db.prepare(`SELECT * FROM photos WHERE event_id=? ${admin?'':'AND approved=1'} ORDER BY created_at,id`).all(req.event.id)
       : db.prepare('SELECT * FROM photos WHERE event_id=? AND approved=1 AND uploader_token_hash=? ORDER BY created_at,id').all(req.event.id,req.guestTokenHash);
-    res.json({photos:photos.map(p=>({id:p.id,url:photoUrl(req,p),timestamp:p.created_at,approved:!!p.approved})),serverTime:Date.now()});
+    res.json({photos:photos.map(p=>({id:p.id,url:photoUrl(req,p),thumbUrl:photoUrl(req,p,'thumb'),downloadUrl:photoUrl(req,p,'original'),timestamp:p.created_at,approved:!!p.approved})),serverTime:Date.now()});
   });
   app.get('/uploads/:eventId/:filename',access,wrap(async(req,res)=>{
     const p=db.prepare('SELECT * FROM photos WHERE event_id=? AND filename=?').get(req.event.id,req.params.filename);
     if(!p || (!own(req,req.event)&&(!p.approved||p.uploader_token_hash!==req.guestTokenHash))) return fail(res,404,'Foto nicht gefunden.');
-    if(photoStorage.mode==='local') return res.sendFile(path.join(root,req.event.id,p.filename));
-    const stream=await photoStorage.getStream(req.event.id,p.filename);
-    res.type('jpeg');res.set('Cache-Control','private, no-store');stream.on('error',()=>res.destroy());stream.pipe(res);
+    const variant=['original','display','thumb'].includes(req.query.variant)?req.query.variant:'display';
+    const filename=variant==='original'?(p.original_filename?originalKey(p):p.filename):variant==='thumb'?(p.thumb_filename||p.display_filename||p.filename):(p.display_filename||p.filename);
+    const contentType=variant==='original'?(p.original_mime||'image/jpeg'):'image/jpeg';
+    res.set('Cache-Control','private, no-store').type(contentType);
+    if(variant==='original')res.attachment(p.original_filename||p.filename);
+    if(photoStorage.mode==='local')return res.sendFile(path.join(root,req.event.id,filename));
+    const stream=await photoStorage.getStream(req.event.id,filename);
+    stream.on('error',()=>res.destroy());stream.pipe(res);
   }));
   app.patch('/api/event/:eventId/photos/:photoId',loginRequired,owner,(req,res)=>{
     if(typeof req.body.approved!=='boolean') return fail(res,400,'Freigabe muss true oder false sein.');
@@ -1007,7 +1015,9 @@ function createApp(options = {}) {
   app.delete('/api/event/:eventId/photos/:photoId',loginRequired,owner,wrap(async(req,res)=>{
     const p=db.prepare('SELECT * FROM photos WHERE id=? AND event_id=?').get(req.params.photoId,req.event.id);
     if(!p) return fail(res,404,'Foto nicht gefunden.');
-    await photoStorage.deletePhoto(req.event.id,p.filename);await backupService.deletePhoto(req.event.id,p.filename);db.prepare('DELETE FROM photos WHERE id=?').run(p.id);res.json({success:true});
+    const files=[p.filename,p.original_filename?originalKey(p):null,p.display_filename,p.thumb_filename].filter(Boolean);
+    for(const filename of new Set(files)){await photoStorage.deletePhoto(req.event.id,filename);await backupService.deletePhoto(req.event.id,filename);}
+    db.prepare('DELETE FROM photos WHERE id=?').run(p.id);res.json({success:true});
   }));
   app.get('/api/event/:eventId/download',access,wrap(async(req,res)=>{
     const photos=own(req,req.event)
@@ -1018,8 +1028,10 @@ function createApp(options = {}) {
     const archive=new archiver.ZipArchive({zlib:{level:1}});
     archive.on('error',()=>res.destroy());res.on('close',()=>archive.abort());archive.pipe(res);
     for(const p of photos) {
-      if(photoStorage.mode==='local') archive.file(path.join(root,req.event.id,p.filename),{name:p.filename});
-      else archive.append(await photoStorage.getStream(req.event.id,p.filename),{name:p.filename});
+      const filename=p.original_filename?originalKey(p):p.filename;
+      const archiveName=p.original_filename||p.filename;
+      if(photoStorage.mode==='local') archive.file(path.join(root,req.event.id,filename),{name:archiveName});
+      else archive.append(await photoStorage.getStream(req.event.id,filename),{name:archiveName});
     }
     archive.finalize();
   }));

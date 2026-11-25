@@ -3,6 +3,7 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const os=require('node:os');
 const path=require('node:path');
+const zlib=require('node:zlib');
 const sharp=require('sharp');
 const Stripe=require('stripe');
 const {createApp}=require('../server');
@@ -28,6 +29,21 @@ async function request(url,{user,guest,body,method='GET',headers={},form}={}) {
   const res=await fetch(origin+url,{method,headers:{...(user?{Cookie:user.cookie,'X-CSRF-Token':user.csrf}:{}),...(guest?.cookie?{Cookie:guest.cookie}:{}),...(method!=='GET'?{Origin:'http://localhost:3000'}:{}),...(body?{'Content-Type':'application/json'}:{}),...headers},body:form || (body?JSON.stringify(body):undefined),redirect:'manual'});
   if(guest){const cookie=res.headers.get('set-cookie');if(cookie)guest.cookie=cookie.split(';')[0];}
   return {status:res.status,res,data:res.headers.get('content-type')?.includes('application/json')?await res.json():await res.arrayBuffer()};
+}
+function unzipEntries(buffer) {
+  let end=buffer.length-22;while(end>=0&&buffer.readUInt32LE(end)!==0x06054b50)end--;
+  assert.ok(end>=0,'ZIP end record exists');
+  const entries=new Map();let central=buffer.readUInt32LE(end+16),count=buffer.readUInt16LE(end+10);
+  for(let index=0;index<count;index++){
+    assert.equal(buffer.readUInt32LE(central),0x02014b50);
+    const method=buffer.readUInt16LE(central+10),compressedSize=buffer.readUInt32LE(central+20),nameLength=buffer.readUInt16LE(central+28),extraLength=buffer.readUInt16LE(central+30),commentLength=buffer.readUInt16LE(central+32),local=buffer.readUInt32LE(central+42);
+    const name=buffer.subarray(central+46,central+46+nameLength).toString();
+    const localNameLength=buffer.readUInt16LE(local+26),localExtraLength=buffer.readUInt16LE(local+28),start=local+30+localNameLength+localExtraLength;
+    const compressed=buffer.subarray(start,start+compressedSize);
+    entries.set(name,method===0?compressed:zlib.inflateRawSync(compressed));
+    central+=46+nameLength+extraLength+commentLength;
+  }
+  return entries;
 }
 async function register(email) {const r=await request('/api/auth/register',{method:'POST',headers:{'X-Forwarded-For':`192.0.2.${registrationIp++}`},body:{email,password:'a-good-long-password'}});assert.equal(r.status,200);return {cookie:r.res.headers.get('set-cookie').split(';')[0],csrf:r.data.csrf,id:r.data.user.id};}
 async function webhook(session,{type='checkout.session.completed',id='evt_'+Math.random(),signature=true}={}) {
@@ -134,6 +150,9 @@ test('Content validation, guest upload, moderation, protected files, QR, quota a
   assert.equal(fs.readdirSync(path.join(tmp,'uploads','.tmp')).length,0);
   assert.equal((await request(`/api/event/birthday/photos/${photo.id}`,{method:'DELETE',user})).status,200);
   assert.equal((await request(photo.url,{user})).status,404);
+  assert.equal(fs.existsSync(path.join(tmp,'uploads','birthday',`${photo.id}.jpg`)),false);
+  assert.equal(fs.existsSync(path.join(tmp,'uploads','birthday','original',`${photo.id}.jpg`)),false);
+  assert.equal(fs.existsSync(path.join(tmp,'uploads','birthday','thumb',`${photo.id}.jpg`)),false);
 });
 test('Guestbook moderation, shared approved notes, ownership and feature pages',async()=>{
   assert.equal((await request(`/event/birthday/games?token=${token}`,{guest:guestA})).status,200);
@@ -245,6 +264,10 @@ test('Free trial quota, compression, counters and upgrade preserve photos and gu
   assert.equal((await send(1,large)).status,200);
   const photoList=(await request('/api/event/trial-event/photos',{user:trialUser})).data.photos;
   const resized=await sharp(Buffer.from((await request(photoList[0].url,{user:trialUser})).data)).metadata();assert.equal(resized.width,2560);assert.equal(resized.height,1920);
+  const thumb=await sharp(Buffer.from((await request(photoList[0].thumbUrl,{user:trialUser})).data)).metadata();assert.equal(thumb.width,480);assert.equal(thumb.height,360);
+  const original=await request(photoList[0].downloadUrl,{user:trialUser});assert.equal(original.status,200);assert.deepEqual(Buffer.from(original.data),large);assert.match(original.res.headers.get('content-disposition'),/attachment/);
+  const stored=app.locals.db.prepare('SELECT filename,bytes,original_bytes,display_filename,thumb_filename,original_filename FROM photos WHERE event_id=?').get('trial-event');assert.equal(stored.original_bytes,large.length);assert.equal(stored.filename,stored.display_filename);assert.match(stored.thumb_filename,/^thumb\//);assert.equal(stored.original_filename,'test.jpg');assert.ok(stored.bytes>stored.original_bytes);
+  const zip=await request('/api/event/trial-event/download',{user:trialUser});assert.equal(zip.status,200);assert.deepEqual(unzipEntries(Buffer.from(zip.data)).get('test.jpg'),large);
   assert.equal((await send(10)).status,200);assert.equal((await send(10)).status,200);assert.equal((await send(4)).status,200);assert.equal((await send(1)).status,400);
   event=(await request('/api/events',{user:trialUser})).data.events[0];assert.equal(event.photoCount,25);assert.equal(event.upload_successes,4);assert.equal(event.upload_failures,1);
   assert.equal((await request('/api/event/trial-event/qr',{user:trialUser})).status,200);

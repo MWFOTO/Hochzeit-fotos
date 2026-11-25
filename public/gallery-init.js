@@ -13,6 +13,7 @@
     const lightboxImg = document.getElementById('lightbox-img');
     const lightboxDownload = document.getElementById('lightbox-download');
     const lightboxClose = document.getElementById('lightbox-close');
+    let openPhotoId = null;
 
     async function loadPhotos() {
       try {
@@ -20,8 +21,9 @@
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Galerie konnte nicht geladen werden.');
         const photos = data.photos || [];
-        if (lightbox.classList.contains('open') && !photos.some(p => new URL(p.url, location.origin).href === lightboxImg.src)) {
+        if (lightbox.classList.contains('open') && !photos.some(p => p.id === openPhotoId)) {
           lightbox.classList.remove('open'); lightboxImg.src = ''; lightboxDownload.href = '';
+          openPhotoId = null;
         }
         renderPhotos(photos);
       } catch (err) {
@@ -37,18 +39,18 @@
       // neueste zuerst anzeigen
       [...photos].reverse().forEach((photo) => {
         const img = document.createElement('img');
-        img.src = photo.url; img.alt = 'Geteiltes Veranstaltungsfoto'; img.tabIndex = 0; img.setAttribute('role','button'); img.setAttribute('aria-label','Foto groß ansehen'); img.onkeydown = e => {if(e.key==='Enter' || e.key===' '){e.preventDefault();openLightbox(photo.url);}};
+        img.src = photo.thumbUrl || photo.url; img.alt = 'Geteiltes Veranstaltungsfoto'; img.tabIndex = 0; img.setAttribute('role','button'); img.setAttribute('aria-label','Foto groß ansehen'); img.onkeydown = e => {if(e.key==='Enter' || e.key===' '){e.preventDefault();openLightbox(photo);}};
         img.loading = 'lazy';
-        img.addEventListener('click', () => openLightbox(photo.url));
+        img.addEventListener('click', () => openLightbox(photo));
         grid.appendChild(img);
       });
     }
 
-    function openLightbox(url) {
-      lightboxImg.src = url;
-      lightboxDownload.href = url;
-      // Dateinamen fürs Download-Attribut aus der URL ableiten
-      lightboxDownload.download = url.split('/').pop();
+    function openLightbox(photo) {
+      openPhotoId = photo.id;
+      lightboxImg.src = photo.url;
+      lightboxDownload.href = photo.downloadUrl || photo.url;
+      lightboxDownload.download = '';
       lightbox.classList.add('open');
     }
 
