@@ -144,7 +144,7 @@ function createApp(options = {}) {
     const design=readDesign(e);
     return {
       title:typeof design.title==='string'?design.title:e?.title||'Veranstaltung',
-      occasion:['wedding','birthday','summer','company','jubilee','graduation','other'].includes(design.occasion)?design.occasion:'other',
+      occasion:['wedding','birthday','party','summer','company','jubilee','graduation','other'].includes(design.occasion)?design.occasion:'other',
       theme:['afterglow','midnight','garden'].includes(design.theme)?design.theme:'afterglow',
       accent:/^#[0-9a-f]{6}$/i.test(design.accent||'')?design.accent:'#e99a69',
       font:['classic','palatino','modern','verdana','relaxed','typewriter'].includes(design.font)?design.font:'classic',
@@ -485,11 +485,14 @@ function createApp(options = {}) {
     const id=String(req.body.eventId||''); const plan=PLANS.event; const title=String(req.body.title||'').trim(),eventDate=String(req.body.eventDate||'');
     if(!/^[a-z0-9][a-z0-9_-]{2,63}$/.test(id) || !title || title.length>120 || !validEventDate(eventDate)) return fail(res,400,'Bitte Event-ID, Titel und ein Veranstaltungsdatum innerhalb der nächsten 24 Monate angeben.');
     if(lookup(id) || fs.existsSync(path.join(root,id))) return fail(res,409,'Event-ID bereits vergeben, auch für Bestandsdaten.');
+    const occasion=['wedding','birthday','party','company'].includes(req.body.occasion)?req.body.occasion:'other';
+    const theme=['afterglow','midnight','garden'].includes(req.body.theme)?req.body.theme:'afterglow';
+    const accent=/^#[0-9a-f]{6}$/i.test(String(req.body.accent||''))?String(req.body.accent).toLowerCase():'#efb85d';
     // During the test-only phase each newly created event can use the 25-photo
     // trial. Checkout remains a Stripe test checkout and can never charge live.
     const trial=req.body.trial!==false;
     const expiresAt=eventDeadline(eventDate);
-    db.prepare('INSERT INTO events (id,email,plan,amount_cents,status,created_at,owner_id,title,event_date,guest_token,moderation,guestbook_moderation,expires_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)').run(id,req.user.email,'event',plan.priceCents,'pending',Date.now(),req.user.id,title,eventDate,random(),req.body.moderation===true?1:0,req.body.guestbookModeration===false?0:1,expiresAt);
+    db.prepare('INSERT INTO events (id,email,plan,amount_cents,status,created_at,owner_id,title,event_date,guest_token,moderation,guestbook_moderation,expires_at,design_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(id,req.user.email,'event',plan.priceCents,'pending',Date.now(),req.user.id,title,eventDate,random(),req.body.moderation===true?1:0,req.body.guestbookModeration===false?0:1,expiresAt,JSON.stringify({occasion,theme,accent,title,occasionLabel:{wedding:'Hochzeit',birthday:'Geburtstag',party:'Party',company:'Firmenfeier',other:'Feier'}[occasion]}));
     if(trial)db.prepare("UPDATE events SET status='trial', trial_used=1 WHERE id=?").run(id);
     res.status(201).json({eventId:id,trial:!!trial,eventDate});
   });

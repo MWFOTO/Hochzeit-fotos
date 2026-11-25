@@ -67,11 +67,13 @@ test('Registration, login, session, CSRF and protected dashboard',async()=>{
   assert.equal((await request('/api/auth/login',{method:'POST',body:{email:'owner@example.com',password:'a-good-long-password'}})).status,200);
   assert.equal((await request('/api/events',{method:'POST',user:{...user,csrf:''},body:{}})).status,403);
   assert.equal((await request('/api/events',{method:'POST',user,headers:{Origin:'https://evil.example'},body:{}})).status,403);
-  assert.equal((await request('/dashboard',{user})).status,200);
+  const dashboard=await request('/dashboard',{user});assert.equal(dashboard.status,200);const dashboardHtml=Buffer.from(dashboard.data).toString();assert.match(dashboardHtml,/id="create-event"/);assert.match(dashboardHtml,/Neue Feier anlegen/g);assert.match(dashboardHtml,/name="occasion"/);assert.match(dashboardHtml,/name="theme"/);assert.match(dashboardHtml,/Schritt 1 von 4 · Anlass/);
 });
 test('Multiple events, ownership and pending payment gate',async()=>{
-  for(const eventId of ['birthday','company'])assert.equal((await request('/api/events',{method:'POST',user,body:{eventId,title:'Test Event',eventDate,plan:'event',trial:false,...(eventId==='birthday'?{moderation:true}:{})}})).status,201);
+  for(const eventId of ['birthday','company'])assert.equal((await request('/api/events',{method:'POST',user,body:{eventId,title:'Test Event',eventDate,plan:'event',trial:false,...(eventId==='birthday'?{moderation:true,occasion:'wedding',theme:'garden',accent:'#aabbcc'}:{occasion:'unknown',theme:'not-a-theme',accent:'url(javascript:alert(1))'})}})).status,201);
   const ownerEvents=(await request('/api/events',{user})).data.events;assert.equal(ownerEvents.length,2);assert.ok(ownerEvents.every(event=>event.guestbook_moderation===1));
+  assert.deepEqual(JSON.parse(ownerEvents.find(event=>event.id==='birthday').design_json),{occasion:'wedding',theme:'garden',accent:'#aabbcc',title:'Test Event',occasionLabel:'Hochzeit'});
+  assert.deepEqual(JSON.parse(ownerEvents.find(event=>event.id==='company').design_json),{occasion:'other',theme:'afterglow',accent:'#efb85d',title:'Test Event',occasionLabel:'Feier'});
   assert.equal((await request('/api/events',{method:'POST',user:other,body:{eventId:'birthday',title:'Collision',eventDate,plan:'event'}})).status,409);
   assert.equal((await request('/event/birthday')).status,402);
   assert.equal((await request('/api/event/birthday/qr',{user})).status,402);
