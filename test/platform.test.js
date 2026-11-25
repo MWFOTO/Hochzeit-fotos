@@ -57,6 +57,7 @@ test('Registration, login, session, CSRF and protected dashboard',async()=>{
   const landing=await request('/');assert.equal(landing.status,200);
   const policy=landing.res.headers.get('content-security-policy');assert.match(policy,/script-src 'self'/);assert.doesNotMatch(policy,/script-src[^;]*unsafe-inline/);
   assert.match(Buffer.from(landing.data).toString(),/src="\/landing\.js"/);
+  const loginPage=Buffer.from((await request('/login')).data).toString();assert.match(loginPage,/finalsnap-logo\.webp/);assert.match(loginPage,/Zur Startseite/);assert.doesNotMatch(loginPage,/Mein Konto/);
   for(const file of ['landing.js','success.js','gallery-init.js','welcome.js','admin.js'])assert.equal((await request(`/${file}`)).status,200);
   assert.equal((await request('/dashboard')).status,302);
   user=await register('owner@example.com');other=await register('other@example.com');
