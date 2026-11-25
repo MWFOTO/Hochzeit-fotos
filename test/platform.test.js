@@ -67,7 +67,7 @@ test('Registration, login, session, CSRF and protected dashboard',async()=>{
   assert.equal((await request('/api/auth/login',{method:'POST',body:{email:'owner@example.com',password:'a-good-long-password'}})).status,200);
   assert.equal((await request('/api/events',{method:'POST',user:{...user,csrf:''},body:{}})).status,403);
   assert.equal((await request('/api/events',{method:'POST',user,headers:{Origin:'https://evil.example'},body:{}})).status,403);
-  const dashboard=await request('/dashboard',{user});assert.equal(dashboard.status,200);const dashboardHtml=Buffer.from(dashboard.data).toString();assert.match(dashboardHtml,/id="create-event"/);assert.match(dashboardHtml,/Neue Feier anlegen/g);assert.match(dashboardHtml,/name="occasion"/);assert.match(dashboardHtml,/name="theme"/);assert.match(dashboardHtml,/Schritt 1 von 4 · Anlass/);
+  const dashboard=await request('/dashboard',{user});assert.equal(dashboard.status,200);const dashboardHtml=Buffer.from(dashboard.data).toString();assert.match(dashboardHtml,/id="create-event"/);assert.match(dashboardHtml,/Neue Feier anlegen/g);assert.match(dashboardHtml,/name="occasion"/);assert.match(dashboardHtml,/name="theme"/);assert.match(dashboardHtml,/Schritt 1 von 4 · Anlass/);const accountScript=Buffer.from((await request('/account.js')).data).toString();assert.match(accountScript,/Bereit für eure Feier/);assert.match(accountScript,/qr-access-preview/);
 });
 test('Multiple events, ownership and pending payment gate',async()=>{
   for(const eventId of ['birthday','company'])assert.equal((await request('/api/events',{method:'POST',user,body:{eventId,title:'Test Event',eventDate,plan:'event',trial:false,...(eventId==='birthday'?{moderation:true,occasion:'wedding',theme:'garden',accent:'#aabbcc'}:{occasion:'unknown',theme:'not-a-theme',accent:'url(javascript:alert(1))'})}})).status,201);
@@ -78,6 +78,15 @@ test('Multiple events, ownership and pending payment gate',async()=>{
   assert.equal((await request('/event/birthday')).status,402);
   assert.equal((await request('/api/event/birthday/qr',{user})).status,402);
   assert.equal((await request('/api/checkout',{method:'POST',user:other,body:{termsAccepted:true,eventId:'birthday'}})).status,404);
+});
+test('Event preparation checklist flags are persisted when design is saved and QR is downloaded',async()=>{
+  const account=await register('event-checklist@example.com');
+  assert.equal((await request('/api/events',{method:'POST',user:account,body:{eventId:'checklist-event',title:'Mara & Jonas',eventDate,occasion:'wedding',theme:'garden',accent:'#aabbcc'}})).status,201);
+  let event=(await request('/api/events',{user:account})).data.events[0];assert.equal(event.design_saved,0);assert.equal(event.qr_downloaded,0);
+  assert.equal((await request('/api/event/checklist-event/design',{method:'PATCH',user:account,body:{design:{title:'Mara & Jonas',occasion:'wedding',theme:'garden',accent:'#aabbcc',font:'classic'}}})).status,200);
+  event=(await request('/api/events',{user:account})).data.events[0];assert.equal(event.design_saved,1);
+  const qr=await request('/api/event/checklist-event/qr',{user:account});assert.equal(qr.status,200);assert.match(qr.res.headers.get('content-type'),/image\/png/);
+  event=(await request('/api/events',{user:account})).data.events[0];assert.equal(event.qr_downloaded,1);
 });
 test('Upcoming event operations list is visible only to verified administrators',async()=>{
   assert.equal((await request('/api/admin/upcoming-events')).status,401);

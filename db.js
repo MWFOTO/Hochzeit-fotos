@@ -103,7 +103,7 @@ function openDatabase(filename) {
     SELECT 'legacy-'||p.id,p.id,p.stripe_session_id,1,CASE WHEN p.status='paid' THEN 'paid' ELSE 'open' END,e.created_at,e.created_at
     FROM payments p JOIN events e ON e.id=p.event_id WHERE p.stripe_session_id IS NOT NULL`).run();
   const columns = new Set(db.prepare('PRAGMA table_info(events)').all().map(x => x.name));
-  for (const [name, type] of Object.entries({owner_id:'TEXT REFERENCES users(id)', title:"TEXT NOT NULL DEFAULT 'Veranstaltung'", event_date:'TEXT', guest_token:'TEXT', moderation:'INTEGER NOT NULL DEFAULT 1', guestbook_moderation:'INTEGER NOT NULL DEFAULT 1', video_greetings_enabled:'INTEGER NOT NULL DEFAULT 0', deleted_at:'INTEGER', trial_used:'INTEGER NOT NULL DEFAULT 0', upload_successes:'INTEGER NOT NULL DEFAULT 0', upload_failures:'INTEGER NOT NULL DEFAULT 0', design_json:"TEXT NOT NULL DEFAULT '{}'"})) {
+  for (const [name, type] of Object.entries({owner_id:'TEXT REFERENCES users(id)', title:"TEXT NOT NULL DEFAULT 'Veranstaltung'", event_date:'TEXT', guest_token:'TEXT', moderation:'INTEGER NOT NULL DEFAULT 1', guestbook_moderation:'INTEGER NOT NULL DEFAULT 1', video_greetings_enabled:'INTEGER NOT NULL DEFAULT 0', deleted_at:'INTEGER', trial_used:'INTEGER NOT NULL DEFAULT 0', upload_successes:'INTEGER NOT NULL DEFAULT 0', upload_failures:'INTEGER NOT NULL DEFAULT 0', design_saved:'INTEGER NOT NULL DEFAULT 0', qr_downloaded:'INTEGER NOT NULL DEFAULT 0', design_json:"TEXT NOT NULL DEFAULT '{}'"})) {
     if (!columns.has(name)) db.exec(`ALTER TABLE events ADD COLUMN ${name} ${type}`);
   }
   const userColumns=new Set(db.prepare('PRAGMA table_info(users)').all().map(x=>x.name));

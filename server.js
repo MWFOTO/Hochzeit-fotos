@@ -707,9 +707,9 @@ function createApp(options = {}) {
     const theme=String(value.theme||'');
     const accent=String(value.accent||'');
     const font=String(value.font||'');
-    if(!title||title.length>80||!['wedding','birthday','summer','company','jubilee','graduation','other'].includes(occasion)||!['afterglow','midnight','garden'].includes(theme)||!/^#[0-9a-f]{6}$/i.test(accent)||!['classic','palatino','modern','verdana','relaxed','typewriter'].includes(font))return fail(res,400,'Bitte prüfe Titel, Anlass, Vorlage, Farbe und Schrift.');
+    if(!title||title.length>80||!['wedding','birthday','party','summer','company','jubilee','graduation','other'].includes(occasion)||!['afterglow','midnight','garden'].includes(theme)||!/^#[0-9a-f]{6}$/i.test(accent)||!['classic','palatino','modern','verdana','relaxed','typewriter'].includes(font))return fail(res,400,'Bitte prüfe Titel, Anlass, Vorlage, Farbe und Schrift.');
     const design={...readDesign(req.event),title,occasion,theme,accent,font};
-    db.prepare('UPDATE events SET design_json=? WHERE id=?').run(JSON.stringify(design),req.event.id);
+    db.prepare('UPDATE events SET design_json=?,design_saved=1 WHERE id=?').run(JSON.stringify(design),req.event.id);
     res.json({success:true,design:publicDesign(lookup(req.event.id))});
   });
   app.patch('/api/event/:eventId',loginRequired,owner,(req,res)=>{
@@ -730,17 +730,20 @@ function createApp(options = {}) {
   app.get('/api/event/:eventId/qr',loginRequired,owner,wrap(async(req,res)=>{
     if(!readable(req.event)) return fail(res,402,'Album und Downloadzeitraum sind abgelaufen.');
     const url=`${baseUrl.origin}/event/${req.event.id}?token=${req.event.guest_token}`;
+    db.prepare('UPDATE events SET qr_downloaded=1 WHERE id=?').run(req.event.id);
     res.type('png').attachment(`${req.event.id}-qr.png`).send(await QRCode.toBuffer(url,{width:2000,margin:4,errorCorrectionLevel:'M'}));
   }));
   app.get('/api/event/:eventId/qr.svg',loginRequired,owner,wrap(async(req,res)=>{
     if(!readable(req.event))return fail(res,402,'Album und Downloadzeitraum sind abgelaufen.');
     const url=`${baseUrl.origin}/event/${req.event.id}?token=${req.event.guest_token}`;
+    db.prepare('UPDATE events SET qr_downloaded=1 WHERE id=?').run(req.event.id);
     const svg=await QRCode.toString(url,{type:'svg',width:2000,margin:4,errorCorrectionLevel:'M'});
     res.type('svg').attachment(`${req.event.id}-qr.svg`).send(svg);
   }));
   app.get('/api/event/:eventId/qr.pdf',loginRequired,owner,wrap(async(req,res)=>{
     if(!readable(req.event))return fail(res,402,'Album und Downloadzeitraum sind abgelaufen.');
     const url=`${baseUrl.origin}/event/${req.event.id}?token=${req.event.guest_token}`;
+    db.prepare('UPDATE events SET qr_downloaded=1 WHERE id=?').run(req.event.id);
     const qr=QRCode.create(url,{errorCorrectionLevel:'M'}),quiet=4,total=qr.modules.size+quiet*2,doc=new PDFDocument({size:[283.46,283.46],margin:0,compress:true});
     const chunks=[];doc.on('data',chunk=>chunks.push(chunk));
     const done=new Promise((resolve,reject)=>{doc.on('end',resolve);doc.on('error',reject);});
