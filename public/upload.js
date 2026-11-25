@@ -15,24 +15,30 @@
   const thumbsEl = document.getElementById('thumbs');
   const RETRY_STATUS = new Set([429, 503]);
   const MAX_RETRY_MS = 3 * 60 * 1000;
+  const MAX_IMAGE_EDGE = 2560;
+  const SMALL_FILE_BYTES = 1.5 * 1024 * 1024;
 
   cameraTrigger.addEventListener('click', () => cameraInput.click());
-  cameraInput.addEventListener('change', () => { if (cameraInput.files.length) uploadFiles(Array.from(cameraInput.files)); });
+  cameraInput.addEventListener('change', () => cameraInput.files.length ? uploadFiles(Array.from(cameraInput.files)) : undefined);
   uploadTrigger.addEventListener('click', () => fileInput.click());
-  fileInput.addEventListener('change', () => { if (fileInput.files?.length) uploadFiles(Array.from(fileInput.files)); });
+  fileInput.addEventListener('change', () => fileInput.files?.length ? uploadFiles(Array.from(fileInput.files)) : undefined);
 
   async function uploadFiles(files) {
-    if (files.length > 10) { setStatus('Bitte höchstens 10 Fotos gleichzeitig auswählen.', 'error'); return; }
+    if (!files.length) return;
     uploadTrigger.disabled = true;
     cameraTrigger.disabled = true;
     showProgress(true);
     let succeeded = 0;
     const failures = [];
+    const retryableFailures = [];
     try {
       for (let index = 0; index < files.length; index++) {
-        const file = files[index];
+        const originalFile = files[index];
+        setStatus(`${succeeded} von ${files.length} Fotos hochgeladen · Foto ${index + 1} von ${files.length} wird vorbereitet …`, 'loading');
+        // Only one bitmap/canvas is held at a time, which keeps older phones responsive.
+        const file = await prepareUploadFile(originalFile);
         setProgress(0);
-        setStatus(`Foto ${index + 1} von ${files.length}: Wird hochgeladen …`, 'loading');
+        setStatus(`${succeeded} von ${files.length} Fotos hochgeladen · Foto ${index + 1} von ${files.length} wird hochgeladen …`, 'loading');
         const result = await sendWithRetry(file, percent => setProgress(percent), retryResult => {
           setProgress(0);
           const waitMessage = retryResult.status === 429
@@ -40,21 +46,27 @@
             : retryResult.status === 503
               ? 'Der Upload ist gerade ausgelastet – dein Foto bleibt ausgewählt. Wir versuchen es erneut.'
               : 'Verbindung kurz unterbrochen – wir versuchen es erneut.';
-          setStatus(`Foto ${index + 1} von ${files.length}: ${waitMessage}`, 'loading');
+          setStatus(`${succeeded} von ${files.length} Fotos hochgeladen · Foto ${index + 1} von ${files.length}: ${waitMessage}`, 'loading');
         });
         if (result.status >= 200 && result.status < 300) {
           succeeded++;
-          showLocalPreview([file]);
+          showLocalPreview([originalFile]);
+          setProgress(100);
+          setStatus(`${succeeded} von ${files.length} Fotos hochgeladen`, 'loading');
           continue;
         }
         const message = responseMessage(result.body);
         failures.push(message);
+        if (result.status === 0 || RETRY_STATUS.has(result.status)) retryableFailures.push(originalFile);
         if (message.startsWith('Die 25 kostenlosen')) break;
       }
       if (succeeded) window.refreshEventQuota?.().catch(() => {});
       if (!failures.length) setStatus(`✓ ${succeeded === 1 ? 'Dein Foto wurde hochgeladen.' : `${succeeded} Fotos wurden hochgeladen.`}`, 'success');
-      else if (succeeded) setStatus(`✓ ${succeeded} Foto${succeeded === 1 ? '' : 's'} hochgeladen. ${failures.length} Foto${failures.length === 1 ? '' : 's'} konnten nicht hochgeladen werden: ${failures[0]}`, 'notice');
+      else if (succeeded) {
+        setStatus(`✓ ${succeeded} von ${files.length} Fotos hochgeladen. ${failures.length} Foto${failures.length === 1 ? '' : 's'} konnten nicht hochgeladen werden: ${failures[0]}`, 'notice');
+      }
       else setStatus('✗ ' + failures[0], failures[0].startsWith('Die 25 kostenlosen') ? 'notice' : 'error');
+      if (retryableFailures.length) addRetryButton(retryableFailures);
     } catch (_) {
       setStatus('✗ Verbindung fehlgeschlagen. Bitte erneut versuchen.', 'error');
     } finally {
@@ -64,6 +76,62 @@
       fileInput.value = '';
       cameraInput.value = '';
     }
+  }
+
+  async function prepareUploadFile(file) {
+    if (typeof createImageBitmap !== 'function') return file;
+    let bitmap;
+    try {
+      bitmap = await createImageBitmap(file, {imageOrientation: 'from-image'});
+      const width = bitmap.width;
+      const height = bitmap.height;
+      if (!width || !height) return file;
+      if (width <= MAX_IMAGE_EDGE && height <= MAX_IMAGE_EDGE && file.size < SMALL_FILE_BYTES) return file;
+
+      const scale = Math.min(1, MAX_IMAGE_EDGE / width, MAX_IMAGE_EDGE / height);
+      const targetWidth = Math.max(1, Math.round(width * scale));
+      const targetHeight = Math.max(1, Math.round(height * scale));
+      let canvas;
+      let blob;
+      if (typeof OffscreenCanvas === 'function') {
+        canvas = new OffscreenCanvas(targetWidth, targetHeight);
+        const context = canvas.getContext('2d');
+        if (!context) return file;
+        context.drawImage(bitmap, 0, 0, targetWidth, targetHeight);
+        blob = await canvas.convertToBlob({type: 'image/jpeg', quality: 0.9});
+      } else {
+        canvas = document.createElement('canvas');
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
+        const context = canvas.getContext('2d');
+        if (!context) return file;
+        context.drawImage(bitmap, 0, 0, targetWidth, targetHeight);
+        blob = await new Promise((resolve, reject) => {
+          canvas.toBlob(result => result ? resolve(result) : reject(new Error('JPEG-Konvertierung fehlgeschlagen.')), 'image/jpeg', 0.9);
+        });
+      }
+      if (!blob || blob.type !== 'image/jpeg') return file;
+      const filename = file.name.replace(/\.[^.]+$/, '') + '.jpg';
+      return new File([blob], filename, {type: 'image/jpeg', lastModified: file.lastModified});
+    } catch (_) {
+      // Unsupported formats (including some HEIF variants) are sent unchanged.
+      return file;
+    } finally {
+      bitmap?.close?.();
+    }
+  }
+
+  function addRetryButton(files) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'button secondary';
+    button.textContent = 'Fehlgeschlagene Fotos erneut versuchen';
+    button.addEventListener('click', () => {
+      button.remove();
+      uploadFiles(files);
+    }, {once: true});
+    statusEl.appendChild(document.createTextNode(' '));
+    statusEl.appendChild(button);
   }
 
   async function sendWithRetry(file, onProgress, onWaiting) {
