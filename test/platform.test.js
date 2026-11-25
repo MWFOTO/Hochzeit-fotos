@@ -146,6 +146,8 @@ test('Content validation, guest upload, moderation, protected files, QR, quota a
   assert.equal((await request(`/api/event/birthday/info?token=${token}`,{guest:guestA})).data.photoCount,1);
   assert.equal((await request(`/api/event/birthday/info?token=${token}`,{guest:guestB})).data.photoCount,0);
   const qr=await request('/api/event/birthday/qr',{user});assert.equal(qr.status,200);assert.equal((await sharp(Buffer.from(qr.data)).metadata()).width,2000);assert.match(qr.res.headers.get('content-disposition'),/birthday-qr\.png/);
+  const guestQr=await request(`/api/event/birthday/guest-qr.png?token=${token}`,{guest:guestA});assert.equal(guestQr.status,200);assert.equal((await sharp(Buffer.from(guestQr.data)).metadata()).width,520);
+  assert.equal((await request('/api/event/birthday/guest-qr.png')).status,403);
   const svgQr=await request('/api/event/birthday/qr.svg',{user});assert.equal(svgQr.status,200);assert.match(Buffer.from(svgQr.data).toString(),/<svg[\s>]/);assert.match(svgQr.res.headers.get('content-disposition'),/birthday-qr\.svg/);
   const pdfQr=await request('/api/event/birthday/qr.pdf',{user});assert.equal(pdfQr.status,200);assert.equal(Buffer.from(pdfQr.data).subarray(0,5).toString(),'%PDF-');assert.match(pdfQr.res.headers.get('content-disposition'),/birthday-qr-10cm\.pdf/);
   assert.equal((await request('/api/event/birthday/qr.svg',{user:other})).status,404);

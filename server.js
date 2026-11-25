@@ -746,6 +746,10 @@ function createApp(options = {}) {
     for(let y=0;y<qr.modules.size;y++)for(let x=0;x<qr.modules.size;x++)if(qr.modules.get(x,y))doc.rect((x+quiet)*moduleSize,(y+quiet)*moduleSize,moduleSize+.15,moduleSize+.15).fill();
     doc.end();await done;res.type('pdf').attachment(`${req.event.id}-qr-10cm.pdf`).send(Buffer.concat(chunks));
   }));
+  app.get('/api/event/:eventId/guest-qr.png',access,wrap(async(req,res)=>{
+    const url=`${baseUrl.origin}/event/${encodeURIComponent(req.event.id)}?token=${encodeURIComponent(req.event.guest_token)}`;
+    res.set('Cache-Control','private, no-store').type('png').send(await QRCode.toBuffer(url,{width:520,margin:4,errorCorrectionLevel:'M'}));
+  }));
   // Disk staging bounds RAM usage. Original files are retained, with GPS metadata removed.
   const temp=path.join(root,'.tmp');fs.mkdirSync(temp,{recursive:true});
   const upload=multer({dest:temp,limits:{fileSize:MAX_UPLOAD_FILE_BYTES,files:10,fields:0,parts:10}}).array('photos',10);

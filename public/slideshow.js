@@ -29,12 +29,19 @@
   const controlsHint = document.getElementById('controls-hint');
   const navPrev = document.getElementById('nav-prev');
   const navNext = document.getElementById('nav-next');
+  const fullscreenToggle = document.getElementById('fullscreen-toggle');
+  const qrToggle = document.getElementById('qr-toggle');
+  const qrPanel = document.getElementById('slideshow-qr');
+  const wakeLockHint = document.getElementById('wake-lock-hint');
 
   let photos = [];        // alle bekannten Fotos { url, timestamp }
   let currentIndex = -1;
   let lastSeen = 0;       // Zeitstempel des zuletzt bekannten Fotos (für ?since=)
   let isPaused = false;
   let autoplayTimer = null;
+  let hasLoadedPhotos = false;
+  let wakeLock = null;
+  let controlsTimer = null;
 
   // Zwei übereinanderliegende Layer für die Überblendung
   const layerA = createSlideLayer();
@@ -61,7 +68,8 @@
       const previous = photos[currentIndex]?.url;
       const known = new Set(photos.map(photo => photo.url));
       const updated = data.photos || [];
-      if (updated.some(photo => !known.has(photo.url))) flashNewBadge();
+      const arrivals = updated.filter(photo => !known.has(photo.url));
+      if (arrivals.length && hasLoadedPhotos) flashNewBadge();
       photos = updated;
       if (!photos.length) {
         currentIndex = -1;
@@ -71,10 +79,13 @@
         counterEl.textContent = '';
       } else {
         placeholder.style.display = 'none';
-        const index = photos.findIndex(photo => photo.url === previous);
-        if (index < 0) showSlide(0);
+        const newestArrival = arrivals.sort((a,b) => b.timestamp-a.timestamp)[0];
+        const index = newestArrival ? photos.findIndex(photo => photo.url === newestArrival.url) : photos.findIndex(photo => photo.url === previous);
+        if (index < 0) showSlide(photos.length - 1);
+        else if (newestArrival || currentIndex < 0) showSlide(index);
         else {currentIndex = index; counterEl.textContent = `${currentIndex + 1} / ${photos.length}`;}
       }
+      hasLoadedPhotos = true;
     } catch (err) {
       // Netzwerkfehler beim Polling einfach ignorieren und beim nächsten Intervall erneut versuchen
       console.warn('Polling fehlgeschlagen:', err);
@@ -156,6 +167,42 @@
 
   navPrev.addEventListener('click', () => manualNav('prev'));
   navNext.addEventListener('click', () => manualNav('next'));
+  fullscreenToggle.addEventListener('click', async () => {
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await container.requestFullscreen();
+      fullscreenToggle.textContent = document.fullscreenElement ? '⛶ Vollbild beenden' : '⛶ Vollbild';
+    } catch (_) { fullscreenToggle.textContent = 'Vollbild nicht verfügbar'; }
+  });
+  qrToggle.addEventListener('click', () => {
+    const visible = qrToggle.getAttribute('aria-pressed') === 'true';
+    qrToggle.setAttribute('aria-pressed', String(!visible));
+    qrPanel.hidden = visible;
+    qrToggle.textContent = visible ? 'QR-Code einblenden' : 'QR-Code ausblenden';
+  });
+  const qrImage = document.getElementById('slideshow-qr-image');
+  qrImage.src = window.guestUrl(`/api/event/${encodeURIComponent(eventId)}/guest-qr.png`);
+  qrImage.addEventListener('error', () => { qrPanel.hidden = true; qrToggle.hidden = true; });
+
+  async function keepScreenAwake() {
+    if (!('wakeLock' in navigator)) { wakeLockHint.hidden = false; return; }
+    if (document.visibilityState !== 'visible' || wakeLock) return;
+    try {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+      wakeLockHint.hidden = true;
+    } catch (_) { wakeLockHint.hidden = false; }
+  }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) void keepScreenAwake(); });
+  void keepScreenAwake();
+
+  function revealControls() {
+    container.classList.remove('controls-hidden');
+    if (controlsTimer) clearTimeout(controlsTimer);
+    controlsTimer = setTimeout(() => container.classList.add('controls-hidden'), 3000);
+  }
+  ['pointermove','pointerdown','touchstart','keydown'].forEach(name => document.addEventListener(name, revealControls, {passive:name!=='keydown'}));
+  revealControls();
 
   // Steuerungshinweis nach ein paar Sekunden ausblenden, damit er nicht dauerhaft stört
   setTimeout(() => controlsHint.classList.add('fade-out'), 6000);
