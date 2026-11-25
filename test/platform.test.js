@@ -57,7 +57,7 @@ test('Registration, login, session, CSRF and protected dashboard',async()=>{
   const landing=await request('/');assert.equal(landing.status,200);
   const policy=landing.res.headers.get('content-security-policy');assert.match(policy,/script-src 'self'/);assert.doesNotMatch(policy,/script-src[^;]*unsafe-inline/);
   assert.match(Buffer.from(landing.data).toString(),/src="\/landing\.js"/);
-  for(const file of ['landing.js','success.js','gallery-init.js','admin.js'])assert.equal((await request(`/${file}`)).status,200);
+  for(const file of ['landing.js','success.js','gallery-init.js','welcome.js','admin.js'])assert.equal((await request(`/${file}`)).status,200);
   assert.equal((await request('/dashboard')).status,302);
   user=await register('owner@example.com');other=await register('other@example.com');
   assert.equal((await request('/api/auth/login',{method:'POST',body:{email:'owner@example.com',password:'wrong-password'}})).status,401);
@@ -109,7 +109,9 @@ test('Checkout idempotency, signature, unpaid/amount/live rejection and delayed 
   assert.equal((await request('/event/birthday')).status,403);
   const guestLanding=await request(`/event/birthday?token=${token}`,{guest:guestA});
   assert.equal(guestLanding.status,200);
-  assert.match(Buffer.from(guestLanding.data).toString(),/id="upload-link"/);
+  assert.match(Buffer.from(guestLanding.data).toString(),/id="welcome-upload"/);
+  assert.match(Buffer.from(guestLanding.data).toString(),/Willkommen zu eurer Feier/);
+  assert.match(Buffer.from(guestLanding.data).toString(),/id="welcome-camera"/);
   const uploadPage=await request(`/event/birthday/upload?token=${token}`,{guest:guestA});
   assert.equal(uploadPage.status,200);
   assert.match(Buffer.from(uploadPage.data).toString(),/id="file-input"/);

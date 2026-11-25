@@ -10,6 +10,9 @@
   const cameraInput = document.getElementById('camera-input');
   const cameraTrigger = document.getElementById('camera-trigger');
   const statusEl = document.getElementById('status');
+  const successActions = document.getElementById('upload-success-actions');
+  const uploadAgain = document.getElementById('upload-again');
+  const successGallery = document.getElementById('upload-success-gallery');
   const progressWrap = document.getElementById('progress-wrap');
   const progressBar = document.getElementById('progress-bar');
   const thumbsEl = document.getElementById('thumbs');
@@ -32,6 +35,8 @@
   cameraTrigger.addEventListener('click', () => cameraInput.click());
   cameraInput.addEventListener('change', () => cameraInput.files.length ? uploadFiles(Array.from(cameraInput.files)) : undefined);
   uploadTrigger.addEventListener('click', () => fileInput.click());
+  if (uploadAgain) uploadAgain.addEventListener('click', () => fileInput.click());
+  if (successGallery) successGallery.href = window.guestUrl ? window.guestUrl(`/event/${encodeURIComponent(eventId)}/gallery`) : `/event/${encodeURIComponent(eventId)}/gallery`;
   fileInput.addEventListener('change', () => fileInput.files?.length ? uploadFiles(Array.from(fileInput.files)) : undefined);
 
   window.addEventListener('online', () => { void resumeQueuedUploads(); });
@@ -280,7 +285,11 @@
     catch (_) { return 'Beim Hochladen ist ein Fehler aufgetreten.'; }
   }
 
-  function setStatus(text, type) { statusEl.textContent = text; statusEl.className = 'status ' + (type || ''); }
+  function setStatus(text, type) {
+    statusEl.textContent = text;
+    statusEl.className = 'status ' + (type || '');
+    if (successActions) successActions.hidden = type !== 'success';
+  }
   function showProgress(active) { progressWrap.classList.toggle('active', !!active); }
   function setProgress(percent) { progressBar.style.width = percent + '%'; }
 

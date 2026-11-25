@@ -1177,7 +1177,8 @@ function createApp(options = {}) {
     ].join('; '));
     res.sendFile(path.join(pub,'design-editor.html'));
   });
-  for(const [suffix,file] of [['','gallery.html'],['/upload','upload.html'],['/gallery','gallery.html'],['/slideshow','slideshow.html'],['/games','games.html'],['/guestbook','guestbook.html']]) app.get(`/event/:eventId${suffix}`,access,(req,res)=>res.sendFile(path.join(pub,file)));
+  app.get('/event/:eventId',access,(req,res)=>res.sendFile(path.join(pub,'welcome.html')));
+  for(const [suffix,file] of [['/upload','upload.html'],['/gallery','gallery.html'],['/slideshow','slideshow.html'],['/games','games.html'],['/guestbook','guestbook.html']]) app.get(`/event/:eventId${suffix}`,access,(req,res)=>res.sendFile(path.join(pub,file)));
   app.get('/event/:eventId/video-grussbox',access,(req,res)=>{
     if(!videoAvailable||!req.event.video_greetings_enabled||!active(req.event))return fail(res,404,'Die Videogrußbox ist für diese Feier geschlossen.');
     res.set('Permissions-Policy','camera=(self), microphone=(self)');
@@ -1186,7 +1187,7 @@ function createApp(options = {}) {
     res.sendFile(path.join(pub,'video-grussbox.html'));
   });
   // Only intended public assets; source code and generic HTML routes cannot bypass guards.
-  for(const file of ['style.css','design-editor.css','design-editor.js','upload.js','slideshow.js','guest-access.js','account.js','verify-email.js','password-recovery.js','games.js','guestbook.js','video-grussbox.js','payments-admin.js','backups-admin.js','operations-admin.js','landing.js','reviews.js','reviews-admin.js','finalsnap-logo.webp','success.js','gallery-init.js','admin.js','johanna-bastian.png','photographer.webp','event-wedding.webp','event-birthday.jpg','event-summer.jpg','event-company.jpg']) app.get(`/${file}`,(req,res)=>res.sendFile(path.join(pub,file)));
+  for(const file of ['style.css','design-editor.css','design-editor.js','upload.js','slideshow.js','guest-access.js','welcome.js','account.js','verify-email.js','password-recovery.js','games.js','guestbook.js','video-grussbox.js','payments-admin.js','backups-admin.js','operations-admin.js','landing.js','reviews.js','reviews-admin.js','finalsnap-logo.webp','success.js','gallery-init.js','admin.js','johanna-bastian.png','photographer.webp','event-wedding.webp','event-birthday.jpg','event-summer.jpg','event-company.jpg']) app.get(`/${file}`,(req,res)=>res.sendFile(path.join(pub,file)));
   for(const file of ['qr-einladung.webp','fotos-sammeln.webp','live-diashow.webp','hochzeit-party.webp','geburtstag.webp','party.webp','why-finalsnap-poster.jpg']) app.get(`/preview-assets/${file}`,(req,res)=>res.sendFile(path.join(pub,'preview-assets',file)));
   for(const file of ['finalsnap-mascot-landscape-poster.jpg','finalsnap-mascot-landscape.mp4']) app.get(`/animations/${file}`,(req,res)=>res.sendFile(path.join(pub,'animations',file)));
   // Liveness stays cheap for the host's restart check. Readiness checks critical dependencies.

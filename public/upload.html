@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/style.css" />
 <script src="/guest-access.js"></script>
 </head>
-<body>
+<body class="guest-upload-body">
   <header class="site-header"><a class="brand" href="/" aria-label="FinalSnap Startseite"><span class="brand-mark">ϟ</span><span>FinalSnap</span></a><a class="button secondary manage-back" id="manage-back" href="/dashboard" hidden>← Zur Veranstaltungsverwaltung</a><span class="eyebrow">GÄSTEALBUM</span></header>
   <main class="upload-page">
 
@@ -36,7 +36,7 @@
          accept="image/*" + capture="environment" -> öffnet auf Mobilgeräten bevorzugt die Kamera,
          Nutzer können aber trotzdem in die Galerie wechseln.
          multiple -> mehrere Fotos auf einmal auswählbar. -->
-    <p class="privacy-note">Bitte lade nur Fotos hoch, die du teilen darfst. Der Veranstalter hat das Album angelegt und kann alle Fotos verwalten. Fotos sind bis 90 Kalendertage nach dem Veranstaltungsdatum im Album verfügbar; danach werden sie aus den aktiven Systemen gelöscht. Bereits heruntergeladene Kopien bleiben erhalten. <a href="/datenschutz">Datenschutzhinweise</a>. Fragen oder Löschwünsche zu diesem Album richtest du zuerst an den Veranstalter; du kannst dich zusätzlich an <a href="mailto:info@finalsnap.de">FinalSnap</a> wenden.</p>
+    <details class="privacy-disclosure"><summary>Bitte nur Fotos teilen, die du teilen darfst. Datenschutz &amp; Speicherdauer</summary><p class="privacy-note">Der Veranstalter hat das Album angelegt und kann alle Fotos verwalten. Fotos sind bis 90 Kalendertage nach dem Veranstaltungsdatum im Album verfügbar; danach werden sie aus den aktiven Systemen gelöscht. Bereits heruntergeladene Kopien bleiben erhalten. <a href="/datenschutz">Datenschutzhinweise</a>. Fragen oder Löschwünsche zu diesem Album richtest du zuerst an den Veranstalter; du kannst dich zusätzlich an <a href="mailto:info@finalsnap.de">FinalSnap</a> wenden.</p></details>
     <input
       type="file"
       id="file-input"
@@ -49,6 +49,7 @@
     </div>
 
     <p class="status" id="status" role="status" aria-live="polite"></p>
+    <div class="upload-success-actions" id="upload-success-actions" hidden><button class="primary" id="upload-again" type="button">Noch ein Foto</button><a class="button secondary" id="upload-success-gallery">Album ansehen</a></div>
     <div class="actions"><a class="button secondary" id="gallery-link">Zur Fotogalerie</a><a class="button secondary" id="games-link">Fotoaufgaben</a><a class="button secondary" id="guestbook-link">Gästebuch</a><a class="button secondary" id="video-greetings-link" hidden>Videogruß aufnehmen</a></div>
     <p id="retention-hint"></p>
 
