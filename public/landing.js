@@ -95,6 +95,74 @@ const openCookieSettings = new URLSearchParams(location.search).get('cookies') =
 if (!savedConsent || openCookieSettings) showConsentBanner();
 if (openCookieSettings) history.replaceState(null, '', `${location.pathname}${location.hash}`);
 
+const landingNav = document.getElementById('landing-nav');
+const landingMenuToggle = document.getElementById('landing-menu-toggle');
+const navBreakpoint = window.matchMedia('(max-width: 760px)');
+function setLandingMenuMode() {
+  if (!landingNav || !landingMenuToggle) return;
+  landingNav.hidden = navBreakpoint.matches;
+  landingMenuToggle.hidden = !navBreakpoint.matches;
+  landingMenuToggle.setAttribute('aria-expanded', 'false');
+}
+setLandingMenuMode();
+navBreakpoint.addEventListener?.('change', setLandingMenuMode);
+landingMenuToggle?.addEventListener('click', () => {
+  const open = landingMenuToggle.getAttribute('aria-expanded') !== 'true';
+  landingNav.hidden = !open;
+  landingMenuToggle.setAttribute('aria-expanded', String(open));
+  landingMenuToggle.setAttribute('aria-label', open ? 'Menü schließen' : 'Menü öffnen');
+});
+landingNav?.querySelectorAll('a').forEach(link => link.addEventListener('click', () => {
+  if (navBreakpoint.matches) { landingNav.hidden = true; landingMenuToggle?.setAttribute('aria-expanded', 'false'); }
+}));
+
+fetch('/api/auth/me').then(response => response.ok ? response.json() : null).then(account => {
+  if (!account?.user) return;
+  const destinations = [
+    [document.getElementById('landing-header-cta'), 'Zu meinen Veranstaltungen'],
+    [document.getElementById('landing-nav-login'), 'Meine Veranstaltungen'],
+    [document.getElementById('landing-hero-cta'), 'Zu meinen Veranstaltungen'],
+  ];
+  for (const [link, label] of destinations) if (link) { link.href = '/dashboard'; link.textContent = label; }
+}).catch(() => {});
+
+const demoGrid = document.querySelector('.phone-photo-grid');
+const demoCount = document.getElementById('demo-photo-count');
+const demoAdd = document.getElementById('demo-add-photo');
+const demoSlideshow = document.getElementById('demo-slideshow');
+const demoNext = document.getElementById('hero-demo-next');
+let demoSlideTimer = null;
+demoAdd?.addEventListener('click', () => {
+  if (!demoGrid || demoGrid.children.length >= 8) return;
+  const source = demoGrid.children[(demoGrid.children.length - 4) % 4] || demoGrid.firstElementChild;
+  const copy = source.cloneNode(true);
+  copy.classList.add('demo-photo-added');
+  const caption = copy.querySelector('span');
+  if (caption) caption.textContent = 'Neu hinzugefügt';
+  demoGrid.append(copy);
+  demoGrid.classList.add('demo-expanded');
+  demoCount.textContent = `${demoGrid.children.length} Fotos im Album`;
+  demoNext.hidden = false;
+});
+demoSlideshow?.addEventListener('click', () => {
+  if (demoSlideTimer) {
+    clearInterval(demoSlideTimer); demoSlideTimer = null;
+    demoGrid?.classList.remove('is-slideshow');
+    demoGrid?.querySelectorAll('.demo-slide-active').forEach(photo => photo.classList.remove('demo-slide-active'));
+    demoSlideshow.textContent = '▶ Diashow starten';
+    return;
+  }
+  let index = 0;
+  demoGrid?.classList.add('is-slideshow');
+  const show = () => {
+    const photos = [...(demoGrid?.children || [])];
+    photos.forEach(photo => photo.classList.toggle('demo-slide-active', photos.indexOf(photo) === index));
+    index = (index + 1) % Math.max(photos.length, 1);
+  };
+  show(); demoSlideTimer = setInterval(show, 1200);
+  demoSlideshow.textContent = '■ Diashow beenden';
+});
+
 document.querySelectorAll('.why-video-frame[data-youtube-id]').forEach(frame => {
   const button = frame.querySelector('.why-video-launch');
   button?.addEventListener('click', () => {
