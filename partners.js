@@ -6,6 +6,7 @@ const path = require('node:path');
 const multer = require('multer');
 const sharp = require('sharp');
 const { rateLimit } = require('express-rate-limit');
+const { createPartnerPayouts } = require('./partner-payouts');
 
 const PARTNER_CATEGORIES = {
   photographer: 'Fotograf:in',
@@ -303,6 +304,7 @@ function createPartnerProgram({ app, db, cfg, baseUrl, mailer, fail, wrap, login
     return { referralApplied: !!partner };
   }
 
+  createPartnerPayouts({ app, db, fail, wrap, paymentAdminRequired, commissionCents: PARTNER_COMMISSION_CENTS });
   return { eventPriceCents, applyToNewEvent, categories: PARTNER_CATEGORIES };
 }
 

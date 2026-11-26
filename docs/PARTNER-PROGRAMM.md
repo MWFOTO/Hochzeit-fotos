@@ -31,6 +31,13 @@
 - Öffentliche Formulare funktionieren auch, wenn man bei FinalSnap angemeldet ist.
 - Offene Geschäftsfragen: `App Entwickeln/Partner-Programm-Klaerung.md`.
 
+## Provisionsabrechnung
+- Entscheidung 26.11.2026: 5 € Rabatt, 10 € Provision netto; monatliche Gutschrift.
+- Fällig 14 Tage nach Zahlung; erstattete oder widerrufene Buchungen zählen nicht; Auszahlung ab 25 €.
+- `/ops/partners` → „Abrechnung“: Rechnungsdaten (Name, Anschrift, Steuernummer, Kleinunternehmer) eintragen → „Gutschrift erstellen“ → PDF senden → überweisen → „Als überwiesen markieren“.
+- Nummern `GS-JJJJ-NNNN`, jede Buchung nur einmal abgerechnet. Keine Bankdaten in FinalSnap. Code: `partner-payouts.js`, Test `test/partner-payouts.test.js`.
+- Gutschrift-Text von Steuerberatung prüfen lassen.
+
 ## Noch offen
 - Rechtlich prüfen lassen: Partner-Bedingungen (Provision, Auszahlung, Kündigung), Hinweis zum Rabatt in den Leistungsbedingungen,
   Kennzeichnung „Premium“.
