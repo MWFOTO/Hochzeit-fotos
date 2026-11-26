@@ -159,7 +159,7 @@
   $('#copyAiBrief').addEventListener('click', async () => {
     const templateName = $('.template-card.selected .template-name')?.textContent || 'Afterglow';
     const occasionName = occasionInput.options[occasionInput.selectedIndex]?.text || occasionInput.value;
-    const prompt = `Erstelle ein hochwertiges Kartendesign für FinalSnap. Anlass: ${occasionName}. Albumtitel: ${titleInput.value.trim() || 'Euer Event'}. Stil: ${templateName}. Akzentfarbe: ${colorInput.value}. Schriftstil: ${fonts[fontInput.value]?.name || fonts.classic.name}. Idee: ${$('#cs-wish')?.value.trim()||'keine zusätzliche Idee'}. Hochformat, klare gut lesbare Gestaltung, ausreichender Kontrast. Lass in der Mitte ein freies Feld von ca. 4 × 4 cm für den QR-Code. Keinen QR-Code selbst zeichnen. Keine fehleranfälligen Texte und kein FinalSnap-Logo einbauen; Titel und echter QR-Code werden anschließend im FinalSnap-Editor ergänzt.`;
+    const prompt = `Erstelle ein hochwertiges Kartendesign für FinalSnap. Anlass: ${occasionName}. Albumtitel: ${titleInput.value.trim() || 'Euer Event'}. Stil: ${templateName}. Akzentfarbe: ${colorInput.value}. Schriftstil: ${fonts[fontInput.value]?.name || fonts.classic.name}. Stimmung: ${document.querySelector('input[name="cs-mood"]:checked')?.parentElement.textContent.trim()||'Elegant'}. Hochformat, klare gut lesbare Gestaltung, ausreichender Kontrast. Lass in der Mitte ein freies Feld von ca. 4 × 4 cm für den QR-Code. Keinen QR-Code selbst zeichnen. Keine fehleranfälligen Texte und kein FinalSnap-Logo einbauen; Titel und echter QR-Code werden anschließend im FinalSnap-Editor ergänzt.`;
     const field = $('#aiBriefText');
     field.value = prompt;
     try {

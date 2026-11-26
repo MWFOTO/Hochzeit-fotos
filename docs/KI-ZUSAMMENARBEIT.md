@@ -74,3 +74,8 @@ Braucht eine neue Funktion eine Oberfläche, baut ChatGPT die Technik und hinter
 - Server: `card-assistant.js`, Routen `GET/POST /api/event/:id/card-assistant` (aus, bis `AI_CARD_ASSISTANT=on` + `ANTHROPIC_API_KEY`),
   Design speichert jetzt `qrPosition` und `cardText`.
 - Datenschutz ergänzt (Abschnitt KI-Assistent). Anleitung zum Einschalten: `docs/KI-TISCHKARTEN.md`.
+
+### 26.11.2026 · Claude · KI wieder entfernt, starke Textbausteine
+- Wunsch des Inhabers: keine Datenübertragung in die USA. KI-Anbindung (card-assistant.js, Routen, SDK, Datenschutz-Abschnitt) entfernt.
+- Karten-Assistent arbeitet jetzt nur im Browser mit kuratierten Textbausteinen (Anlass × Stimmung × Anrede), optional eigener Satz.
+- Doku: `docs/TISCHKARTEN-ASSISTENT.md`.
