@@ -125,34 +125,6 @@
   }
 
   document.querySelectorAll('.template-card').forEach(button => button.addEventListener('click', () => selectTheme(button.dataset.template)));
-  const guidedStyleInputs=[...document.querySelectorAll('[name="guided-style"]')];
-  const guidedPalette=$('#guided-palette');
-  const guidedIdea=$('#guided-idea');
-  const guidedStatus=$('#guided-inspiration-status');
-  const guidedInspiration=$('#guided-inspiration');
-  function applyGuidedDesign({rotate=false}={}){
-    if(rotate){const current=Math.max(0,guidedStyleInputs.findIndex(input=>input.checked));guidedStyleInputs[(current+1)%guidedStyleInputs.length].checked=true;const palettesList=Object.keys(palettes);guidedPalette.value=palettesList[(palettesList.indexOf(guidedPalette.value)+1)%palettesList.length];}
-    const style=guidedStyleInputs.find(input=>input.checked)?.value||'elegant';const preset=stylePresets[style]||stylePresets.elegant;const palette=palettes[guidedPalette.value]||palettes.sage;
-    selectTheme(preset.theme);fontInput.value=preset.font;colorInput.value=palette.accent;$('#colorLabel').textContent=palette.name;updatePreview();
-    $('#guided-title').textContent='Euer Entwurf ist bereit';
-    status.textContent='Entwurf wird gespeichert …';
-    form.requestSubmit();
-  }
-  $('#generate-guided-design').addEventListener('click',()=>applyGuidedDesign());
-  $('#another-guided-variant').addEventListener('click',()=>applyGuidedDesign({rotate:true}));
-  $('#customize-guided-design').addEventListener('click',()=>{$('#step-design').scrollIntoView({behavior:'smooth',block:'start'});titleInput.focus({preventScroll:true});});
-  guidedInspiration.addEventListener('change',()=>{const file=guidedInspiration.files?.[0];if(!file)return;if(!['image/jpeg','image/png','image/webp'].includes(file.type)||file.size>8*1024*1024){guidedStatus.textContent='Bitte ein JPG-, PNG- oder WEBP-Bild bis 8 MB auswählen.';guidedInspiration.value='';$('#use-guided-inspiration').hidden=true;return;}guidedStatus.textContent=`„${file.name}“ bleibt als Orientierung auf diesem Gerät. Es wird nicht an FinalSnap übertragen.`;$('#use-guided-inspiration').hidden=false;});
-  $('#use-guided-inspiration').addEventListener('click',()=>{const file=guidedInspiration.files?.[0];if(!file)return;if(typeof DataTransfer!=='function'){guidedStatus.textContent='Wähle das Bild bitte zusätzlich über „PNG, JPG oder WEBP auswählen“ aus, um es als Titelmotiv zu speichern.';return;}const transfer=new DataTransfer();transfer.items.add(file);$('#coverUpload').files=transfer.files;$('#coverUpload').dispatchEvent(new Event('change',{bubbles:true}));guidedStatus.textContent='Du hast ausgewählt, dieses Bild als Titelmotiv bei FinalSnap zu speichern.';});
-  document.querySelectorAll('.progress-step, .next-step-button').forEach(link => link.addEventListener('click', () => {
-    const target = link.getAttribute('href');
-    document.querySelectorAll('.progress-step').forEach(step => step.classList.toggle('active', step.getAttribute('href') === target));
-  }));
-  titleInput.addEventListener('input', updatePreview);
-  occasionInput.addEventListener('change', updatePreview);
-  dateInput.addEventListener('input', updatePreview);
-  colorInput.addEventListener('input', () => { $('#colorLabel').textContent = 'Eigene Farbe'; updatePreview(); });
-  fontInput.addEventListener('change', updatePreview);
-
   $('#coverUpload').addEventListener('change', async event => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -187,7 +159,7 @@
   $('#copyAiBrief').addEventListener('click', async () => {
     const templateName = $('.template-card.selected .template-name')?.textContent || 'Afterglow';
     const occasionName = occasionInput.options[occasionInput.selectedIndex]?.text || occasionInput.value;
-    const prompt = `Erstelle ein hochwertiges Kartendesign für FinalSnap. Anlass: ${occasionName}. Albumtitel: ${titleInput.value.trim() || 'Euer Event'}. Stil: ${templateName}. Akzentfarbe: ${colorInput.value}. Schriftstil: ${fonts[fontInput.value]?.name || fonts.classic.name}. Idee: ${guidedIdea.value.trim()||'keine zusätzliche Idee'}. Hochformat, klare gut lesbare Gestaltung, ausreichender Kontrast. Lass in der Mitte ein freies Feld von ca. 4 × 4 cm für den QR-Code. Keinen QR-Code selbst zeichnen. Keine fehleranfälligen Texte und kein FinalSnap-Logo einbauen; Titel und echter QR-Code werden anschließend im FinalSnap-Editor ergänzt.`;
+    const prompt = `Erstelle ein hochwertiges Kartendesign für FinalSnap. Anlass: ${occasionName}. Albumtitel: ${titleInput.value.trim() || 'Euer Event'}. Stil: ${templateName}. Akzentfarbe: ${colorInput.value}. Schriftstil: ${fonts[fontInput.value]?.name || fonts.classic.name}. Idee: ${$('#cs-wish')?.value.trim()||'keine zusätzliche Idee'}. Hochformat, klare gut lesbare Gestaltung, ausreichender Kontrast. Lass in der Mitte ein freies Feld von ca. 4 × 4 cm für den QR-Code. Keinen QR-Code selbst zeichnen. Keine fehleranfälligen Texte und kein FinalSnap-Logo einbauen; Titel und echter QR-Code werden anschließend im FinalSnap-Editor ergänzt.`;
     const field = $('#aiBriefText');
     field.value = prompt;
     try {
@@ -211,25 +183,24 @@
       fontFamily: fonts[fontInput.value]?.css || fonts.classic.css,
       format: selectedFormat,
       theme: selected?.dataset.template || 'afterglow'
-      ,qrPosition:$('#qrPlacement')?.value||'center',customArtwork:!!customArtworkInput?.checked
+      ,qrPosition:$('#qrPlacement')?.value||'center',customArtwork:!!customArtworkInput?.checked,
+      ...cardTexts()
     };
   }
 
+  const textFields={kicker:'#cardKicker',invite:'#cardInvite',backKicker:'#cardBackKicker',backInvite:'#cardBackInvite'};
+  function cardTexts(){const out={};for(const [key,sel] of Object.entries(textFields)){const v=$(sel)?.value.trim();if(v)out[key]=v;}return out;}
+  function setCardTexts(values={}){for(const [key,sel] of Object.entries(textFields)){if($(sel))$(sel).value=values[key]||'';}}
+  // Bricht Text für die Leinwand in höchstens maxLines Zeilen um
+  function wrapLines(ctx,text,maxWidth,maxLines=2){
+    const words=String(text).split(/\s+/).filter(Boolean),lines=[];let line='';
+    for(const word of words){const test=line?`${line} ${word}`:word;if(ctx.measureText(test).width>maxWidth&&line){lines.push(line);line=word;}else line=test;}
+    if(line)lines.push(line);
+    if(lines.length>maxLines){lines.length=maxLines;lines[maxLines-1]=lines[maxLines-1].replace(/\s*\S*$/,'')+'…';}
+    return lines;
+  }
   function safeText(value) {
     return String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
-  }
-
-  function printMarkup(data) {
-    const tent = data.format === 'tent';
-    const poster = data.format === 'poster';
-    const pageSize = tent ? 'A4 landscape' : poster ? 'A4 portrait' : 'A6 portrait';
-    const qrSize = tent ? '33mm' : poster ? '50mm' : '36mm';
-    const themeEnd = data.theme === 'midnight' ? '#203c48' : data.theme === 'garden' ? '#3e5947' : '#44343a';
-    const designBg = data.image ? `linear-gradient(0deg,#151416bb,#15141624 82%),url('${data.image}') center/cover` : `linear-gradient(145deg,${data.accent} 0%,${themeEnd} 100%)`;
-    const qr = `<div class="qr-placeholder real-qr qr-${data.qrPosition}" style="width:${qrSize};height:${qrSize};padding:2mm"><img src="${data.qr}" alt="QR-Code zum Eventalbum" style="width:100%;height:100%;object-fit:contain"></div>`;
-    const panel = (back = false) => `<section class="panel ${back ? 'back' : ''}" style="--art:${designBg};--accent:${data.accent}"><div class="wash"></div><div class="content"><div class="brand">FINAL<span>SNAP</span></div><p class="kicker">${safeText(back ? 'TEILT EURE MOMENTE' : data.occasionLabel)}</p><h1 style="font-family:${data.fontFamily}">${safeText(data.title)}</h1>${data.date ? `<p class="date">${safeText(data.date)}</p>` : ''}<p class="invite" style="font-family:${data.fontFamily}">${back ? 'Scannen, Fotos teilen und die Feier aus vielen Blickwinkeln erleben.' : 'Macht mit und ladet eure Fotos in unser gemeinsames Album.'}</p>${qr}<p class="qr-hint">Scannen und eigene Fotos teilen</p></div></section>`;
-    const body = tent ? `<main class="sheet tent">${panel(true)}${panel(false)}<div class="fold"></div></main>` : `<main class="sheet single ${poster ? 'poster' : 'card'}">${panel(false)}</main>`;
-    return `<!doctype html><html lang="de"><head><meta charset="utf-8"><title>${safeText(data.title)} · FinalSnap Druck</title><style>@page{size:${pageSize};margin:0}*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;font-family:Arial,sans-serif;color:#fff}.sheet{position:relative;width:100vw;height:100vh;overflow:hidden;background:#29252a}.tent{display:flex}.panel{position:relative;width:100%;height:100%;display:flex;align-items:center;justify-content:center;text-align:center;background:var(--art);background-position:center;background-size:cover;overflow:hidden}.tent .panel{width:50%;height:100%}.tent .panel.back{transform:rotate(180deg)}.fold{position:absolute;left:50%;top:0;height:100%;border-left:1px dashed #fff9;z-index:2}.wash{position:absolute;inset:0;background:linear-gradient(180deg,#17151952,#171519a6)}.content{position:relative;z-index:1;width:82%;max-width:460px;margin:auto;display:flex;align-items:center;flex-direction:column}.tent .content{width:78%}.brand{font-size:14px;letter-spacing:.22em;font-weight:800;margin-bottom:9%}.brand span{font-weight:400}.kicker{font-size:9px;letter-spacing:.24em;font-weight:700;margin:0 0 12px}.content h1{font-size:clamp(27px,5vw,64px);line-height:1.03;font-weight:500;letter-spacing:-.04em;max-width:100%;margin:0 0 10px;overflow-wrap:anywhere}.tent .content h1{font-size:clamp(20px,3vw,38px)}.date{font-size:10px;letter-spacing:.16em;text-transform:uppercase;margin:0 0 14px}.invite{font-style:italic;font-size:14px;line-height:1.4;max-width:340px;margin:0 0 18px}.tent .invite{font-size:11px}.qr-placeholder{background:#fff;color:#272329;display:flex;align-items:center;justify-content:center;flex-direction:column;border:3px solid #fff;border-radius:3px;box-shadow:0 3px 14px #0003}.qr-hint{font:8px Arial,sans-serif;margin:8px 0 0;opacity:.9}.card .content{width:80%}.card .content h1{font-size:28px}.poster .content h1{font-size:44px}@media screen{body{background:#e9e5de;padding:24px;min-height:100vh}.sheet{margin:auto;box-shadow:0 10px 40px #0004}.tent{width:min(100%,1100px);height:auto;aspect-ratio:297/210}.single{width:min(100%,650px);height:auto;aspect-ratio:${data.format === 'card' ? '105/148' : '210/297'}}.tent .content h1{font-size:clamp(22px,4vw,42px)}.single .content h1{font-size:clamp(25px,5vw,52px)}}@media print{.sheet{width:100vw;height:100vh}.fold{border-color:#fff7}}</style></head><body>${body}<script>window.addEventListener('load',()=>setTimeout(()=>window.print(),250));</script></body></html>`;
   }
 
   async function renderArtwork(data) {
@@ -244,15 +215,17 @@
       if(!data.customArtwork){ctx.fillStyle='#15141680';ctx.fillRect(x,y,w,h);}ctx.textAlign='center';ctx.fillStyle='#fff';const centerX=x+w/2;let top=y+h*.18;
       if(back){ctx.save();ctx.translate(centerX,y+h/2);ctx.rotate(Math.PI);ctx.translate(-centerX,-(y+h/2));}
       if(!data.customArtwork){
-      ctx.font='700 22px Arial';ctx.fillText('FINALSNAP',centerX,top);top+=h*.12;
-      ctx.font='700 13px Arial';ctx.letterSpacing='3px';ctx.fillText(back?'TEILT EURE MOMENTE':data.occasionLabel,centerX,top);top+=h*.095;ctx.letterSpacing='0px';
-      ctx.font=`500 ${data.format==='tent'?38:54}px ${data.fontFamily}`;const title=data.title.length>25?`${data.title.slice(0,23)}…`:data.title;ctx.fillText(title,centerX,top,w*.84);top+=h*.07;
-      if(data.date){ctx.font='14px Arial';ctx.fillText(data.date.toUpperCase(),centerX,top);top+=h*.07;}
-      ctx.font=`italic 17px ${data.fontFamily}`;ctx.fillText(back?'Scannen, Fotos teilen und feiern':'Macht mit und ladet Fotos hoch',centerX,top,w*.82);top+=h*.1;
+      // Schriftgrößen relativ zur Kartenbreite, damit der Druck in jedem Format gut lesbar ist
+      const u=w/100;
+      ctx.font=`800 ${2.6*u}px Arial`;ctx.letterSpacing=`${.5*u}px`;ctx.fillText('FINALSNAP',centerX,top);ctx.letterSpacing='0px';top+=h*.1;
+      ctx.font=`700 ${2.3*u}px Arial`;ctx.letterSpacing=`${.45*u}px`;ctx.fillText((back?(data.backKicker||'TEILT EURE MOMENTE'):(data.kicker||data.occasionLabel)).toUpperCase(),centerX,top,w*.86);ctx.letterSpacing='0px';top+=h*.075;
+      const titleSize=(data.format==='tent'?7.2:8)*u;ctx.font=`500 ${titleSize}px ${data.fontFamily}`;const titleLines=wrapLines(ctx,data.title,w*.84,2);titleLines.forEach((line,i)=>ctx.fillText(line,centerX,top+i*titleSize*1.08,w*.86));top+=(titleLines.length-1)*titleSize*1.08+h*.055;
+      if(data.date){ctx.font=`${2.1*u}px Arial`;ctx.letterSpacing=`${.3*u}px`;ctx.fillText(data.date.toUpperCase(),centerX,top);ctx.letterSpacing='0px';top+=h*.06;}
+      const inviteSize=3.3*u;ctx.font=`italic ${inviteSize}px ${data.fontFamily}`;const invite=back?(data.backInvite||'Scannen, Fotos teilen und feiern.'):(data.invite||'Macht mit und ladet eure Fotos in unser gemeinsames Album.');const inviteLines=wrapLines(ctx,invite,w*.78,2);inviteLines.forEach((line,i)=>ctx.fillText(line,centerX,top+i*inviteSize*1.3,w*.82));top+=(inviteLines.length-1)*inviteSize*1.3+h*.035;
       }
       const qrSize=data.format==='poster'?240:data.format==='card'?330:250;const qrPoint=data.qrPosition==='lowerCenter'?[centerX,y+h*.72]:data.qrPosition==='lowerRight'?[x+w*.75,y+h*.72]:[centerX,data.customArtwork?y+h*.64:top+qrSize/2];const qrX=qrPoint[0]-qrSize/2,qrY=qrPoint[1]-qrSize/2;ctx.fillStyle='#fff';ctx.fillRect(qrX,qrY,qrSize,qrSize);
       ctx.imageSmoothingEnabled=false;ctx.drawImage(uploadedQr,qrX+4,qrY+4,qrSize-8,qrSize-8);ctx.imageSmoothingEnabled=true;
-      if(!data.customArtwork){ctx.font='11px Arial';ctx.fillStyle='#fff';ctx.fillText('Scannen und eigene Fotos teilen',qrPoint[0],qrY+qrSize+25,w*.88);}if(back)ctx.restore();
+      if(!data.customArtwork){ctx.font=`${2*w/100}px Arial`;ctx.fillStyle='#fff';ctx.fillText('Scannen und eigene Fotos teilen',qrPoint[0],qrY+qrSize+w*.045,w*.88);}if(back)ctx.restore();
     };
     try {
       uploadedQr=new Image();uploadedQr.src=data.qr;await uploadedQr.decode();
@@ -282,7 +255,7 @@
   form.addEventListener('submit', async event => {
     event.preventDefault();
     try {
-      await api(`${endpoint}/design`, 'PATCH', { design: { title:titleInput.value, occasion:occasionInput.value, theme:$('.template-card.selected')?.dataset.template||'afterglow', accent:colorInput.value, font:fontInput.value,customArtwork:customArtworkInput.checked } });
+      await api(`${endpoint}/design`, 'PATCH', { design: { title:titleInput.value, occasion:occasionInput.value, theme:$('.template-card.selected')?.dataset.template||'afterglow', accent:colorInput.value, font:fontInput.value,customArtwork:customArtworkInput.checked,qrPosition:$('#qrPlacement')?.value||'center',cardText:cardTexts() } });
       status.textContent='Design für dieses Event gespeichert.';
     } catch(error) { status.textContent=error.message; }
   });
@@ -304,6 +277,8 @@
     colorInput.value=design.accent||themes.afterglow.accent;
     fontInput.value=design.font||'classic';
     customArtworkInput.checked=!!design.customArtwork;
+    setCardTexts(design.cardText||{});
+    if($('#qrPlacement'))$('#qrPlacement').value=design.qrPosition||'center';
     selectTheme(design.theme||'afterglow');
     colorInput.value=design.accent||themes.afterglow.accent;
     updateColorLabel();
@@ -318,8 +293,44 @@
     $('#downloadStatus').textContent='Der echte Event-QR ist in PDF und PNG enthalten.';
     status.textContent='Design geladen. Änderungen kannst du für dieses Event speichern.';
     $('#pageTitle').textContent='Gestalte euer gemeinsames Album.';
+    for(const [id,path] of [['#qrOnlyPng','/qr'],['#qrOnlySvg','/qr.svg'],['#qrOnlyPdf','/qr.pdf']]){const link=$(id);if(link)link.href=`${endpoint}${path}`;}
     updatePreview();
+    schedulePrintPreview();
+    document.dispatchEvent(new CustomEvent('finalsnap:editor-ready',{detail:{title:titleInput.value,occasion:occasionInput.value}}));
   }
+
+  /* ---------- Live-Vorschau der Druckdatei (mit echtem QR-Code) ---------- */
+  let previewTimer=null,previewUrl='';
+  async function renderPrintPreview(){
+    if(!qrDataUrl)return null;
+    try{const blob=await renderArtwork(getPrintData());if(previewUrl)URL.revokeObjectURL(previewUrl);previewUrl=URL.createObjectURL(blob);const img=$('#printPreview');if(img)img.src=previewUrl;return previewUrl;}catch{return null;}
+  }
+  function schedulePrintPreview(){clearTimeout(previewTimer);previewTimer=setTimeout(renderPrintPreview,250);}
+  ['#eventTitle','#cardKicker','#cardInvite','#cardBackKicker','#cardBackInvite','#accentColor'].forEach(sel=>$(sel)?.addEventListener('input',schedulePrintPreview));
+  ['#fontStyle','#qrPlacement','#occasion','#customArtwork'].forEach(sel=>$(sel)?.addEventListener('change',schedulePrintPreview));
+  document.querySelectorAll('.template-card,.format-card').forEach(b=>b.addEventListener('click',schedulePrintPreview));
+
+  /* ---------- Schnittstelle für den Karten-Assistenten (card-studio.js) ---------- */
+  window.fsEditor={
+    endpoint,api,
+    apply(s){
+      if(s.title)titleInput.value=s.title;
+      selectTheme(s.theme);
+      if(/^#[0-9a-f]{6}$/i.test(s.accent||''))colorInput.value=s.accent;
+      updateColorLabel();
+      if(fonts[s.font])fontInput.value=s.font;
+      if($('#qrPlacement')&&s.qrPosition)$('#qrPlacement').value=s.qrPosition;
+      setCardTexts(s);
+      updatePreview();
+    },
+    async save(){
+      await api(`${endpoint}/design`,'PATCH',{design:{title:titleInput.value.trim()||'Unser Album',occasion:occasionInput.value,theme:$('.template-card.selected')?.dataset.template||'afterglow',accent:colorInput.value,font:fontInput.value,customArtwork:customArtworkInput.checked,qrPosition:$('#qrPlacement')?.value||'center',cardText:cardTexts()}});
+      status.textContent='Design für dieses Event gespeichert.';
+    },
+    renderPreview:renderPrintPreview,
+    get title(){return titleInput.value;},
+    get occasion(){return occasionInput.value;}
+  };
 
   updatePreview();
   loadEvent().catch(error=>{status.textContent=error.message;$('#qrFileStatus').textContent='Event-QR konnte nicht geladen werden.';$('#pdfButton').disabled=true;$('#pngButton').disabled=true;});

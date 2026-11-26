@@ -67,3 +67,10 @@ Braucht eine neue Funktion eine Oberfläche, baut ChatGPT die Technik und hinter
 - Doppelte Lösungen bereinigt: Für die Startseite gilt ChatGPTs Umsetzung (`landing.js`/`landing.html`), mein `landing-enhance.js` ist entfernt. Die ungenutzte `welcome.html`/`welcome.js` ist entfernt, die Gästeseite bleibt `upload.html`.
 - Galerie: Blättern funktioniert jetzt auch mit den neuen Vorschaubildern. Texte zur Fotoqualität auf „volle Originalauflösung, GPS entfernt“ vereinheitlicht.
 - 53/53 Tests grün. Lokal geprüft: Upload großer Fotos (Original unverändert gespeichert, Vorschau 480 px), Galerie mit Blättern und Original-Download.
+
+### 26.11.2026 · Claude · KI-Karten-Assistent
+- Design-Editor: neuer Frage-Assistent (`public/card-studio.js`) ersetzt die alte Stil-Auswahl, Kartentexte editierbar,
+  Live-Druckvorschau mit echtem QR, „Nur den QR-Code“ (PNG/SVG/PDF), lesbare Schriftgrößen im Druck, Logo statt ϟ.
+- Server: `card-assistant.js`, Routen `GET/POST /api/event/:id/card-assistant` (aus, bis `AI_CARD_ASSISTANT=on` + `ANTHROPIC_API_KEY`),
+  Design speichert jetzt `qrPosition` und `cardText`.
+- Datenschutz ergänzt (Abschnitt KI-Assistent). Anleitung zum Einschalten: `docs/KI-TISCHKARTEN.md`.
