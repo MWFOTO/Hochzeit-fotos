@@ -3,286 +3,216 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#202329">
-  <title>FinalSnap – Eine Feier. Alle Perspektiven. Ein Album.</title>
+  <meta name="theme-color" content="#16181d">
+  <title>FinalSnap – Das Gäste-Fotoalbum per QR-Code für Hochzeit und Feier</title>
+  <meta name="description" content="Eure Gäste scannen einen QR-Code und laden ihre Fotos hoch – ohne App, ohne Anmeldung, in Originalqualität. Alle Bilder eurer Feier in einem Album. Server in Deutschland.">
   <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/landing.css">
 </head>
-<body class="landing-body">
-  <p class="landing-test-mode-notice">Stripe befindet sich aktuell im Testmodus – Zahlungen werden noch nicht angenommen.</p>
-  <header class="site-header">
-    <a class="brand" href="/" aria-label="FinalSnap Startseite">
-      <img src="/finalsnap-logo.webp" alt="FinalSnap" width="180" height="107">
-    </a>
-    <a class="button primary landing-header-cta" id="landing-header-cta" href="/register">Kostenlos testen</a>
-    <button class="landing-menu-toggle" id="landing-menu-toggle" type="button" aria-expanded="false" aria-controls="landing-nav" aria-label="Menü öffnen">☰</button>
-    <nav class="landing-nav" id="landing-nav" aria-label="Hauptnavigation">
-      <a href="#ablauf">So funktioniert’s</a>
-      <a href="#funktionen">Funktionen</a>
-      <a href="#anlaesse">Für wen?</a>
-      <a href="#trustpilot">Trustpilot</a>
-      <a href="#pakete">Paket &amp; Preis</a>
-      <a class="button secondary" id="landing-nav-login" href="/login">Anmelden</a>
+<body class="landing-body lp">
+  <p class="lp-testmode">Stripe befindet sich aktuell im Testmodus – Zahlungen werden noch nicht angenommen.</p>
+
+  <header class="lp-header">
+    <a class="lp-brand" href="/" aria-label="FinalSnap Startseite"><img src="/finalsnap-logo.webp" alt="FinalSnap" width="150" height="89"></a>
+    <button class="lp-menu-toggle" id="landing-menu-toggle" type="button" aria-expanded="false" aria-controls="landing-nav" aria-label="Menü öffnen">☰</button>
+    <nav class="lp-nav" id="landing-nav" aria-label="Hauptnavigation">
+      <a href="#ablauf">So geht’s</a>
+      <a href="#warum">Warum FinalSnap</a>
+      <a href="#preis">Preis</a>
+      <a href="#fragen">Fragen</a>
+      <a href="/partner">Dienstleister</a>
+      <a class="lp-nav-login" id="landing-nav-login" href="/login">Anmelden</a>
     </nav>
+    <a class="button primary lp-header-cta" id="landing-header-cta" href="/register">Kostenlos testen</a>
   </header>
 
-  <main class="landing-page">
-    <section class="hero">
-      <div class="hero-copy">
-        <span class="eyebrow">EURE FEIER. AUS ALLEN BLICKWINKELN.</span>
-        <h1>Eine Feier.<br>Alle Perspektiven.<br><span>Ein Album.</span></h1>
-        <p>Alle Momente eurer Feier an einem Ort. Eure Gäste laden Fotos per QR-Code ohne Registrierung hoch. Freigegebene Bilder sehen alle Gäste mit dem Link in der gemeinsamen Galerie.</p>
-        <div class="actions">
-          <a class="button primary" id="landing-hero-cta" href="/register">25 Fotos kostenlos testen <span aria-hidden="true">↗</span></a>
-          <a class="button secondary" href="#ablauf">So funktioniert’s</a>
+  <main>
+    <!-- 1. Hero -->
+    <section class="lp-hero">
+      <div class="lp-hero-copy">
+        <span class="lp-eyebrow">Das Gäste-Fotoalbum für eure Feier</span>
+        <h1>Alle Fotos eurer Gäste.<br><span>In einem Album.</span></h1>
+        <p class="lp-lead">Eure Gäste scannen einen QR-Code und laden ihre Fotos hoch – ohne App, ohne Anmeldung, in voller Qualität. Ihr bekommt alle Momente eurer Feier an einem Ort.</p>
+        <div class="lp-actions">
+          <a class="button primary lp-cta" id="landing-hero-cta" href="/register">25 Fotos kostenlos testen <span aria-hidden="true">→</span></a>
+          <a class="button secondary" href="#ablauf">So geht’s</a>
         </div>
-        <p class="small hero-note"><span class="note-dot" aria-hidden="true"></span> Gäste brauchen kein Konto und keine App.</p><p class="small hero-note">Fotos bleiben in voller Originalauflösung erhalten; kleinere Versionen machen die Galerie schnell.</p>
+        <p class="lp-price-hint">Danach einmalig <strong>49,90 €</strong> pro Feier · keine Abofalle</p>
       </div>
-
-      <div class="hero-art" aria-label="FinalSnap Maskottchen neben einer Beispielgalerie auf dem Smartphone">
-        <div class="glow glow-cyan" aria-hidden="true"></div>
-        <div class="glow glow-magenta" aria-hidden="true"></div>
-        <figure class="hero-mascot-figure">
-          <img class="mascot" src="/photographer.webp" alt="FinalSnap-Maskottchen mit Kamera und den originalen Blitzen" fetchpriority="high">
-          <figcaption class="ai-media-caption">KI-generiertes Maskottchenmotiv</figcaption>
-        </figure>
-        <div class="phone" aria-label="Beispielgalerie auf dem Smartphone">
-          <div class="phone-frame">
-            <div class="phone-island" aria-hidden="true"></div>
-            <div class="phone-screen">
-              <div class="phone-status"><span>9:41</span><span aria-hidden="true">● ● ●</span></div>
-              <div class="phone-heading">
-                <span class="phone-kicker">EURE GALERIE</span>
-                <strong>Feier-Momente</strong>
-                <span class="phone-date">Gemeinsam gesammelt</span>
-              </div>
-              <div class="phone-photo-grid" aria-label="Vier Beispielgalerien: Hochzeit, Geburtstag, Sommerfest und Firmenfeier">
-                <div class="phone-photo"><img src="/preview-assets/hochzeit-party.webp" alt="Hochzeitsgäste halten einen spontanen Moment mit dem Smartphone fest"><span>Hochzeit</span></div>
-                <div class="phone-photo"><img src="/preview-assets/geburtstag.webp" alt="Ein Gast fotografiert einen Geburtstagsmoment am gedeckten Tisch"><span>Geburtstag</span></div>
-                <div class="phone-photo"><img src="/preview-assets/party.webp" alt="Freunde fotografieren gemeinsam einen Moment auf einer Party"><span>Party</span></div>
-                <div class="phone-photo"><img src="/event-company.jpg" alt="Gäste bei einer Firmenfeier halten gemeinsame Momente fest"><span>Firmenfeier</span></div>
-              </div>
-              <p class="phone-photo-count" id="demo-photo-count" aria-live="polite">4 Fotos im Album</p>
-              <button class="phone-upload" id="demo-add-photo" type="button"><span class="upload-plus" aria-hidden="true">+</span><span>Foto hinzufügen</span></button>
-              <button class="phone-demo-slideshow" id="demo-slideshow" type="button">▶ Diashow starten</button>
-              <div class="phone-nav" aria-hidden="true"><i></i><i></i><i></i></div>
-            </div>
-          </div>
-          <div class="upload-chip"><span aria-hidden="true">▦</span><span>QR scannen<br><b>Foto hochladen</b></span></div>
-        </div>
-        <p class="ai-media-caption phone-ai-note">Die vier Beispielmotive im Handy sind KI-generiert.</p>
-        <a class="hero-demo-next" id="hero-demo-next" href="/register" hidden>So einfach geht’s auf eurer Feier. Jetzt eigenes Album anlegen →</a>
-      </div>
-    </section>
-
-    <section class="section why-video-section" aria-labelledby="why-video-title">
-      <div class="why-video-copy">
-        <span class="eyebrow">WARUM FINALSNAP?</span>
-        <h2 id="why-video-title">Eure Feier. Aus allen Blickwinkeln.</h2>
-        <p>Die schönsten Erinnerungen entstehen überall auf eurer Feier. Im Erklärvideo seht ihr, wie FinalSnap die Fotos eurer Gäste an einem Ort zusammenbringt.</p>
-        <p class="video-privacy-note">Das Video wird erst geladen, wenn du auf Abspielen klickst; dabei wird eine Verbindung zu YouTube hergestellt.</p>
-        <a class="how-step-link" href="#ablauf">So funktioniert FinalSnap <span aria-hidden="true">↓</span></a>
-      </div>
-      <figure class="why-video-card">
-        <div class="why-video-frame" data-youtube-id="FQJTEasN5A4">
-          <button class="why-video-launch" type="button" aria-label="Erklärvideo Warum FinalSnap abspielen">
-            <img src="/preview-assets/why-finalsnap-poster.jpg" width="720" height="1280" alt="Ein Hochzeitsgast hält einen Moment der Feier mit dem Smartphone fest" loading="lazy">
-            <span class="why-video-play" aria-hidden="true">▶</span>
-          </button>
-        </div>
-        <figcaption>Das FinalSnap-Erklärvideo · 43 Sekunden<br><strong>KI-Hinweis:</strong> Titelbild und Beispielmotive im Video sind KI-generiert.</figcaption>
-        <noscript><a href="https://youtube.com/shorts/FQJTEasN5A4" target="_blank" rel="noopener">Video auf YouTube ansehen</a></noscript>
+      <figure class="lp-hero-visual">
+        <img src="/landing-img/hero-handy.webp" width="1600" height="1067" alt="Eine Hochzeitsgästin fotografiert das Brautpaar mit dem Smartphone" fetchpriority="high">
+        <div class="lp-float lp-float-a"><strong>+ 1 Foto</strong><span>gerade hochgeladen</span></div>
+        <div class="lp-float lp-float-b"><strong>312 Fotos</strong><span>von 48 Gästen</span></div>
       </figure>
     </section>
 
-    <section id="ablauf" class="section how-section">
-      <div class="section-heading">
-        <span class="eyebrow">IN VIER SCHRITTEN</span>
-        <h2>Von der Feier ins Album.</h2>
+    <!-- 2. Vertrauensleiste -->
+    <ul class="lp-trust" aria-label="Das Wichtigste auf einen Blick">
+      <li><span aria-hidden="true">📱</span> Keine App, kein Konto für Gäste</li>
+      <li><span aria-hidden="true">✨</span> Fotos in Originalqualität</li>
+      <li><span aria-hidden="true">🇩🇪</span> Server in Deutschland · DSGVO</li>
+      <li><span aria-hidden="true">📅</span> 90 Tage online, dann gelöscht</li>
+    </ul>
+
+    <!-- 3. Perspektiven -->
+    <section class="lp-section lp-perspectives">
+      <div class="lp-section-head">
+        <span class="lp-eyebrow">Eine Feier. Alle Perspektiven.</span>
+        <h2>Euer Fotograf sieht vieles.<br>Eure Gäste sehen den Rest.</h2>
+        <p>Die spontanen Momente am Tisch, auf der Tanzfläche, beim Sektempfang: Auf euren Gästehandys liegen hunderte Erinnerungen. Mit FinalSnap landen sie bei euch – statt in 20 verschiedenen Chats.</p>
       </div>
-      <div class="how-steps">
-        <article class="how-step">
-          <div class="how-step-copy">
-            <span class="how-step-label"><span>1</span> SCHRITT 1</span>
-            <h3>Veranstaltung und Album anlegen</h3>
-            <p>Lege dein Event an und richte dein persönliches Album ein. Vorab kannst du FinalSnap mit bis zu 25 Testfotos ausprobieren.</p>
-            <a class="how-step-link" href="/register">Kostenlos starten <span aria-hidden="true">↗</span></a>
-          </div>
-          <figure class="how-step-visual how-step-phone-visual">
-            <div class="event-phone-stage" role="img" aria-label="Handyansicht des FinalSnap-Veranstalterbereichs mit hervorgehobener Schaltfläche Album anlegen">
-              <div class="event-phone-mock">
-                <span class="event-phone-earpiece" aria-hidden="true"></span>
-                <div class="event-phone-screen">
-                  <div class="event-phone-status"><span>9:41</span><span>● ● ●</span></div>
-                  <div class="event-phone-topbar"><span aria-hidden="true">☰</span><span>Mein Bereich <b>/ Übersicht</b></span></div>
-                  <img class="event-phone-logo" src="/finalsnap-logo.webp" alt="FinalSnap">
-                  <span class="event-phone-eyebrow">DEIN VERANSTALTERBEREICH</span>
-                  <h4>Willkommen zurück</h4>
-                  <p>Hier verwaltest du deine Fotoalben.</p>
-                  <div class="event-phone-tile"><strong>90 Tage</strong><span>Albumzeitraum ab Feier</span></div>
-                  <div class="event-phone-click"><span aria-hidden="true">＋</span> Album anlegen</div>
-                  <span class="event-phone-tap" aria-hidden="true"></span>
-                </div>
-                <span class="event-phone-home" aria-hidden="true"></span>
-              </div>
+      <div class="lp-mosaic">
+        <img src="/landing-img/gaeste-oldtimer.webp" width="1000" height="667" alt="Gäste fotografieren das Brautpaar im Oldtimer mit ihren Handys" loading="lazy">
+        <img src="/landing-img/gast-filmt-tanz.webp" width="1000" height="667" alt="Ein Gast filmt das tanzende Brautpaar" loading="lazy">
+        <img src="/landing-img/gast-handy-garten.webp" width="1000" height="667" alt="Eine Gästin fotografiert die Hochzeitsgesellschaft im Garten" loading="lazy">
+        <img src="/landing-img/gaeste-gruppe.webp" width="1000" height="667" alt="Hochzeitsgäste halten den Moment mit ihren Handys fest" loading="lazy">
+      </div>
+    </section>
+
+    <!-- 4. Ablauf mit Handy-Demo -->
+    <section class="lp-section lp-steps" id="ablauf">
+      <div class="lp-section-head">
+        <span class="lp-eyebrow">In drei Schritten</span>
+        <h2>So einfach geht’s.</h2>
+      </div>
+      <div class="lp-steps-grid">
+        <ol class="lp-step-list">
+          <li>
+            <span class="lp-step-no">1</span>
+            <div><h3>Album anlegen</h3><p>Namen und Datum eurer Feier eingeben – fertig. Vorab könnt ihr mit 25 Fotos kostenlos testen.</p></div>
+          </li>
+          <li>
+            <span class="lp-step-no">2</span>
+            <div><h3>QR-Code auf den Tisch</h3><p>Im Design-Editor gestaltet ihr Tischkarten und Aufsteller passend zu eurer Feier – mit Textvorschlägen, als druckfertiges PDF.</p></div>
+          </li>
+          <li>
+            <span class="lp-step-no">3</span>
+            <div><h3>Fotos sammeln und gemeinsam anschauen</h3><p>Gäste laden direkt im Browser hoch. Ihr seht alles in einer Galerie, startet die Live-Diashow auf dem Beamer und ladet am Ende alles gesammelt herunter.</p></div>
+          </li>
+        </ol>
+        <div class="lp-phone" aria-label="Beispiel: So sieht euer Album auf dem Handy aus">
+          <div class="lp-phone-screen">
+            <div class="lp-phone-top"><span>9:41</span><span aria-hidden="true">● ● ●</span></div>
+            <p class="lp-phone-title">Unsere Hochzeit</p>
+            <p class="lp-phone-sub" id="demo-photo-count">4 Fotos im Album</p>
+            <div class="phone-photo-grid lp-phone-grid">
+              <figure><img src="/landing-img/paar-oldtimer.webp" alt="" loading="lazy"><span>von Lisa</span></figure>
+              <figure><img src="/landing-img/gaestefoto-torte.webp" alt="" loading="lazy"><span>von Onkel Jürgen</span></figure>
+              <figure><img src="/landing-img/ringe-haende.webp" alt="" loading="lazy"><span>von Sarah</span></figure>
+              <figure><img src="/landing-img/paar-nah.webp" alt="" loading="lazy"><span>von Tim</span></figure>
             </div>
-            <figcaption>FinalSnap auf dem Handy · Ein Tipp auf „Album anlegen“ startet die Einrichtung</figcaption>
-          </figure>
-        </article>
-        <article class="how-step how-step-reverse">
-          <div class="how-step-copy">
-            <span class="how-step-label"><span>2</span> SCHRITT 2</span>
-            <h3>QR-Code oder Link mit Gästen teilen</h3>
-            <p>Zeige den QR-Code auf einer Karte oder teile den Album-Link in deiner Einladung. Gäste öffnen das Album direkt im Browser – ohne App und ohne eigenes Konto.</p>
+            <div class="lp-phone-actions">
+              <button type="button" id="demo-add-photo">+ Foto hinzufügen</button>
+              <button type="button" id="demo-slideshow">▶ Diashow starten</button>
+            </div>
+            <p class="lp-phone-next" id="hero-demo-next" hidden>So einfach landet jedes Gästefoto im Album.</p>
           </div>
-          <figure class="how-step-visual">
-            <img src="/preview-assets/qr-einladung.webp" alt="Ein Hochzeitsgast scannt am Tisch den QR-Code zum gemeinsamen FinalSnap-Album" width="1448" height="1086" loading="lazy">
-            <figcaption>KI-generiertes Beispielbild · Gäste öffnen den Zugang direkt mit dem Smartphone</figcaption>
-          </figure>
-        </article>
-        <article class="how-step">
-          <div class="how-step-copy">
-            <span class="how-step-label"><span>3</span> SCHRITT 3</span>
-            <h3>Gäste laden ihre Fotos hoch</h3>
-            <p>Jeder kann eigene Bilder beisteuern – ohne Registrierung und ohne App-Download. Originalfotos bleiben in voller Auflösung erhalten; kleinere Anzeigeversionen machen die Galerie schnell.</p>
-          </div>
-          <figure class="how-step-visual">
-            <img src="/preview-assets/fotos-sammeln.webp" alt="Ein Gast nutzt sein Smartphone, um Momente der Hochzeitsfeier ins gemeinsame Album zu bringen" width="1448" height="1086" loading="lazy">
-            <figcaption>KI-generiertes Beispielbild · Die Feiermomente kommen aus vielen Blickwinkeln zusammen</figcaption>
-          </figure>
-        </article>
-        <article class="how-step how-step-reverse">
-          <div class="how-step-copy">
-            <span class="how-step-label"><span>4</span> SCHRITT 4</span>
-            <h3>Erinnerungen gemeinsam anschauen</h3>
-            <p>Freigegebene Fotos findet ihr in der gemeinsamen Galerie. Auf Wunsch zeigt ihr sie bei der Feier als Diashow auf einem großen Bildschirm.</p>
-          </div>
-          <figure class="how-step-visual">
-            <img src="/preview-assets/live-diashow.webp" alt="Gäste schauen gemeinsam auf einem Fernseher eine Diashow mit den Feierfotos" width="1448" height="1086" loading="lazy">
-            <figcaption>KI-generiertes Beispielbild · Freigegebene Aufnahmen auf dem großen Bildschirm</figcaption>
-          </figure>
-        </article>
-      </div>
-    </section>
-
-    <section class="section mascot-motion-section" aria-label="FinalSnap Party Outro">
-      <div class="mascot-motion-copy">
-        <span class="eyebrow">FINALSNAP IN BEWEGUNG</span>
-        <h2>Kamera bereit. Blitz geladen.</h2>
-      </div>
-      <div class="mascot-motion-stage">
-        <video class="mascot-motion-video" autoplay muted playsinline webkit-playsinline loop preload="auto" poster="/animations/finalsnap-mascot-landscape-poster.jpg" aria-label="Das FinalSnap-Maskottchen fotografiert auf einer Party und zeigt das FinalSnap-Logo">
-          <source src="/animations/finalsnap-mascot-landscape.mp4" type="video/mp4">
-        </video>
-        <button class="mascot-motion-play" type="button" aria-label="FinalSnap-Animation abspielen"><span aria-hidden="true">▶</span><span>Animation abspielen</span></button>
-        <span class="ai-video-tag">KI-generiertes Video</span>
-      </div>
-    </section>
-
-    <section id="funktionen" class="section feature-section">
-      <div class="section-heading">
-        <span class="eyebrow">ALLES AN EINEM ORT</span>
-        <h2>Mehr gemeinsame Erinnerungen. Weniger Hin und Her.</h2>
-        <p>FinalSnap sammelt die Bilder eurer Gäste an einem Ort – einfach per Handy und passend zu eurer Feier.</p>
-      </div>
-      <div class="feature-grid">
-        <article class="feature-card"><span class="feature-icon" aria-hidden="true">▧</span><h3>Euer gemeinsames Fotoalbum</h3><p>Freigegebene Fotos erscheinen in einer Galerie, die ihr mit euren Gästen teilt.</p></article>
-        <article class="feature-card"><span class="feature-icon" aria-hidden="true">▦</span><h3>Ein QR-Code für alle</h3><p>Zeigt den QR-Code auf einem Schild oder verschickt den Album-Link direkt an eure Gäste.</p></article>
-        <article class="feature-card"><span class="feature-icon" aria-hidden="true">✓</span><h3>Ihr behaltet den Überblick</h3><p>Auf Wunsch prüft ihr neue Fotos, bevor sie für alle in der Galerie sichtbar werden.</p></article>
-        <article class="feature-card"><span class="feature-icon" aria-hidden="true">↓</span><h3>Fotos gesammelt herunterladen</h3><p>Ladet die Bilder eurer Feier gesammelt herunter und bewahrt sie bei euch auf.</p></article>
-        <article class="feature-card"><span class="feature-icon" aria-hidden="true">▶</span><h3>Gemeinsam anschauen</h3><p>Öffnet die Live-Diashow auf einem Bildschirm und erlebt die freigegebenen Fotos zusammen.</p></article>
-        <article class="feature-card"><span class="feature-icon" aria-hidden="true">✎</span><h3>Mehr als nur Fotos</h3><p>Gästebuch und Fotoaufgaben bringen persönliche Nachrichten und kleine Mitmachideen dazu.</p></article>
-      </div>
-      <p class="feature-footnote">Gäste brauchen weder ein eigenes Konto noch eine App. Freigegebene Fotos sehen alle Gäste in der gemeinsamen Galerie.</p>
-    </section>
-
-    <section id="anlaesse" class="section occasion-section">
-      <div class="section-heading">
-        <span class="eyebrow">FÜR EURE MOMENTE</span>
-        <h2>Für welche Feiern ist FinalSnap gedacht?</h2>
-        <p>Überall dort, wo viele Menschen gemeinsame Erinnerungen festhalten.</p>
-      </div>
-      <div class="occasion-grid">
-        <article><span aria-hidden="true">💍</span><div><h3>Hochzeiten</h3><p>Auch die spontanen Augenblicke eurer Gäste sammeln.</p></div></article>
-        <article><span aria-hidden="true">🎂</span><div><h3>Geburtstage &amp; Familienfeste</h3><p>Erinnerungen von Familie und Freunden zusammenbringen.</p></div></article>
-        <article><span aria-hidden="true">🎉</span><div><h3>Partys &amp; Feiern</h3><p>Die Bilder vom Abend an einem Ort wiederfinden.</p></div></article>
-        <article><span aria-hidden="true">🥂</span><div><h3>Firmenveranstaltungen</h3><p>Gemeinsame Momente von Team und Gästen festhalten.</p></div></article>
-        <article><span aria-hidden="true">🎓</span><div><h3>Abschluss &amp; Jubiläum</h3><p>Besondere Meilensteine aus verschiedenen Blickwinkeln erleben.</p></div></article>
-        <article><span aria-hidden="true">⚽</span><div><h3>Vereins- &amp; Gemeinschaftsevents</h3><p>Fotos von vielen Beteiligten einfach einsammeln.</p></div></article>
-      </div>
-    </section>
-
-    <section id="trustpilot" class="section experience-section">
-      <div class="experience-panel trustpilot-panel">
-        <span class="eyebrow">UNABHÄNGIGE BEWERTUNGEN</span>
-        <div class="experience-heading">
-          <div><h2>Deine Erfahrung auf Trustpilot teilen</h2><p class="experience-lead">Du hast FinalSnap ausprobiert? Teile deine ehrliche Rückmeldung direkt auf Trustpilot.</p></div>
         </div>
-        <!-- TrustBox widget - Review Collector -->
-        <div class="trustpilot-widget" data-locale="de-DE" data-template-id="56278e9abfbbba0bdcd568bc" data-businessunit-id="6b00a73630d26ccd32cb8d7e" data-style-height="52px" data-style-width="100%">
-          <a href="https://de.trustpilot.com/review/finalsnap.de" target="_blank" rel="noopener">Trustpilot</a>
-        </div>
-        <p class="trustpilot-consent-hint" id="trustpilot-consent-hint">Das Trustpilot-Widget wird erst nach deiner Zustimmung zu externen Medien geladen. <a href="https://de.trustpilot.com/review/finalsnap.de" target="_blank" rel="noopener">Trustpilot direkt öffnen</a>.</p>
-        <!-- End TrustBox widget -->
+      </div>
+      <p class="lp-center"><a class="button primary" href="/register">Jetzt Album anlegen <span aria-hidden="true">→</span></a></p>
+    </section>
+
+    <!-- 5. Vergleich -->
+    <section class="lp-section lp-compare" id="warum">
+      <div class="lp-section-head">
+        <span class="lp-eyebrow">Warum nicht einfach WhatsApp?</span>
+        <h2>Weil eure Erinnerungen mehr verdienen.</h2>
+      </div>
+      <div class="lp-table-wrap">
+        <table class="lp-table">
+          <thead><tr><th scope="col"><span class="lp-sr">Kriterium</span></th><th scope="col" class="lp-us">FinalSnap</th><th scope="col">WhatsApp-Gruppe</th><th scope="col">Cloud-Ordner</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">Was Gäste brauchen</th><td data-label="FinalSnap" class="lp-us">nur die Handykamera</td><td data-label="WhatsApp-Gruppe">App und Telefonnummer in der Gruppe</td><td data-label="Cloud-Ordner">oft ein eigenes Konto</td></tr>
+            <tr><th scope="row">Bildqualität</th><td data-label="FinalSnap" class="lp-us">Original</td><td data-label="WhatsApp-Gruppe">standardmäßig komprimiert</td><td data-label="Cloud-Ordner">Original</td></tr>
+            <tr><th scope="row">Datenschutz</th><td data-label="FinalSnap" class="lp-us">Server in Deutschland, keine Nummern sichtbar</td><td data-label="WhatsApp-Gruppe">Nummern für alle sichtbar</td><td data-label="Cloud-Ordner">meist US-Anbieter</td></tr>
+            <tr><th scope="row">Alles an einem Ort</th><td data-label="FinalSnap" class="lp-us">ja</td><td data-label="WhatsApp-Gruppe">verteilt zwischen Nachrichten</td><td data-label="Cloud-Ordner">ja</td></tr>
+            <tr><th scope="row">Live-Diashow auf der Feier</th><td data-label="FinalSnap" class="lp-us">ja</td><td data-label="WhatsApp-Gruppe">nein</td><td data-label="Cloud-Ordner">eingeschränkt</td></tr>
+            <tr><th scope="row">Fotos vorher prüfen</th><td data-label="FinalSnap" class="lp-us">ja, auf Wunsch</td><td data-label="WhatsApp-Gruppe">nein</td><td data-label="Cloud-Ordner">nein</td></tr>
+          </tbody>
+        </table>
       </div>
     </section>
 
-    <section id="pakete" class="section plans-section">
-      <div class="plans-heading">
-        <span class="eyebrow">FÜR EURE VERANSTALTUNG</span>
-        <h2>Ein Album für euren Anlass.</h2>
-        <p>Hochzeit, Geburtstag, Sommerfest oder Firmenfeier.</p>
-        <p class="plans-intro">Einmal pro Veranstaltung buchen. Eure Gäste laden ohne Konto und ohne App hoch.</p>
+    <!-- 6. Funktionen -->
+    <section class="lp-section lp-features" id="funktionen">
+      <div class="lp-section-head">
+        <span class="lp-eyebrow">Alles drin</span>
+        <h2>Mehr als ein Fotoordner.</h2>
       </div>
-      <div id="plan-grid" class="plan-grid" aria-live="polite"></div>
-      <div class="actions">
-        <a class="button primary" href="/register">Konto erstellen &amp; Event anlegen <span aria-hidden="true">↗</span></a>
+      <div class="lp-feature-grid">
+        <article><span aria-hidden="true">🪧</span><h3>Tischkarten &amp; QR-Aufsteller</h3><p>Eigenes Design mit Textvorschlägen für Hochzeit, Geburtstag und Firmenfeier. Druckfertig als PDF.</p></article>
+        <article><span aria-hidden="true">📽️</span><h3>Live-Diashow</h3><p>Neue Fotos erscheinen während der Feier auf dem Beamer oder Fernseher.</p></article>
+        <article><span aria-hidden="true">✍️</span><h3>Gästebuch &amp; Fotoaufgaben</h3><p>Persönliche Grüße und kleine Mitmach-Ideen, die für Stimmung sorgen.</p></article>
+        <article><span aria-hidden="true">✅</span><h3>Ihr behaltet die Kontrolle</h3><p>Auf Wunsch prüft ihr neue Fotos, bevor alle Gäste sie sehen.</p></article>
+        <article><span aria-hidden="true">⬇️</span><h3>Alles herunterladen</h3><p>Alle Fotos in Originalqualität gesammelt als ZIP – zum Aufbewahren oder fürs Fotobuch.</p></article>
+        <article><span aria-hidden="true">📍</span><h3>Dienstleister in eurer Nähe</h3><p>Fotografen, Locations, DJs und mehr aus eurer Region – direkt im Veranstalterbereich.</p></article>
       </div>
-      <p class="small">Das Album startet am gewählten Veranstaltungsdatum.</p>
     </section>
 
-    <section id="fragen" class="section faq-section">
-      <span class="eyebrow">NOCH FRAGEN?</span>
-      <h2>Gut zu wissen.</h2>
-      <details>
-        <summary>Müssen Gäste ein Konto erstellen?</summary>
-        <p>Nein. Eure Gäste öffnen den QR-Code oder Veranstaltungslink und können Fotos hochladen. Nach der Freigabe sehen alle Gäste mit dem Gästelink die gemeinsame Galerie.</p>
-      </details>
-      <details>
-        <summary>Wer kann die Fotos sehen?</summary>
-        <p>Gäste sehen in der gemeinsamen Galerie alle freigegebenen Fotos. Du kannst neue Uploads vor der Veröffentlichung prüfen und verwalten. Originalfotos bleiben in voller Auflösung erhalten; kleinere Versionen sorgen für eine schnelle Anzeige.</p>
-      </details>
-      <details>
-        <summary>Wann ist die Veranstaltung freigeschaltet?</summary>
-        <p>Mit bis zu 25 Testfotos kannst du dein Album vorab ausprobieren. Das volle Paket kostet einmalig 49,90 € inkl. 19 % USt. pro Veranstaltung und startet am Veranstaltungsdatum.</p>
-      </details>
-      <details>
-        <summary>Wie lange bleiben die Fotos verfügbar?</summary>
-        <p>Vor dem Veranstaltungsdatum kannst du bis zu 25 Testfotos hochladen. Wenn du das Album buchst, bleiben diese Fotos erhalten und zählen ab dem Start in den Speicherplatz von bis zu 25 GB. Je nach Dateigröße entspricht das als grobe Orientierung etwa 4.000 Fotos. Das Paket läuft 90 Tage ab Veranstaltungsdatum. Bis zum Ablauf kannst du Fotos hochladen, ansehen und herunterladen. Danach werden die Fotos automatisch gelöscht.</p>
-      </details>
+    <!-- 7. Gründer -->
+    <section class="lp-section lp-founder">
+      <div class="lp-founder-photos">
+        <img src="/landing-img/braut-lacht.webp" width="600" height="900" alt="Lachende Braut" loading="lazy">
+        <img src="/landing-img/paar-lacht.webp" width="600" height="900" alt="Brautpaar lacht miteinander" loading="lazy">
+      </div>
+      <div class="lp-founder-copy">
+        <span class="lp-eyebrow">Von einem Hochzeitsfotografen entwickelt</span>
+        <h2>„Wo sind eigentlich die Fotos der Gäste?“</h2>
+        <p>Diese Frage höre ich nach fast jeder Hochzeit. Als Fotograf halte ich den Tag fest – aber die vielen kleinen Momente entstehen auf den Handys eurer Gäste. Deshalb habe ich FinalSnap gebaut: einfach für die Gäste, sicher für eure Daten und mit Platz für jede Perspektive.</p>
+        <p class="lp-signature">Matthias Wendland<br><span>Hochzeitsfotograf aus Gütersloh, Gründer von FinalSnap</span></p>
+      </div>
     </section>
 
-    <section class="closing-cta">
-      <span class="eyebrow">DER NÄCHSTE SCHÖNE MOMENT KOMMT</span>
-      <h2>Eure Feier. Alle Perspektiven.</h2>
-      <p>Starte mit bis zu 25 Fotos.</p>
-      <a class="button primary" href="/register">25 Fotos kostenlos testen <span aria-hidden="true">↗</span></a>
+    <!-- 8. Preis -->
+    <section class="lp-section lp-pricing" id="preis">
+      <div class="lp-section-head">
+        <span class="lp-eyebrow">Ein Preis. Keine Überraschungen.</span>
+        <h2>Ein Album für eure Feier.</h2>
+        <p>Erst kostenlos mit 25 Fotos testen, dann einmalig buchen. Kein Abo.</p>
+      </div>
+      <div id="plan-grid" class="plan-grid lp-plan-grid" aria-live="polite"></div>
+      <p class="lp-center lp-small">Ihr habt einen Code von eurem Fotografen oder eurer Location? Den löst ihr bei der Buchung ein.</p>
+    </section>
+
+    <!-- 9. Fragen -->
+    <section class="lp-section lp-faq" id="fragen">
+      <div class="lp-section-head">
+        <span class="lp-eyebrow">Noch Fragen?</span>
+        <h2>Gut zu wissen.</h2>
+      </div>
+      <details><summary>Brauchen Gäste eine App oder ein Konto?</summary><p>Nein. Gäste scannen den QR-Code oder öffnen den Link und laden ihre Fotos direkt im Browser hoch.</p></details>
+      <details><summary>Wer kann die Fotos sehen?</summary><p>Nur Gäste mit eurem Album-Link. Auf Wunsch prüft ihr neue Fotos, bevor sie in der gemeinsamen Galerie erscheinen.</p></details>
+      <details><summary>Wo werden die Fotos gespeichert?</summary><p>Auf Servern in Deutschland. Standortdaten werden aus den Fotos entfernt, die Originale bleiben in voller Auflösung erhalten.</p></details>
+      <details><summary>Wie viele Fotos passen hinein?</summary><p>Es gibt keine feste Anzahl. Ihr habt bis zu 25 GB Speicher – je nach Dateigröße grob 4.000 Fotos.</p></details>
+      <details><summary>Wie lange bleibt das Album online?</summary><p>90 Tage ab dem Tag eurer Feier. Bis dahin könnt ihr alles herunterladen, danach wird das Album automatisch gelöscht.</p></details>
+      <details><summary>Was kostet FinalSnap?</summary><p>Testen mit bis zu 25 Fotos ist kostenlos. Das volle Album kostet einmalig 49,90 € inkl. 19 % USt. pro Feier – ohne Abo.</p></details>
+    </section>
+
+    <!-- 10. Dienstleister -->
+    <section class="lp-partner-teaser">
+      <div>
+        <span class="lp-eyebrow">Für Fotografen, Locations &amp; Dienstleister</span>
+        <h2>Werdet FinalSnap-Partner.</h2>
+        <p>Kostenloser Eintrag für Paare in eurer Region – und eine Provision für jede Empfehlung.</p>
+      </div>
+      <a class="button secondary" href="/partner/anmelden">Partner werden <span aria-hidden="true">→</span></a>
+    </section>
+
+    <!-- 11. Abschluss -->
+    <section class="lp-closing">
+      <img src="/landing-img/paar-bruecke.webp" width="900" height="600" alt="" loading="lazy">
+      <div>
+        <h2>Euer Tag. Aus allen Blickwinkeln.</h2>
+        <p>Legt euer Album in zwei Minuten an und testet es mit 25 Fotos – kostenlos.</p>
+        <a class="button primary lp-cta" href="/register">Jetzt kostenlos testen <span aria-hidden="true">→</span></a>
+      </div>
     </section>
   </main>
 
-  <footer class="site-footer">
-    <span>FinalSnap · Eine Feier. Alle Perspektiven. Ein Album.</span>
-    <span><a href="/partner">Dienstleister finden</a> · <a href="/partner/anmelden">Partner werden</a> · <a href="/impressum">Impressum</a> · <a href="/datenschutz">Datenschutz</a> · <a href="/?cookies=1">Cookie-Einstellungen</a> · <a href="mailto:info@finalsnap.de">Kontakt</a></span>
+  <footer class="site-footer lp-footer">
+    <span>FinalSnap · Alle Fotos eurer Gäste. In einem Album.</span>
+    <span><a href="/partner">Dienstleister finden</a> · <a href="/partner/anmelden">Partner werden</a> · <a href="/impressum">Impressum</a> · <a href="/datenschutz">Datenschutz</a> · <a href="/bedingungen">Leistungsbedingungen</a> · <a href="mailto:info@finalsnap.de">Kontakt</a></span>
   </footer>
-
-  <section class="cookie-consent-banner" id="cookie-consent-banner" role="dialog" aria-labelledby="cookie-consent-title" aria-describedby="cookie-consent-copy" hidden>
-    <h2 id="cookie-consent-title">Deine Cookie-Auswahl</h2>
-    <p id="cookie-consent-copy">Notwendige Cookies halten Anmeldung, Albumzugang und deine Auswahl funktionsfähig. Mit „Alle akzeptieren“ erlaubst du außerdem externe Medien von Trustpilot und YouTube. Du kannst deine Auswahl jederzeit ändern. <a href="/datenschutz">Mehr in den Datenschutzhinweisen</a>.</p>
-    <p class="cookie-consent-context" id="cookie-consent-context" aria-live="polite" hidden></p>
-    <div class="cookie-consent-actions">
-      <button type="button" data-cookie-choice="necessary">Nur notwendige</button>
-      <button type="button" data-cookie-choice="all">Alle akzeptieren</button>
-    </div>
-  </section>
 
   <script src="/landing.js"></script>
 </body>
