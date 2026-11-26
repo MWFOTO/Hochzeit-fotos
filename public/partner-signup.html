@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Partner werden · FinalSnap</title>
+  <meta name="description" content="Kostenloser Eintrag im FinalSnap-Partnerverzeichnis für Fotograf:innen, Locations und Dienstleister rund um Hochzeit und Feier – mit Provision für jede Empfehlung.">
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/partner.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="/" aria-label="FinalSnap Startseite"><img src="/finalsnap-logo.webp" alt="FinalSnap" width="150" height="89"></a>
+    <nav class="actions"><a class="button secondary" href="/partner">Zum Verzeichnis</a></nav>
+  </header>
+  <main class="partner-page">
+    <section class="partner-hero">
+      <span class="eyebrow">PARTNER WERDEN</span>
+      <h1>Werdet FinalSnap-Partner in eurer Region</h1>
+      <p>Paare, die ihre Feier bei FinalSnap anlegen, sehen passende Dienstleister in ihrer Nähe. Der Eintrag ist kostenlos.</p>
+    </section>
+    <section class="partner-benefits" aria-label="Vorteile">
+      <article><h2>Gesehen werden</h2><p>Euer Eintrag erscheint im Verzeichnis und bei Paaren in eurer Region direkt im Veranstalterbereich.</p></article>
+      <article><h2>Provision verdienen</h2><p>Ihr bekommt einen eigenen Empfehlungs-Code. Eure Kund:innen sparen 5 € – ihr erhaltet 10 € pro bezahlter Buchung.</p></article>
+      <article><h2>Mehrwert für eure Kund:innen</h2><p>Empfehlt euren Paaren ein Gäste-Fotoalbum per QR-Code – ohne App und ohne Konto für die Gäste.</p></article>
+    </section>
+    <form class="partner-form" id="partner-form" enctype="multipart/form-data" novalidate>
+      <label class="full" for="company">Name eures Unternehmens *<input id="company" name="company" maxlength="80" required autocomplete="organization"></label>
+      <label for="category">Kategorie *<select id="category" name="category" required>
+        <option value="">Bitte wählen</option>
+        <option value="photographer">Fotograf:in</option><option value="videographer">Videograf:in</option><option value="location">Location</option>
+        <option value="music">DJ &amp; Musik</option><option value="flowers">Floristik &amp; Deko</option><option value="cake">Konditorei &amp; Catering</option>
+        <option value="planner">Hochzeits- &amp; Eventplanung</option><option value="officiant">Freie Trauung &amp; Redner:in</option>
+        <option value="styling">Styling, Haare &amp; Make-up</option><option value="other">Weitere Dienstleister</option>
+      </select></label>
+      <label for="website">Webseite<input id="website" name="website" maxlength="200" placeholder="www.euer-studio.de" autocomplete="url"></label>
+      <label for="postcode">Postleitzahl *<input id="postcode" name="postcode" inputmode="numeric" pattern="\d{5}" maxlength="5" required autocomplete="postal-code"></label>
+      <label for="city">Ort<input id="city" name="city" maxlength="60" autocomplete="address-level2"></label>
+      <label class="full" for="regions">Weitere Einsatzgebiete (PLZ-Bereiche)<input id="regions" name="regions" maxlength="80" placeholder="z. B. 32, 48, 59">
+        <small>Die ersten zwei Ziffern der Postleitzahlen, in denen ihr auch arbeitet. Euer eigener Bereich ist automatisch dabei.</small></label>
+      <label class="full" for="description">Kurzbeschreibung<textarea id="description" name="description" maxlength="600" placeholder="Was macht euch aus? Für welche Feiern seid ihr da?"></textarea><small><span id="description-count">0</span> / 600 Zeichen</small></label>
+      <label class="full" for="logo">Logo (JPG, PNG oder WebP, max. 4 MB)<input id="logo" name="logo" type="file" accept="image/jpeg,image/png,image/webp"></label>
+      <label for="contactName">Ansprechperson *<input id="contactName" name="contactName" maxlength="80" required autocomplete="name"></label>
+      <label for="email">E-Mail *<input id="email" name="email" type="email" maxlength="120" required autocomplete="email"><small>Nicht öffentlich. Hierhin schicken wir die Freischaltung und euren Code.</small></label>
+      <label for="phone">Telefon (optional, nicht öffentlich)<input id="phone" name="phone" maxlength="40" autocomplete="tel"></label>
+      <label class="trap" aria-hidden="true">Bitte leer lassen<input name="website_confirm" tabindex="-1" autocomplete="off"></label>
+      <label class="check-label full"><input type="checkbox" id="consent" required><span>Ich bin berechtigt, dieses Unternehmen anzumelden. Name, Kategorie, Ort, Webseite, Beschreibung und Logo dürfen nach Prüfung im FinalSnap-Partnerverzeichnis veröffentlicht werden. Ich kann den Eintrag jederzeit per E-Mail an info@finalsnap.de löschen lassen. Hinweise in der <a href="/datenschutz" target="_blank" rel="noopener">Datenschutzerklärung</a>.</span></label>
+      <div class="full actions"><button class="primary" type="submit" id="submit">Anmeldung absenden</button></div>
+      <p class="full" id="status" role="status" aria-live="polite"></p>
+    </form>
+  </main>
+  <footer class="legal-footer"><a href="/impressum">Impressum</a> · <a href="/datenschutz">Datenschutz</a></footer>
+  <script src="/partner-signup.js"></script>
+</body>
+</html>

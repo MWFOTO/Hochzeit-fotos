@@ -79,3 +79,9 @@ Braucht eine neue Funktion eine Oberfläche, baut ChatGPT die Technik und hinter
 - Wunsch des Inhabers: keine Datenübertragung in die USA. KI-Anbindung (card-assistant.js, Routen, SDK, Datenschutz-Abschnitt) entfernt.
 - Karten-Assistent arbeitet jetzt nur im Browser mit kuratierten Textbausteinen (Anlass × Stimmung × Anrede), optional eigener Satz.
 - Doku: `docs/TISCHKARTEN-ASSISTENT.md`.
+
+### 26.11.2026 · Claude · Partner-Programm Stufe 1
+- Regionales Partnerverzeichnis (`/partner`, Suche nach PLZ-Leitregion und Kategorie), Anmeldung (`/partner/anmelden`) mit Logo,
+  Verwaltung `/ops/partners` (Freigabe, Premium, Code, Löschen, Provisionsübersicht).
+- Empfehlungs-Codes: 5 € Rabatt im Checkout, 10 € Provision je bezahlter Buchung; Code per `?ref=` oder im Dashboard.
+- Dashboard: optionale PLZ der Location, „Dienstleister in eurer Nähe“. Datenschutz ergänzt. Doku: `docs/PARTNER-PROGRAMM.md`.

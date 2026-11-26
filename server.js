@@ -21,6 +21,7 @@ const { createPaymentReceipt } = require('./payment-receipt');
 const { createUploadCapacity, GiB, MiB, MIN_UPLOAD_FREE_BYTES, uploadDiskWarningThreshold } = require('./upload-capacity');
 const { createEventUploadQueues } = require('./upload-queues');
 const { preparePhoto, originalKey } = require('./photo-processing');
+const { createPartnerProgram } = require('./partners');
 const CARD_TEXT_LIMITS = { kicker:40, invite:120, backKicker:40, backInvite:120 };
 const scrypt = promisify(crypto.scrypt);
 const PLANS = { event:{label:'FinalSnap Fotoalbum',months:3,retentionDays:90,priceCents:4990}, '1m':{label:'1 Monat (alt)',months:1,priceCents:1900,legacy:true}, '3m':{label:'3 Monate (alt)',months:3,priceCents:2900,legacy:true}, '6m':{label:'6 Monate (alt)',months:6,priceCents:3900,legacy:true}, '12m':{label:'12 Monate (alt)',months:12,priceCents:5900,legacy:true} };
@@ -466,7 +467,7 @@ function createApp(options = {}) {
     const events=db.prepare(`SELECT e.*, COUNT(p.id) photoCount, COALESCE(SUM(p.bytes),0) storageBytes
       FROM events e LEFT JOIN photos p ON p.event_id=e.id
       WHERE e.owner_id=? AND e.deleted_at IS NULL GROUP BY e.id ORDER BY e.created_at DESC`).all(req.user.id);
-    res.json({events:events.map(e=>{const payment=db.prepare('SELECT id,status,customer_type,paid_at,early_start_requested_at,early_start_acknowledged_at,terms_accepted_at,terms_version,stripe_invoice_id FROM payments WHERE event_id=?').get(e.id);const withdrawal=payment?db.prepare('SELECT submitted_at,status FROM withdrawal_confirmations WHERE payment_id=?').get(payment.id):null;return {...e,videoAvailable,expires_at:e.event_date?retentionUntil(e):e.expires_at,storageLimitBytes:eventStorageLimit(e,cfg),photoLimit:eventPhotoLimit(e,cfg),checkoutStarted:!!payment,customerType:payment?.customer_type||null,paymentStatus:payment?.status||null,paymentConcludedAt:payment?.paid_at||null,withdrawalSubmittedAt:withdrawal?.submitted_at||null,withdrawalConfirmationStatus:withdrawal?.status||null,earlyStartRequested:!!payment?.early_start_requested_at,earlyStartAcknowledged:!!payment?.early_start_acknowledged_at,termsAccepted:!!payment?.terms_accepted_at,termsVersion:payment?.terms_version||null,hasInvoice:!!payment?.stripe_invoice_id,readOnly:!active(e)&&readable(e),retentionUntil:retentionUntil(e),startsAt:startAt(e),guestUrl:readable(e)?`${baseUrl.origin}/event/${e.id}?token=${e.guest_token}`:null};})});
+    res.json({events:events.map(e=>{const payment=db.prepare('SELECT id,status,customer_type,paid_at,early_start_requested_at,early_start_acknowledged_at,terms_accepted_at,terms_version,stripe_invoice_id FROM payments WHERE event_id=?').get(e.id);const withdrawal=payment?db.prepare('SELECT submitted_at,status FROM withdrawal_confirmations WHERE payment_id=?').get(payment.id):null;return {...e,priceCents:partnerProgram.eventPriceCents(e),videoAvailable,expires_at:e.event_date?retentionUntil(e):e.expires_at,storageLimitBytes:eventStorageLimit(e,cfg),photoLimit:eventPhotoLimit(e,cfg),checkoutStarted:!!payment,customerType:payment?.customer_type||null,paymentStatus:payment?.status||null,paymentConcludedAt:payment?.paid_at||null,withdrawalSubmittedAt:withdrawal?.submitted_at||null,withdrawalConfirmationStatus:withdrawal?.status||null,earlyStartRequested:!!payment?.early_start_requested_at,earlyStartAcknowledged:!!payment?.early_start_acknowledged_at,termsAccepted:!!payment?.terms_accepted_at,termsVersion:payment?.terms_version||null,hasInvoice:!!payment?.stripe_invoice_id,readOnly:!active(e)&&readable(e),retentionUntil:retentionUntil(e),startsAt:startAt(e),guestUrl:readable(e)?`${baseUrl.origin}/event/${e.id}?token=${e.guest_token}`:null};})});
   });
   app.post('/api/events/:eventId/withdrawal',loginRequired,owner,wrap(async(req,res)=>{
     const customerName=String(req.body.customerName||'').trim().replace(/\s+/g,' ');
@@ -509,7 +510,8 @@ function createApp(options = {}) {
     const occasionLabel={wedding:'Hochzeit',birthday:'Geburtstag',party:'Party',summer:'Sommerfest',company:'Firmenfeier',jubilee:'Jubiläum',graduation:'Abschlussfeier',other:'Feier'}[occasion];
     db.prepare('INSERT INTO events (id,email,plan,amount_cents,status,created_at,owner_id,title,event_date,guest_token,moderation,guestbook_moderation,expires_at,design_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(id,req.user.email,'event',plan.priceCents,'pending',Date.now(),req.user.id,title,eventDate,random(),req.body.moderation===true?1:0,req.body.guestbookModeration===false?0:1,expiresAt,JSON.stringify({occasion,theme,accent,title,occasionLabel}));
     if(trial)db.prepare("UPDATE events SET status='trial', trial_used=1 WHERE id=?").run(id);
-    res.status(201).json({eventId:id,trial:!!trial,eventDate});
+    const {referralApplied}=partnerProgram.applyToNewEvent(id,req.body);
+    res.status(201).json({eventId:id,trial:!!trial,eventDate,referralApplied});
   });
   app.get('/api/event/:eventId/availability',(req,res)=>res.json({available:/^[a-z0-9][a-z0-9_-]{2,63}$/.test(req.params.eventId)&&!lookup(req.params.eventId)&&!fs.existsSync(path.join(root,req.params.eventId))}));
   function owner(req,res,next) { const e=lookup(req.params.eventId); if(!own(req,e)) return fail(res,404,'Event nicht gefunden.'); req.event=e; next(); }
@@ -519,6 +521,7 @@ function createApp(options = {}) {
     if(!user?.email_verified_at||!paymentAdminEmails.has(String(req.user.email||'').toLowerCase()))return fail(res,403,'Kein Zugriff auf die Zahlungsverwaltung.');
     next();
   }
+  const partnerProgram=createPartnerProgram({app,db,cfg,baseUrl,mailer,fail,wrap,loginRequired,owner,paymentAdminRequired,adminEmails:[...paymentAdminEmails],basePriceCents:PLANS.event.priceCents});
   app.get('/ops/events',paymentAdminRequired,(req,res)=>res.sendFile(path.join(__dirname,'public','operations-admin.html')));
   app.get('/api/admin/upcoming-events',paymentAdminRequired,(req,res)=>{
     const parts=Object.fromEntries(berlinParts.formatToParts(new Date()).map(part=>[part.type,part.value]));
@@ -607,18 +610,19 @@ function createApp(options = {}) {
     const customerType=['consumer','business'].includes(req.body.customerType)?req.body.customerType:'consumer';
     const earlyStartNeeded=customerType==='consumer'&&!!e.event_date&&startAt(e)<Date.now()+14*86400000;
     if(earlyStartNeeded&&(req.body.earlyStartRequest!==true||req.body.earlyStartAcknowledged!==true))return fail(res,400,'Bitte bestätige den möglichen vorzeitigen Leistungsbeginn und die Hinweise zum Widerruf.');
+    const price=partnerProgram.eventPriceCents(e);
     const earlyStartRequestedAt=earlyStartNeeded?Date.now():null;
     const earlyStartAcknowledgedAt=earlyStartNeeded?earlyStartRequestedAt:null;
     if(req.body.plan!==undefined){const plan=PLANS[req.body.plan];if(!plan)return fail(res,400,'Bitte ein gültiges Paket wählen.');if(req.body.plan!==e.plan)return fail(res,409,'Das Paket und der Preis für dieses Album sind bereits festgelegt.');}
     let payment=db.prepare('SELECT * FROM payments WHERE event_id=?').get(e.id);
-    if(!payment){const plan=PLANS.event;db.prepare('INSERT INTO payments (id,event_id,amount_cents,months) VALUES (?,?,?,?)').run(crypto.randomUUID(),e.id,plan.priceCents,plan.months);payment=db.prepare('SELECT * FROM payments WHERE event_id=?').get(e.id);}
+    if(!payment){const plan=PLANS.event;db.prepare('INSERT INTO payments (id,event_id,amount_cents,months) VALUES (?,?,?,?)').run(crypto.randomUUID(),e.id,price,plan.months);payment=db.prepare('SELECT * FROM payments WHERE event_id=?').get(e.id);}
     if(['refunded','disputed','disputed_lost'].includes(payment.status))return fail(res,409,'Für diese Zahlung ist aktuell kein neuer Checkout möglich. Bitte kontaktiere den Support.');
     let attempt=db.prepare('SELECT * FROM payment_attempts WHERE payment_id=? ORDER BY attempt_no DESC LIMIT 1').get(payment.id);
     let session=null;
     if(attempt&&attempt.status==='open'&&!attempt.stripe_session_id.startsWith('creating_')){
       try{session=await stripe.checkout.sessions.retrieve(attempt.stripe_session_id);}catch(error){if(error.code!=='resource_missing')throw error;db.prepare("UPDATE payment_attempts SET status='expired',updated_at=? WHERE id=?").run(Date.now(),attempt.id);attempt=null;}
       if(session&&session.livemode!==false)throw new Error('Live-Checkout gesperrt');
-      if(session?.status==='open'&&session.amount_total===PLANS.event.priceCents&&payment.amount_cents===PLANS.event.priceCents&&session.metadata?.customerType===customerType&&session.metadata?.earlyStartRequest===String(earlyStartNeeded))return res.json({url:session.url||`${baseUrl.origin}/success?session_id=${session.id}`,attempt:attempt.attempt_no});
+      if(session?.status==='open'&&session.amount_total===price&&payment.amount_cents===price&&session.metadata?.customerType===customerType&&session.metadata?.earlyStartRequest===String(earlyStartNeeded))return res.json({url:session.url||`${baseUrl.origin}/success?session_id=${session.id}`,attempt:attempt.attempt_no});
       if(session?.status==='open'){
         await stripe.checkout.sessions.expire(session.id);
         db.prepare("UPDATE payment_attempts SET status='expired',updated_at=? WHERE id=?").run(Date.now(),attempt.id);
@@ -630,8 +634,8 @@ function createApp(options = {}) {
       if(session?.status==='complete')db.prepare("UPDATE payment_attempts SET status='failed',updated_at=? WHERE id=?").run(Date.now(),attempt.id);
       if(session?.status==='expired'||session?.status==='complete')attempt=null;
     }
-    if(payment.status==='pending'&&(payment.amount_cents!==PLANS.event.priceCents||e.amount_cents!==PLANS.event.priceCents)){
-      const canonicalPrice=PLANS.event.priceCents;
+    if(payment.status==='pending'&&(payment.amount_cents!==price||e.amount_cents!==price)){
+      const canonicalPrice=price;
       db.transaction(()=>{
         db.prepare('UPDATE payments SET amount_cents=? WHERE id=? AND status=\'pending\'').run(canonicalPrice,payment.id);
         db.prepare('UPDATE events SET amount_cents=? WHERE id=? AND status IN (\'pending\',\'trial\')').run(canonicalPrice,e.id);
@@ -1212,7 +1216,7 @@ function createApp(options = {}) {
     res.sendFile(path.join(pub,'video-grussbox.html'));
   });
   // Only intended public assets; source code and generic HTML routes cannot bypass guards.
-  for(const file of ['style.css','fs-design.css','guest-experience.js','event-journey.js','event-wizard.js','gallery-experience.js','design-editor.css','design-editor.js','card-studio.js','upload.js','slideshow.js','guest-access.js','account.js','verify-email.js','password-recovery.js','games.js','guestbook.js','video-grussbox.js','payments-admin.js','backups-admin.js','operations-admin.js','landing.js','reviews.js','reviews-admin.js','finalsnap-logo.webp','success.js','gallery-init.js','admin.js','johanna-bastian.png','photographer.webp','event-wedding.webp','event-birthday.jpg','event-summer.jpg','event-company.jpg']) app.get(`/${file}`,(req,res)=>res.sendFile(path.join(pub,file)));
+  for(const file of ['style.css','fs-design.css','guest-experience.js','event-journey.js','event-wizard.js','gallery-experience.js','design-editor.css','design-editor.js','card-studio.js','partner.js','partner.css','partner-signup.js','partners-admin.js','partner-nearby.js','upload.js','slideshow.js','guest-access.js','account.js','verify-email.js','password-recovery.js','games.js','guestbook.js','video-grussbox.js','payments-admin.js','backups-admin.js','operations-admin.js','landing.js','reviews.js','reviews-admin.js','finalsnap-logo.webp','success.js','gallery-init.js','admin.js','johanna-bastian.png','photographer.webp','event-wedding.webp','event-birthday.jpg','event-summer.jpg','event-company.jpg']) app.get(`/${file}`,(req,res)=>res.sendFile(path.join(pub,file)));
   for(const file of ['qr-einladung.webp','fotos-sammeln.webp','live-diashow.webp','hochzeit-party.webp','geburtstag.webp','party.webp','why-finalsnap-poster.jpg']) app.get(`/preview-assets/${file}`,(req,res)=>res.sendFile(path.join(pub,'preview-assets',file)));
   for(const file of ['finalsnap-mascot-landscape-poster.jpg','finalsnap-mascot-landscape.mp4']) app.get(`/animations/${file}`,(req,res)=>res.sendFile(path.join(pub,'animations',file)));
   // Liveness stays cheap for the host's restart check. Readiness checks critical dependencies.

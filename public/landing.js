@@ -1,3 +1,5 @@
+// Empfehlungs-Code aus Partner-Links (?ref=CODE) für die spätere Albumanlage merken.
+(() => { const ref = new URLSearchParams(location.search).get('ref'); if (ref && /^[A-Za-z0-9-]{4,20}$/.test(ref)) try { localStorage.setItem('finalsnap_ref', ref.toUpperCase()); } catch {} })();
 fetch('/api/plans').then(response => response.json()).then(plans => {
       for (const [key, plan] of Object.entries(plans)) {
         if (plan.legacy) continue;

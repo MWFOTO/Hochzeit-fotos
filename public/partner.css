@@ -1,0 +1,57 @@
+/* Partner-Verzeichnis, Anmeldung und Verwaltung */
+.partner-page{max-width:1180px;margin:auto;padding:24px 28px 90px}
+.partner-hero{display:grid;gap:14px;max-width:760px;margin:20px 0 34px}
+.partner-hero h1{margin:6px 0}
+.partner-hero p{font-size:1.1rem;margin:0}
+.partner-search{display:grid;grid-template-columns:minmax(140px,220px) minmax(180px,300px) auto;gap:14px;align-items:end;background:var(--panel,#2a2d34);border:1px solid var(--line);border-radius:20px;padding:20px 22px}
+.partner-search button{margin:0;justify-self:start;min-width:160px}
+.partner-status{margin:22px 0 8px;min-height:1.6em}
+.partner-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:18px}
+.partner-card{display:flex;flex-direction:column;gap:10px;background:var(--panel,#2a2d34);border:1px solid var(--line);border-radius:20px;padding:22px;position:relative}
+.partner-card.is-premium{border-color:#49d5e888;box-shadow:0 0 0 1px #49d5e833,0 18px 40px #0004}
+.partner-card h2,.partner-card h3{font-size:1.25rem;margin:0;letter-spacing:-.02em}
+.partner-card p{margin:0;font-size:.98rem}
+.partner-card .partner-logo{width:100%;height:120px;object-fit:contain;background:#ffffff0d;border-radius:14px;padding:12px}
+.partner-card .partner-logo.is-empty{display:grid;place-items:center;font-size:2.4rem;font-weight:800;color:var(--color-accent)}
+.partner-meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:.85rem;color:var(--color-muted)}
+.partner-chip{display:inline-block;padding:3px 11px;border-radius:30px;background:#49d5e81c;color:var(--color-accent);font-weight:700;font-size:.78rem}
+.partner-chip.is-premium{background:#ffd43b24;color:#ffd43b}
+.partner-chip.is-pending{background:#ffd43b24;color:#ffd43b}
+.partner-chip.is-rejected{background:#ff9c9424;color:#ff9c94}
+.partner-card .actions{margin-top:auto;padding-top:6px}
+.partner-cta{margin-top:46px;display:flex;flex-wrap:wrap;gap:18px;justify-content:space-between;align-items:center;background:linear-gradient(120deg,#49d5e81a,#dd75c91a);border:1px solid var(--line);border-radius:22px;padding:26px 28px}
+.partner-cta h2{font-size:1.5rem;margin:0 0 6px}
+.partner-cta p{margin:0}
+.partner-form{display:grid;grid-template-columns:1fr 1fr;gap:18px;background:var(--panel,#2a2d34);border:1px solid var(--line);border-radius:22px;padding:28px}
+.partner-form .full{grid-column:1/-1}
+.partner-form textarea{display:block;width:100%;min-height:130px;font:inherit;padding:13px 14px;border:1px solid #ffffff30;border-radius:10px;margin-top:7px;resize:vertical}
+.partner-form small{display:block;font-weight:400;margin-top:6px;font-size:.88rem}
+.partner-form .check-label{font-weight:400}
+.partner-form .check-label input{width:20px;height:20px;margin-top:4px;align-self:flex-start}
+.partner-benefits{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin:0 0 30px}
+.partner-benefits article{background:var(--panel,#2a2d34);border:1px solid var(--line);border-radius:18px;padding:20px}
+.partner-benefits h2{font-size:1.1rem;margin:0 0 6px;letter-spacing:-.01em}
+.partner-benefits p{margin:0;font-size:.95rem}
+.trap{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+.partner-admin-card{display:grid;grid-template-columns:140px 1fr;gap:20px}
+.partner-admin-card .partner-logo{height:110px}
+.partner-admin-card dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:6px 0;font-size:.92rem}
+.partner-admin-card dt{color:var(--color-muted)}
+.partner-admin-card dd{margin:0;word-break:break-word}
+.partner-admin-edit{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px}
+.partner-admin-edit textarea{grid-column:1/-1;min-height:80px;width:100%;font:inherit;padding:10px;border-radius:10px;border:1px solid #ffffff30;background:#1c1e23;color:var(--color-text)}
+.partner-filter{display:flex;flex-wrap:wrap;gap:10px;margin:18px 0}
+.partner-filter button[aria-pressed="true"]{background:var(--color-accent);color:#111a1d}
+@media(max-width:760px){.partner-search,.partner-form,.partner-admin-card,.partner-admin-edit{grid-template-columns:1fr}.partner-page{padding:16px 18px 70px}}
+/* Dashboard: Dienstleister in eurer Nähe und Empfehlungs-Code */
+.nearby-partners .partner-grid{grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-top:12px}
+.nearby-partners .partner-card{padding:16px;border-radius:16px}
+.nearby-partners .partner-card .partner-logo{height:80px}
+.nearby-partners form,.referral-box form{display:flex;flex-wrap:wrap;gap:10px;align-items:end}
+.nearby-partners form label,.referral-box form label{flex:1 1 180px}
+.referral-box{border:1px dashed var(--line);border-radius:14px;padding:14px 16px;margin:14px 0}
+.referral-box p{margin:6px 0}
+.partner-logo{box-sizing:border-box;max-width:100%}
+.partner-admin-card{align-items:start}
+.partner-admin-card .partner-logo{width:140px}
+.partner-admin-card h2{margin:6px 0 4px}
