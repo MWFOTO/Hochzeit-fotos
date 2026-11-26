@@ -39,3 +39,9 @@ Braucht eine neue Funktion eine Oberfläche, baut ChatGPT die Technik und hinter
   - Assistent „Neue Feier anlegen“ mit Anlass. `POST /api/events` speichert `occasion` in `design_json` (Test ergänzt).
   - Startseite: schmaler Handy-Header mit Menü, Mitmach-Demo, Erkennung angemeldeter Kunden (`landing-enhance.js`).
   - Alle 47 Tests grün. Lokal mit echtem Server geprüft (Gästeseite, Anlass-Begrüßung, Kontingent-Hinweis).
+
+### 26.11.2026 · Claude · Branch `claude/galerie-login`
+- Gäste-Galerie (`gallery.html`) im neuen Design. Neu: `gallery-experience.js` mit Blättern in der Großansicht (Buttons, Pfeiltasten, Wischen, Zähler) und dem Button „Fotos teilen“, der auf dem Handy unten immer erreichbar ist. Alle IDs für `gallery-init.js` und `guest-access.js` unverändert.
+- Einheitliches Logo statt ϟ-Icon auf allen Unterseiten (außer `design-editor.html`, wartet auf ChatGPTs Kartendesigner-Abgleich).
+- Anmelden/Registrieren: „Mein Konto“ → „← Zur Startseite“, Maskottchen ersetzt durch drei Vorteile.
+- 47/47 Tests grün. Lokal mit echtem Server und 6 Testfotos geprüft.

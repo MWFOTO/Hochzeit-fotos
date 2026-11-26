@@ -1766,3 +1766,18 @@ body[data-design-theme="afterglow"] { --color-bg: #262324; --color-text: #f5f1ef
   .landing-body .cookie-consent-actions { gap:8px; }
   .landing-body .cookie-consent-actions button { padding:9px 8px; font-size:.8rem; }
 }
+
+/* === Claude 26.11.2026: einheitliches Logo im Seitenkopf aller Unterseiten === */
+body:not(.landing-body):not(.fs-page) .site-header .brand img { width: auto !important; height: 48px; display: block; }
+@media (max-width: 760px) {
+  body:not(.landing-body):not(.fs-page) .site-header .brand img { height: 40px; }
+}
+/* Anmelden/Registrieren: Vorteile statt Maskottchen */
+.auth-benefits { display: flex; flex-direction: column; gap: 18px; }
+.auth-benefits h2 { text-align: left !important; margin: 0; }
+.auth-benefits ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.auth-benefits li { position: relative; padding: 14px 16px 14px 46px; border-radius: 16px; background: #2a2d34; border: 1px solid #ffffff1f; display: flex; flex-direction: column; gap: 2px; }
+.auth-benefits li::before { content: "✓"; position: absolute; left: 14px; top: 13px; width: 22px; height: 22px; border-radius: 50%; background: #49d5e8; color: #101a1d; font-weight: 900; font-size: 13px; display: flex; align-items: center; justify-content: center; }
+.auth-benefits li strong { color: #f4f5f7; }
+.auth-benefits li span { color: #c0c3cb; font-size: .92rem; }
+@media (max-width: 760px) { .auth-benefits { order: 2; } }
