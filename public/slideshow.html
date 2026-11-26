@@ -7,9 +7,13 @@
   <link rel="stylesheet" href="/style.css" />
 <script src="/guest-access.js"></script>
 </head>
-<body>
-  <a class="button secondary slideshow-back" id="album-back">← Zurück zum Album</a>
-  <a class="button secondary slideshow-manage-back" id="manage-back" href="/dashboard" hidden>← Zur Veranstaltungsverwaltung</a>
+<body class="slideshow-body">
+  <nav class="slideshow-toolbar slideshow-controls" aria-label="Diashow-Steuerung">
+    <a class="button secondary slideshow-back" id="album-back">← Zurück zum Album</a>
+    <a class="button secondary slideshow-manage-back" id="manage-back" href="/dashboard" hidden>← Zur Verwaltung</a>
+    <div class="slideshow-toolbar-actions"><button class="button secondary" id="fullscreen-toggle" type="button">⛶ Vollbild</button><button class="button secondary" id="qr-toggle" type="button" aria-pressed="true">QR-Code ausblenden</button></div>
+  </nav>
+  <p class="wake-lock-hint" id="wake-lock-hint" hidden>Tipp: Energiesparmodus am Gerät ausschalten, damit die Diashow weiterläuft.</p>
   <main class="slideshow-page" id="slideshow">
 
     <!-- Platzhalter, solange noch keine Fotos hochgeladen wurden -->
@@ -25,10 +29,14 @@
     <div class="nav-zone nav-zone-left" id="nav-prev" title="Vorheriges Foto"></div>
     <div class="nav-zone nav-zone-right" id="nav-next" title="Nächstes Foto"></div>
 
-    <div class="controls-hint" id="controls-hint">
+    <div class="controls-hint slideshow-controls" id="controls-hint">
       ← → zum Blättern · Leertaste zum Pausieren
     </div>
     <div class="pause-badge" id="pause-badge">⏸ Pausiert</div>
+    <aside class="slideshow-qr" id="slideshow-qr" aria-label="QR-Code zum Mitmachen">
+      <img id="slideshow-qr-image" alt="QR-Code: Fotoalbum für Gäste öffnen" />
+      <span>Mach mit – scanne mich!</span>
+    </aside>
   </main>
 
   <script src="/slideshow.js"></script>

@@ -24,13 +24,22 @@
 
       <nav class="progress" aria-label="Ablauf in drei Schritten"><a class="progress-step active" href="#step-design"><b>1</b> Event & Design</a><i></i><a class="progress-step" href="#step-qr"><b>2</b> QR-Code</a><i></i><a class="progress-step" href="#step-download"><b>3</b> Download</a></nav>
 
+      <section class="guided-card" aria-labelledby="guided-title">
+        <span class="eyebrow">SCHNELL ZUM ENTWURF</span><h2 id="guided-title">Wie soll eure Karte wirken?</h2>
+        <div class="guided-options"><fieldset><legend>Stil</legend><label><input type="radio" name="guided-style" value="elegant" checked> Elegant</label><label><input type="radio" name="guided-style" value="playful"> Verspielt</label><label><input type="radio" name="guided-style" value="modern"> Modern</label><label><input type="radio" name="guided-style" value="romantic"> Romantisch</label></fieldset>
+          <label class="palette-label" for="guided-palette">Farbwelt<select id="guided-palette"><option value="sage">Salbei & Creme</option><option value="gold">Gold & Nachtblau</option><option value="rose">Rosé & Weiß</option><option value="neon">FinalSnap Neon</option></select></label></div>
+        <label class="field-label" for="guided-idea">Eure Idee <span>optional</span></label><textarea id="guided-idea" rows="2" placeholder="Zum Beispiel: locker, mit Blumen und unseren Initialen"></textarea>
+        <label class="inspiration-upload" for="guided-inspiration">＋ Inspirationsbild auswählen <small>Optional · PNG, JPG oder WEBP bis 8 MB · bleibt auf diesem Gerät</small></label><input id="guided-inspiration" class="visually-hidden" type="file" accept="image/png,image/jpeg,image/webp"><p id="guided-inspiration-status" class="guided-status" aria-live="polite">Das Bild wird nicht an FinalSnap übertragen.</p><button id="use-guided-inspiration" class="guided-secondary use-inspiration-button" type="button" hidden>Dieses Bild als Titelmotiv in FinalSnap speichern</button>
+        <div class="guided-actions"><button id="generate-guided-design" type="button" class="guided-primary">Karte gestalten</button><button id="another-guided-variant" type="button" class="guided-secondary">Andere Variante</button><button id="customize-guided-design" type="button" class="guided-text-button">Selbst anpassen</button></div>
+      </section>
+
       <form id="designForm" class="wizard-step" aria-label="Schritt 1: Event und Design">
         <section class="form-section">
           <div class="section-heading"><span class="section-number">01</span><div><h2>Der Name eurer Feier</h2><p>So heißt euer Album für alle Gäste.</p></div></div>
           <label class="field-label" for="eventTitle">Albumtitel</label>
           <input id="eventTitle" name="eventTitle" maxlength="80" value="Mara & Jonas feiern" autocomplete="off">
           <label class="field-label occasion-label" for="occasion">Anlass</label>
-          <select id="occasion" name="occasion"><option value="wedding">Hochzeit</option><option value="birthday">Geburtstag</option><option value="summer">Sommerfest</option><option value="company">Firmenfeier</option><option value="jubilee">Jubiläum</option><option value="graduation">Abschlussfeier</option><option value="other">Anderer Anlass</option></select>
+          <select id="occasion" name="occasion"><option value="wedding">Hochzeit</option><option value="birthday">Geburtstag</option><option value="party">Party</option><option value="summer">Sommerfest</option><option value="company">Firmenfeier</option><option value="jubilee">Jubiläum</option><option value="graduation">Abschlussfeier</option><option value="other">Anderer Anlass</option></select>
           <label class="field-label date-label" for="eventDate">Datum <span>optional</span></label>
           <input id="eventDate" name="eventDate" type="date" value="2027-08-22" readonly>
           <small>Das Datum wird aus deinen Veranstaltungsdaten übernommen.</small>
@@ -48,14 +57,16 @@
         </section>
 
         <section class="form-section upload-section">
-          <div class="section-heading"><span class="section-number">03</span><div><h2>Eigenes Motiv hinzufügen</h2><p>Zum Beispiel ein Foto, Monogramm oder eine Einladung.</p></div></div>
-          <label class="upload-drop" for="coverUpload"><span class="upload-icon">↥</span><span><strong>Bild auswählen</strong><small>PNG, JPG oder WEBP · Vorschau auf diesem Gerät</small></span><span class="upload-arrow">＋</span></label>
+          <div class="section-heading"><span class="section-number">03</span><div><h2>Eigenes Kartendesign hochladen</h2><p>Lade eine fertige Canva-Karte oder ein eigenes Motiv hoch. FinalSnap fügt den echten QR-Code hinzu.</p></div></div>
+          <label class="upload-drop" for="coverUpload"><span class="upload-icon">↥</span><span><strong>PNG, JPG oder WEBP auswählen</strong><small>Bis 8 MB · PDF bitte vorher als PNG exportieren</small></span><span class="upload-arrow">＋</span></label>
           <input class="visually-hidden" id="coverUpload" type="file" accept="image/png,image/jpeg,image/webp">
           <p class="upload-filename" id="uploadFilename" aria-live="polite">Noch kein eigenes Motiv ausgewählt</p>
+          <label class="custom-art-toggle"><input id="customArtwork" type="checkbox" disabled> Das Bild ist eine fertige Karte. Nur den QR-Code darüberlegen.</label>
+          <p class="small-note">Der QR-Code bleibt mindestens 3 × 3 cm groß und wird separat über die Positionsauswahl platziert.</p>
         </section>
         <section class="ai-brief-section">
           <div><span class="ai-label">OPTIONAL · KI-WERKZEUGE</span><h2>Eine Idee für dein Motiv</h2><p>Erstelle mit Anlass und Stil einen Brief für Canva oder dein KI-Bildwerkzeug. Das fertige Bild kannst du oben hochladen.</p></div>
-          <button id="copyAiBrief" type="button" class="ai-brief-button"><span>✦</span> Design-Brief kopieren</button>
+          <button id="copyAiBrief" type="button" class="ai-brief-button"><span>✦</span> Prompt für ChatGPT/Canva kopieren</button>
           <div class="tool-links" aria-label="Externe Designwerkzeuge"><span>Tools mit kostenlosem Einstieg · Nutzungslimits gelten:</span><a href="https://chatgpt.com/" target="_blank" rel="noopener noreferrer">ChatGPT</a><a href="https://express.adobe.com/" target="_blank" rel="noopener noreferrer">Adobe Express</a><a href="https://www.canva.com/" target="_blank" rel="noopener noreferrer">Canva</a></div>
           <p id="aiBriefStatus" class="ai-brief-status" aria-live="polite">Kein KI-API-Schlüssel nötig. Das Motiv erstellst du in deinem gewählten Tool.</p>
           <textarea id="aiBriefText" class="ai-brief-text" readonly hidden aria-label="Kopierbarer Design-Brief"></textarea>
@@ -77,6 +88,7 @@
           <button class="format-card" type="button" data-format="card" aria-pressed="false"><span class="format-art art-card"><i></i><b>QR</b></span><strong>QR-Karte</strong><small>A6 · zum Auslegen</small></button>
           <button class="format-card" type="button" data-format="poster" aria-pressed="false"><span class="format-art art-poster"><i></i><b>QR</b></span><strong>Willkommensposter</strong><small>A4 · Hochformat</small></button>
         </div>
+        <label class="qr-placement-label" for="qrPlacement">QR-Code auf eurem Motiv platzieren<select id="qrPlacement"><option value="center">Mittig unter dem Einladungstext</option><option value="lowerCenter">Unten mittig</option><option value="lowerRight">Unten rechts</option></select></label>
         <div class="download-actions"><button id="pdfButton" type="button" class="download-button primary-download"><span class="download-symbol">↓</span><span><strong>PDF herunterladen</strong><small>Fertige Druckdatei mit 3 mm Beschnitt</small></span></button><button id="pngButton" type="button" class="download-button"><span class="download-symbol">▧</span><span><strong>PNG herunterladen</strong><small>Bilddatei zum digitalen Teilen</small></span></button></div>
         <p class="print-note">Druckt den QR dunkel auf hellem Untergrund. Für einen zuverlässigen Scan sollte er mindestens 3 × 3 cm groß sein. Druckt die PDF in Originalgröße; Tischaufsteller an der Mittellinie falten.</p>
         <p class="download-status" id="downloadStatus" role="status" aria-live="polite">Der QR-Code wird direkt aus deinem Event geladen.</p>

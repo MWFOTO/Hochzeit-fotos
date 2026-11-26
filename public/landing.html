@@ -6,20 +6,22 @@
   <meta name="theme-color" content="#202329">
   <title>FinalSnap – Eine Feier. Alle Perspektiven. Ein Album.</title>
   <link rel="stylesheet" href="/style.css">
-  <link rel="stylesheet" href="/fs-design.css">
 </head>
 <body class="landing-body">
+  <p class="landing-test-mode-notice">Stripe befindet sich aktuell im Testmodus – Zahlungen werden noch nicht angenommen.</p>
   <header class="site-header">
     <a class="brand" href="/" aria-label="FinalSnap Startseite">
       <img src="/finalsnap-logo.webp" alt="FinalSnap" width="180" height="107">
     </a>
-    <nav class="landing-nav" aria-label="Hauptnavigation">
+    <a class="button primary landing-header-cta" id="landing-header-cta" href="/register">Kostenlos testen</a>
+    <button class="landing-menu-toggle" id="landing-menu-toggle" type="button" aria-expanded="false" aria-controls="landing-nav" aria-label="Menü öffnen">☰</button>
+    <nav class="landing-nav" id="landing-nav" aria-label="Hauptnavigation">
       <a href="#ablauf">So funktioniert’s</a>
       <a href="#funktionen">Funktionen</a>
       <a href="#anlaesse">Für wen?</a>
       <a href="#trustpilot">Trustpilot</a>
       <a href="#pakete">Paket &amp; Preis</a>
-      <a class="button secondary" href="/login">Anmelden</a>
+      <a class="button secondary" id="landing-nav-login" href="/login">Anmelden</a>
     </nav>
   </header>
 
@@ -30,10 +32,10 @@
         <h1>Eine Feier.<br>Alle Perspektiven.<br><span>Ein Album.</span></h1>
         <p>Alle Momente eurer Feier an einem Ort. Eure Gäste laden Fotos per QR-Code ohne Registrierung hoch. Freigegebene Bilder sehen alle Gäste mit dem Link in der gemeinsamen Galerie.</p>
         <div class="actions">
-          <a class="button primary" href="/register">25 Fotos kostenlos testen <span aria-hidden="true">↗</span></a>
+          <a class="button primary" id="landing-hero-cta" href="/register">25 Fotos kostenlos testen <span aria-hidden="true">↗</span></a>
           <a class="button secondary" href="#ablauf">So funktioniert’s</a>
         </div>
-        <p class="small hero-note"><span class="note-dot" aria-hidden="true"></span> Gäste brauchen kein Konto und keine App.</p><p class="small hero-note">Fotos werden verkleinert und komprimiert; Originaldateien bleiben nicht erhalten.</p><p class="small hero-note">Stripe ist noch im Testmodus. Es werden keine echten Zahlungen angenommen.</p>
+        <p class="small hero-note"><span class="note-dot" aria-hidden="true"></span> Gäste brauchen kein Konto und keine App.</p><p class="small hero-note">Fotos bleiben in voller Originalauflösung erhalten; kleinere Versionen machen die Galerie schnell.</p>
       </div>
 
       <div class="hero-art" aria-label="FinalSnap Maskottchen neben einer Beispielgalerie auf dem Smartphone">
@@ -54,17 +56,21 @@
                 <span class="phone-date">Gemeinsam gesammelt</span>
               </div>
               <div class="phone-photo-grid" aria-label="Vier Beispielgalerien: Hochzeit, Geburtstag, Sommerfest und Firmenfeier">
-                <div class="phone-photo"><img src="/preview-assets/hochzeit-party.webp" alt="Hochzeitsgäste halten einen spontanen Moment mit dem Smartphone fest"><span>Hochzeit</span><small class="ai-image-tag">KI-Bild</small></div>
-                <div class="phone-photo"><img src="/preview-assets/geburtstag.webp" alt="Ein Gast fotografiert einen Geburtstagsmoment am gedeckten Tisch"><span>Geburtstag</span><small class="ai-image-tag">KI-Bild</small></div>
-                <div class="phone-photo"><img src="/preview-assets/party.webp" alt="Freunde fotografieren gemeinsam einen Moment auf einer Party"><span>Party</span><small class="ai-image-tag">KI-Bild</small></div>
-                <div class="phone-photo"><img src="/event-company.jpg" alt="Gäste bei einer Firmenfeier halten gemeinsame Momente fest"><span>Firmenfeier</span><small class="ai-image-tag">KI-Bild</small></div>
+                <div class="phone-photo"><img src="/preview-assets/hochzeit-party.webp" alt="Hochzeitsgäste halten einen spontanen Moment mit dem Smartphone fest"><span>Hochzeit</span></div>
+                <div class="phone-photo"><img src="/preview-assets/geburtstag.webp" alt="Ein Gast fotografiert einen Geburtstagsmoment am gedeckten Tisch"><span>Geburtstag</span></div>
+                <div class="phone-photo"><img src="/preview-assets/party.webp" alt="Freunde fotografieren gemeinsam einen Moment auf einer Party"><span>Party</span></div>
+                <div class="phone-photo"><img src="/event-company.jpg" alt="Gäste bei einer Firmenfeier halten gemeinsame Momente fest"><span>Firmenfeier</span></div>
               </div>
-              <div class="phone-upload"><span class="upload-plus" aria-hidden="true">+</span><span>Foto hinzufügen</span></div>
+              <p class="phone-photo-count" id="demo-photo-count" aria-live="polite">4 Fotos im Album</p>
+              <button class="phone-upload" id="demo-add-photo" type="button"><span class="upload-plus" aria-hidden="true">+</span><span>Foto hinzufügen</span></button>
+              <button class="phone-demo-slideshow" id="demo-slideshow" type="button">▶ Diashow starten</button>
               <div class="phone-nav" aria-hidden="true"><i></i><i></i><i></i></div>
             </div>
           </div>
           <div class="upload-chip"><span aria-hidden="true">▦</span><span>QR scannen<br><b>Foto hochladen</b></span></div>
         </div>
+        <p class="ai-media-caption phone-ai-note">Die vier Beispielmotive im Handy sind KI-generiert.</p>
+        <a class="hero-demo-next" id="hero-demo-next" href="/register" hidden>So einfach geht’s auf eurer Feier. Jetzt eigenes Album anlegen →</a>
       </div>
     </section>
 
@@ -137,7 +143,7 @@
           <div class="how-step-copy">
             <span class="how-step-label"><span>3</span> SCHRITT 3</span>
             <h3>Gäste laden ihre Fotos hoch</h3>
-            <p>Jeder kann eigene Bilder beisteuern – ohne Registrierung und ohne App-Download. Die Fotos werden gesammelt und für den Speicher verkleinert und komprimiert.</p>
+            <p>Jeder kann eigene Bilder beisteuern – ohne Registrierung und ohne App-Download. Originalfotos bleiben in voller Auflösung erhalten; kleinere Anzeigeversionen machen die Galerie schnell.</p>
           </div>
           <figure class="how-step-visual">
             <img src="/preview-assets/fotos-sammeln.webp" alt="Ein Gast nutzt sein Smartphone, um Momente der Hochzeitsfeier ins gemeinsame Album zu bringen" width="1448" height="1086" loading="lazy">
@@ -186,7 +192,7 @@
         <article class="feature-card"><span class="feature-icon" aria-hidden="true">▶</span><h3>Gemeinsam anschauen</h3><p>Öffnet die Live-Diashow auf einem Bildschirm und erlebt die freigegebenen Fotos zusammen.</p></article>
         <article class="feature-card"><span class="feature-icon" aria-hidden="true">✎</span><h3>Mehr als nur Fotos</h3><p>Gästebuch und Fotoaufgaben bringen persönliche Nachrichten und kleine Mitmachideen dazu.</p></article>
       </div>
-      <p class="feature-footnote">Gäste brauchen weder ein eigenes Konto noch eine App. Hochgeladene Fotos werden verkleinert und komprimiert; die Originaldateien bleiben nicht erhalten.</p>
+      <p class="feature-footnote">Gäste brauchen weder ein eigenes Konto noch eine App. Freigegebene Fotos sehen alle Gäste in der gemeinsamen Galerie.</p>
     </section>
 
     <section id="anlaesse" class="section occasion-section">
@@ -232,7 +238,6 @@
         <a class="button primary" href="/register">Konto erstellen &amp; Event anlegen <span aria-hidden="true">↗</span></a>
       </div>
       <p class="small">Das Album startet am gewählten Veranstaltungsdatum.</p>
-      <p class="test-notice">Aktuell im Stripe-Testmodus. Es werden keine echten Zahlungen angenommen.</p>
     </section>
 
     <section id="fragen" class="section faq-section">
@@ -244,7 +249,7 @@
       </details>
       <details>
         <summary>Wer kann die Fotos sehen?</summary>
-        <p>Gäste sehen in der gemeinsamen Galerie alle freigegebenen Fotos. Du kannst neue Uploads vor der Veröffentlichung prüfen und verwalten. Fotos werden verkleinert und komprimiert; Originaldateien bleiben nicht erhalten.</p>
+        <p>Gäste sehen in der gemeinsamen Galerie alle freigegebenen Fotos. Du kannst neue Uploads vor der Veröffentlichung prüfen und verwalten. Originalfotos bleiben in voller Auflösung erhalten; kleinere Versionen sorgen für eine schnelle Anzeige.</p>
       </details>
       <details>
         <summary>Wann ist die Veranstaltung freigeschaltet?</summary>
@@ -252,7 +257,7 @@
       </details>
       <details>
         <summary>Wie lange bleiben die Fotos verfügbar?</summary>
-        <p>Vor dem Veranstaltungsdatum kannst du bis zu 25 Testfotos hochladen. Wenn du das Album buchst, bleiben diese Fotos erhalten und zählen ab dem Start in den Speicherplatz von bis zu 25 GB. Das Paket läuft 90 Tage ab Veranstaltungsdatum. Bis zum Ablauf kannst du Fotos hochladen, ansehen und herunterladen. Danach werden die Fotos automatisch gelöscht.</p>
+        <p>Vor dem Veranstaltungsdatum kannst du bis zu 25 Testfotos hochladen. Wenn du das Album buchst, bleiben diese Fotos erhalten und zählen ab dem Start in den Speicherplatz von bis zu 25 GB. Je nach Dateigröße entspricht das als grobe Orientierung etwa 4.000 Fotos. Das Paket läuft 90 Tage ab Veranstaltungsdatum. Bis zum Ablauf kannst du Fotos hochladen, ansehen und herunterladen. Danach werden die Fotos automatisch gelöscht.</p>
       </details>
     </section>
 
@@ -279,7 +284,6 @@
     </div>
   </section>
 
-  <script src="/landing-enhance.js"></script>
   <script src="/landing.js"></script>
 </body>
 </html>

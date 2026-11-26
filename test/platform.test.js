@@ -3,6 +3,7 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const os=require('node:os');
 const path=require('node:path');
+const zlib=require('node:zlib');
 const sharp=require('sharp');
 const Stripe=require('stripe');
 const {createApp}=require('../server');
@@ -20,7 +21,7 @@ const fake={webhooks:signer.webhooks,invoices:{retrieve:async id=>({id,status:'p
 },retrieve:async id=>sessions.get(id),expire:async id=>{const session=sessions.get(id);session.status='expired';return session;}}}};
 const sentMail=[];
 let failNextContractConfirmation=false;
-const app=createApp({invoicePdfFetcher:async()=>Buffer.from('%PDF-1.4 test invoice'),mailer:async message=>{if(message.subject.includes('Bestellbestätigung')&&failNextContractConfirmation){failNextContractConfirmation=false;throw new Error('temporary delivery failure');}sentMail.push(message);},DB_PATH:path.join(tmp,'events.db'),UPLOAD_DIR:path.join(tmp,'uploads'),BASE_URL:'http://localhost:3000',STRIPE_WEBHOOK_SECRET:signing,stripe:fake,MAX_EVENT_PHOTOS:2,TRUST_PROXY:'1',uploadCapacityStatfs:()=>({bavail:simulatedUploadFreeBytes,bsize:1})});
+const app=createApp({invoicePdfFetcher:async()=>Buffer.from('%PDF-1.4 test invoice'),mailer:async message=>{if(message.subject.includes('Bestellbestätigung')&&failNextContractConfirmation){failNextContractConfirmation=false;throw new Error('temporary delivery failure');}sentMail.push(message);},DB_PATH:path.join(tmp,'events.db'),UPLOAD_DIR:path.join(tmp,'uploads'),BASE_URL:'http://localhost:3000',STRIPE_WEBHOOK_SECRET:signing,stripe:fake,MAX_EVENT_PHOTOS:2,TRUST_PROXY:'1',PAYMENT_ADMIN_EMAILS:'ops@example.com',uploadCapacityStatfs:()=>({bavail:simulatedUploadFreeBytes,bsize:1})});
 const server=app.listen(0);
 const origin=`http://127.0.0.1:${server.address().port}`;
 after(()=>{server.close();app.locals.db.close();fs.rmSync(tmp,{recursive:true,force:true});});
@@ -28,6 +29,21 @@ async function request(url,{user,guest,body,method='GET',headers={},form}={}) {
   const res=await fetch(origin+url,{method,headers:{...(user?{Cookie:user.cookie,'X-CSRF-Token':user.csrf}:{}),...(guest?.cookie?{Cookie:guest.cookie}:{}),...(method!=='GET'?{Origin:'http://localhost:3000'}:{}),...(body?{'Content-Type':'application/json'}:{}),...headers},body:form || (body?JSON.stringify(body):undefined),redirect:'manual'});
   if(guest){const cookie=res.headers.get('set-cookie');if(cookie)guest.cookie=cookie.split(';')[0];}
   return {status:res.status,res,data:res.headers.get('content-type')?.includes('application/json')?await res.json():await res.arrayBuffer()};
+}
+function unzipEntries(buffer) {
+  let end=buffer.length-22;while(end>=0&&buffer.readUInt32LE(end)!==0x06054b50)end--;
+  assert.ok(end>=0,'ZIP end record exists');
+  const entries=new Map();let central=buffer.readUInt32LE(end+16),count=buffer.readUInt16LE(end+10);
+  for(let index=0;index<count;index++){
+    assert.equal(buffer.readUInt32LE(central),0x02014b50);
+    const method=buffer.readUInt16LE(central+10),compressedSize=buffer.readUInt32LE(central+20),nameLength=buffer.readUInt16LE(central+28),extraLength=buffer.readUInt16LE(central+30),commentLength=buffer.readUInt16LE(central+32),local=buffer.readUInt32LE(central+42);
+    const name=buffer.subarray(central+46,central+46+nameLength).toString();
+    const localNameLength=buffer.readUInt16LE(local+26),localExtraLength=buffer.readUInt16LE(local+28),start=local+30+localNameLength+localExtraLength;
+    const compressed=buffer.subarray(start,start+compressedSize);
+    entries.set(name,method===0?compressed:zlib.inflateRawSync(compressed));
+    central+=46+nameLength+extraLength+commentLength;
+  }
+  return entries;
 }
 async function register(email) {const r=await request('/api/auth/register',{method:'POST',headers:{'X-Forwarded-For':`192.0.2.${registrationIp++}`},body:{email,password:'a-good-long-password'}});assert.equal(r.status,200);return {cookie:r.res.headers.get('set-cookie').split(';')[0],csrf:r.data.csrf,id:r.data.user.id};}
 async function webhook(session,{type='checkout.session.completed',id='evt_'+Math.random(),signature=true}={}) {
@@ -41,24 +57,47 @@ test('Registration, login, session, CSRF and protected dashboard',async()=>{
   const landing=await request('/');assert.equal(landing.status,200);
   const policy=landing.res.headers.get('content-security-policy');assert.match(policy,/script-src 'self'/);assert.doesNotMatch(policy,/script-src[^;]*unsafe-inline/);
   assert.match(Buffer.from(landing.data).toString(),/src="\/landing\.js"/);
-  for(const file of ['landing.js','success.js','gallery-init.js','admin.js'])assert.equal((await request(`/${file}`)).status,200);
+  const landingHtml=Buffer.from(landing.data).toString();assert.match(landingHtml,/id="landing-menu-toggle"/);assert.match(landingHtml,/id="demo-add-photo"/);assert.match(landingHtml,/id="landing-hero-cta"/);assert.equal((landingHtml.match(/Stripe befindet sich aktuell im Testmodus/g)||[]).length,1);assert.match(landingHtml,/phone-ai-note/);assert.doesNotMatch(landingHtml,/class="ai-image-tag"/);
+  const loginPage=Buffer.from((await request('/login')).data).toString();assert.match(loginPage,/finalsnap-logo\.webp/);assert.match(loginPage,/Zur Startseite/);assert.doesNotMatch(loginPage,/Mein Konto/);
+  for(const file of ['landing.js','gallery-experience.js','success.js','gallery-init.js','account.js','admin.js','event-journey.js','event-wizard.js','guest-experience.js'])assert.equal((await request(`/${file}`)).status,200);
+  assert.match(Buffer.from((await request('/account.js')).data).toString(),/Spam.?Ordner/i);
   assert.equal((await request('/dashboard')).status,302);
   user=await register('owner@example.com');other=await register('other@example.com');
   assert.equal((await request('/api/auth/login',{method:'POST',body:{email:'owner@example.com',password:'wrong-password'}})).status,401);
   assert.equal((await request('/api/auth/login',{method:'POST',body:{email:'owner@example.com',password:'a-good-long-password'}})).status,200);
   assert.equal((await request('/api/events',{method:'POST',user:{...user,csrf:''},body:{}})).status,403);
   assert.equal((await request('/api/events',{method:'POST',user,headers:{Origin:'https://evil.example'},body:{}})).status,403);
-  assert.equal((await request('/dashboard',{user})).status,200);
+  const dashboard=await request('/dashboard',{user});assert.equal(dashboard.status,200);const dashboardHtml=Buffer.from(dashboard.data).toString();assert.match(dashboardHtml,/id="create-event"/);assert.match(dashboardHtml,/Neue Feier anlegen/g);assert.match(dashboardHtml,/name="occasion"/);assert.match(dashboardHtml,/id="event-occasion"/);assert.match(dashboardHtml,/Schritt 1 von 4 · Dein Name/);const journeyScript=Buffer.from((await request('/event-journey.js')).data).toString();assert.match(journeyScript,/Bereit für eure Feier/);assert.match(journeyScript,/fs-guest-preview/);
 });
 test('Multiple events, ownership and pending payment gate',async()=>{
-  for(const eventId of ['birthday','company'])assert.equal((await request('/api/events',{method:'POST',user,body:{eventId,title:'Test Event',eventDate,plan:'event',trial:false,...(eventId==='birthday'?{moderation:true,occasion:'birthday'}:{occasion:'<script>'})}})).status,201);
+  for(const eventId of ['birthday','company'])assert.equal((await request('/api/events',{method:'POST',user,body:{eventId,title:'Test Event',eventDate,plan:'event',trial:false,...(eventId==='birthday'?{moderation:true,occasion:'birthday',theme:'garden',accent:'#aabbcc'}:{occasion:'<script>',theme:'not-a-theme',accent:'url(javascript:alert(1))'})}})).status,201);
   const ownerEvents=(await request('/api/events',{user})).data.events;assert.equal(ownerEvents.length,2);assert.ok(ownerEvents.every(event=>event.guestbook_moderation===1));
-  assert.equal(JSON.parse(app.locals.db.prepare('SELECT design_json FROM events WHERE id=?').get('birthday').design_json).occasion,'birthday');
-  assert.equal(JSON.parse(app.locals.db.prepare('SELECT design_json FROM events WHERE id=?').get('company').design_json||'{}').occasion,undefined);
+  assert.deepEqual(JSON.parse(ownerEvents.find(event=>event.id==='birthday').design_json),{occasion:'birthday',theme:'garden',accent:'#aabbcc',title:'Test Event',occasionLabel:'Geburtstag'});
+  assert.deepEqual(JSON.parse(ownerEvents.find(event=>event.id==='company').design_json),{occasion:'other',theme:'afterglow',accent:'#efb85d',title:'Test Event',occasionLabel:'Feier'});
   assert.equal((await request('/api/events',{method:'POST',user:other,body:{eventId:'birthday',title:'Collision',eventDate,plan:'event'}})).status,409);
   assert.equal((await request('/event/birthday')).status,402);
   assert.equal((await request('/api/event/birthday/qr',{user})).status,402);
   assert.equal((await request('/api/checkout',{method:'POST',user:other,body:{termsAccepted:true,eventId:'birthday'}})).status,404);
+});
+test('Event preparation checklist flags are persisted when design is saved and QR is downloaded',async()=>{
+  const account=await register('event-checklist@example.com');
+  assert.equal((await request('/api/events',{method:'POST',user:account,body:{eventId:'checklist-event',title:'Mara & Jonas',eventDate,occasion:'wedding',theme:'garden',accent:'#aabbcc'}})).status,201);
+  let event=(await request('/api/events',{user:account})).data.events[0];assert.equal(event.design_saved,0);assert.equal(event.qr_downloaded,0);
+  assert.equal((await request('/api/event/checklist-event/design',{method:'PATCH',user:account,body:{design:{title:'Mara & Jonas',occasion:'wedding',theme:'garden',accent:'#aabbcc',font:'classic',customArtwork:true}}})).status,200);
+  event=(await request('/api/events',{user:account})).data.events[0];assert.equal(event.design_saved,1);const design=(await request('/api/event/checklist-event/design',{user:account})).data.design;assert.equal(design.customArtwork,true);
+  const editor=Buffer.from((await request('/event/checklist-event/design',{user:account})).data).toString();assert.match(editor,/Karte gestalten/);assert.match(editor,/Salbei & Creme/);assert.match(editor,/Das Bild ist eine fertige Karte/);assert.match(editor,/qrPlacement/);const editorScript=Buffer.from((await request('/design-editor.js')).data).toString();assert.match(editorScript,/4 × 4 cm/);
+  const qr=await request('/api/event/checklist-event/qr',{user:account});assert.equal(qr.status,200);assert.match(qr.res.headers.get('content-type'),/image\/png/);
+  event=(await request('/api/events',{user:account})).data.events[0];assert.equal(event.qr_downloaded,1);
+});
+test('Upcoming event operations list is visible only to verified administrators',async()=>{
+  assert.equal((await request('/api/admin/upcoming-events')).status,401);
+  assert.equal((await request('/api/admin/upcoming-events',{user})).status,403);
+  const admin=await register('ops@example.com');app.locals.db.prepare('UPDATE users SET email_verified_at=? WHERE id=?').run(Date.now(),admin.id);
+  const parts=Object.fromEntries(new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/Berlin',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date()).map(part=>[part.type,part.value]));
+  const today=`${parts.year}-${parts.month}-${parts.day}`;
+  app.locals.db.prepare("INSERT INTO events (id,title,event_date,status,created_at) VALUES ('ops-today','Feier heute',?,'paid',?)").run(today,Date.now());
+  const page=await request('/ops/events',{user:admin});assert.equal(page.status,200);assert.match(Buffer.from(page.data).toString(),/Anstehende Feiern/);
+  const list=await request('/api/admin/upcoming-events',{user:admin});assert.equal(list.status,200);assert.ok(list.data.events.some(event=>event.id==='ops-today'));assert.doesNotMatch(JSON.stringify(list.data),/email|guest_token|password_hash/);
 });
 test('Checkout idempotency, signature, unpaid/amount/live rejection and delayed payment',async()=>{
   for(let i=0;i<2;i++)assert.equal((await request('/api/checkout',{method:'POST',user,body:{termsAccepted:true,eventId:'birthday'}})).status,200);
@@ -120,6 +159,8 @@ test('Content validation, guest upload, moderation, protected files, QR, quota a
   assert.equal((await request(`/api/event/birthday/info?token=${token}`,{guest:guestA})).data.photoCount,1);
   assert.equal((await request(`/api/event/birthday/info?token=${token}`,{guest:guestB})).data.photoCount,0);
   const qr=await request('/api/event/birthday/qr',{user});assert.equal(qr.status,200);assert.equal((await sharp(Buffer.from(qr.data)).metadata()).width,2000);assert.match(qr.res.headers.get('content-disposition'),/birthday-qr\.png/);
+  const guestQr=await request(`/api/event/birthday/guest-qr.png?token=${token}`,{guest:guestA});assert.equal(guestQr.status,200);assert.equal((await sharp(Buffer.from(guestQr.data)).metadata()).width,520);
+  assert.equal((await request('/api/event/birthday/guest-qr.png')).status,403);
   const svgQr=await request('/api/event/birthday/qr.svg',{user});assert.equal(svgQr.status,200);assert.match(Buffer.from(svgQr.data).toString(),/<svg[\s>]/);assert.match(svgQr.res.headers.get('content-disposition'),/birthday-qr\.svg/);
   const pdfQr=await request('/api/event/birthday/qr.pdf',{user});assert.equal(pdfQr.status,200);assert.equal(Buffer.from(pdfQr.data).subarray(0,5).toString(),'%PDF-');assert.match(pdfQr.res.headers.get('content-disposition'),/birthday-qr-10cm\.pdf/);
   assert.equal((await request('/api/event/birthday/qr.svg',{user:other})).status,404);
@@ -136,6 +177,9 @@ test('Content validation, guest upload, moderation, protected files, QR, quota a
   assert.equal(fs.readdirSync(path.join(tmp,'uploads','.tmp')).length,0);
   assert.equal((await request(`/api/event/birthday/photos/${photo.id}`,{method:'DELETE',user})).status,200);
   assert.equal((await request(photo.url,{user})).status,404);
+  assert.equal(fs.existsSync(path.join(tmp,'uploads','birthday',`${photo.id}.jpg`)),false);
+  assert.equal(fs.existsSync(path.join(tmp,'uploads','birthday','original',`${photo.id}.jpg`)),false);
+  assert.equal(fs.existsSync(path.join(tmp,'uploads','birthday','thumb',`${photo.id}.jpg`)),false);
 });
 test('Guestbook moderation, shared approved notes, ownership and feature pages',async()=>{
   assert.equal((await request(`/event/birthday/games?token=${token}`,{guest:guestA})).status,200);
@@ -247,6 +291,10 @@ test('Free trial quota, compression, counters and upgrade preserve photos and gu
   assert.equal((await send(1,large)).status,200);
   const photoList=(await request('/api/event/trial-event/photos',{user:trialUser})).data.photos;
   const resized=await sharp(Buffer.from((await request(photoList[0].url,{user:trialUser})).data)).metadata();assert.equal(resized.width,2560);assert.equal(resized.height,1920);
+  const thumb=await sharp(Buffer.from((await request(photoList[0].thumbUrl,{user:trialUser})).data)).metadata();assert.equal(thumb.width,480);assert.equal(thumb.height,360);
+  const original=await request(photoList[0].downloadUrl,{user:trialUser});assert.equal(original.status,200);assert.deepEqual(Buffer.from(original.data),large);assert.match(original.res.headers.get('content-disposition'),/attachment/);
+  const stored=app.locals.db.prepare('SELECT filename,bytes,original_bytes,display_filename,thumb_filename,original_filename FROM photos WHERE event_id=?').get('trial-event');assert.equal(stored.original_bytes,large.length);assert.equal(stored.filename,stored.display_filename);assert.match(stored.thumb_filename,/^thumb\//);assert.equal(stored.original_filename,'test.jpg');assert.ok(stored.bytes>stored.original_bytes);
+  const zip=await request('/api/event/trial-event/download',{user:trialUser});assert.equal(zip.status,200);assert.equal(Buffer.from(zip.data).readUInt16LE(8),0,'JPEG ZIP entries use STORE to avoid wasting CPU on recompression');assert.deepEqual(unzipEntries(Buffer.from(zip.data)).get('test.jpg'),large);
   assert.equal((await send(10)).status,200);assert.equal((await send(10)).status,200);assert.equal((await send(4)).status,200);assert.equal((await send(1)).status,400);
   event=(await request('/api/events',{user:trialUser})).data.events[0];assert.equal(event.photoCount,25);assert.equal(event.upload_successes,4);assert.equal(event.upload_failures,1);
   assert.equal((await request('/api/event/trial-event/qr',{user:trialUser})).status,200);

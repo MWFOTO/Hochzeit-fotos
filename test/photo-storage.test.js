@@ -104,7 +104,11 @@ test('the app authorizes S3 photo reads and expiry deletes stored objects',async
     const form=new FormData();form.append('photos',new Blob([await sharp({create:{width:16,height:16,channels:3,background:'#123456'}}).jpeg().toBuffer()],{type:'image/jpeg'}),'photo.jpg');
     const upload=await fetch(`${origin}/api/event/s3event/upload?token=${guestToken}`,{method:'POST',headers:{...headers,Origin:'http://localhost:3000'},body:form});
     assert.equal(upload.status,200);
-    assert.equal(objects.size,1);
+    assert.equal(objects.size,3);
+    const storedPhoto=app.locals.db.prepare('SELECT id,filename,original_filename,thumb_filename FROM photos WHERE event_id=?').get('s3event');
+    assert.ok(objects.has(`s3event/${storedPhoto.filename}`));
+    assert.ok(objects.has(`s3event/original/${storedPhoto.id}.jpg`));
+    assert.ok(objects.has(`s3event/${storedPhoto.thumb_filename}`));
     const guestCookie=upload.headers.get('set-cookie').split(';')[0];
     const photos=await fetch(`${origin}/api/event/s3event/photos?token=${guestToken}`,{headers:{Cookie:guestCookie}});
     const payload=await photos.json();

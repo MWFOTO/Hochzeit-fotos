@@ -16,10 +16,18 @@
   if (!lightbox || !image || !grid) return;
 
   function photos() { return Array.prototype.slice.call(grid.querySelectorAll('img')); }
+  // Das Raster zeigt kleine Vorschaubilder, die Großansicht das Foto selbst.
+  // Darum merken wir uns, welches Vorschaubild geöffnet wurde.
+  var openIndex = -1;
+  function remember(e) {
+    var img = e.target && e.target.closest ? e.target.closest('img') : null;
+    if (img && grid.contains(img)) openIndex = photos().indexOf(img);
+  }
+  grid.addEventListener('click', remember, true);
+  grid.addEventListener('keydown', remember, true);
   function currentIndex() {
     var list = photos();
-    for (var i = 0; i < list.length; i++) if (list[i].src === image.src) return i;
-    return -1;
+    return openIndex >= 0 && openIndex < list.length ? openIndex : -1;
   }
 
   /* ---------- Blättern ---------- */
