@@ -8,10 +8,10 @@
   const sidebar=document.getElementById('account-sidebar');
   const menuToggle=document.getElementById('sidebar-toggle');
   const closeSidebar=()=>{sidebar?.classList.remove('is-open');menuToggle?.setAttribute('aria-expanded','false');};
-  const setSection=(section)=>{document.getElementById('topbar-section').textContent=section;[navEvents,navNew,navAccount].forEach((link,index)=>{if(!link)return;if(['Übersicht','Neues Event','Konto & Profil'][index]===section)link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');});closeSidebar();};
+  const setSection=(section)=>{document.getElementById('topbar-section').textContent=section;[navEvents,navNew,navAccount].forEach((link,index)=>{if(!link)return;if(['Übersicht','Neue Feier','Konto & Profil'][index]===section)link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');});closeSidebar();};
   if(menuToggle?.addEventListener)menuToggle.addEventListener('click',()=>{const open=sidebar.classList.toggle('is-open');menuToggle.setAttribute('aria-expanded',String(open));});
   if(navEvents?.addEventListener)navEvents.addEventListener('click',async e=>{e.preventDefault();activeEvent=null;history.replaceState(null,'','/dashboard');document.getElementById('photo-manager').hidden=true;setSection('Übersicht');await load();document.getElementById('dashboard-overview').scrollIntoView({behavior:'smooth',block:'start'});});
-  if(navNew?.addEventListener)navNew.addEventListener('click',async e=>{e.preventDefault();activeEvent=null;history.replaceState(null,'','/dashboard');setSection('Neues Event');await load();const panel=document.querySelector('.create-panel');panel.open=true;panel.scrollIntoView({behavior:'smooth',block:'start'});});
+  if(navNew?.addEventListener)navNew.addEventListener('click',async e=>{e.preventDefault();activeEvent=null;history.replaceState(null,'','/dashboard');setSection('Neue Feier');await load();const panel=document.querySelector('.create-panel');panel.open=true;panel.scrollIntoView({behavior:'smooth',block:'start'});});
   if(navAccount?.addEventListener)navAccount.addEventListener('click',e=>{e.preventDefault();setSection('Konto & Profil');const panel=document.getElementById('account-settings');panel.open=true;panel.scrollIntoView({behavior:'smooth',block:'start'});});
   for(const id of ['dashboard-new-event','list-new-event']){const action=document.getElementById(id);if(action?.addEventListener)action.addEventListener('click',()=>navNew?.click());}
   const report = error => {message.textContent = error.message;};
@@ -142,9 +142,10 @@
         }
         if(event.checkoutStarted)chooser.append(element('p','Die begonnene Testzahlung ist an das einmalige FinalSnap-Fotoalbum gebunden.'));
       }
+      let summarySection=null;
       if(event.guestUrl) {
-        const summarySection=element('div');summarySection.className='event-section event-overview-panel';summarySection.append(element('h3','Dein Album auf einen Blick'));
-        const summaryCopy=element('p',`${event.photoCount} ${event.photoCount===1?'Foto':'Fotos'} im Album · ${event.upload_successes} Uploads erfolgreich. Hier kannst du dein Album gestalten, den QR-Code teilen und die Freigabe verwalten.`);summarySection.append(summaryCopy);
+        summarySection=element('div');summarySection.className='event-section event-overview-panel';summarySection.append(element('h3','Dein Album auf einen Blick'));
+        const summaryCopy=element('p',`${event.photoCount} ${event.photoCount===1?'Foto':'Fotos'} im Album · ${event.upload_successes} Uploads erfolgreich. Hier kannst du dein Album gestalten, den QR-Code teilen und die Freigabe verwalten.`);
         const summaryActions=element('div');summaryActions.className='actions';summarySection.append(summaryActions);
         link(summaryActions,'Design-Editor öffnen',`/event/${encodeURIComponent(event.id)}/design`);
         card.append(summarySection);
@@ -204,28 +205,23 @@
         ['Übersicht','Fotos','Gästezugang & QR','Einstellungen'].forEach((label,i)=>button(tabs,label,()=>showPanel(i,true)));
         button(summaryActions,'Fotos ansehen & verwalten',()=>showPanel(1,true)).className='primary';
         button(summaryActions,'Gästezugang & QR öffnen',()=>showPanel(2,true));
-        button(accessActions,'Gästelink kopieren',async()=>{try{await navigator.clipboard.writeText(event.guestUrl);message.textContent='Gästelink kopiert.';}catch{const input=element('input');input.value=event.guestUrl;input.readOnly=true;accessSection.append(input);input.select();message.textContent='Bitte den markierten Gästelink kopieren.';}});
-        link(accessActions,'Gästeansicht öffnen',event.guestUrl);
         link(photoActions,'Galerie öffnen',event.guestUrl.replace('?','/gallery?'));
         link(photoActions,'Live-Diashow',event.guestUrl.replace('?','/slideshow?'));
         link(photoActions,'Fotoaufgaben',event.guestUrl.replace('?','/games?'));
         link(photoActions,'Gästebuch ansehen',event.guestUrl.replace('?','/guestbook?'));
         link(accessActions,'Gästebuch verwalten',`/event/${encodeURIComponent(event.id)}/guestbook`);
-        link(accessActions,'QR- & Tischkarten-Studio öffnen',`/event/${encodeURIComponent(event.id)}/design`);
-        link(accessActions,'QR-Code als PNG · 2000 × 2000',`/api/event/${event.id}/qr`);
-        link(accessActions,'QR-Code als SVG · Vektor',`/api/event/${event.id}/qr.svg`);
-        link(accessActions,'QR-Code als PDF · 10 × 10 cm',`/api/event/${event.id}/qr.pdf`);
         link(photoActions,'Alle Fotos herunterladen',`/api/event/${event.id}/download`);
         button(photoActions,'Fotos verwalten',()=>manage(event)).className='primary';
         button(settingsActions,event.moderation?'Automatische Freigabe aktivieren':'Manuelle Freigabe aktivieren',async()=>{await api(`/api/event/${event.id}`,'PATCH',{moderation:!event.moderation});await load();});
         button(settingsActions,event.guestbook_moderation?'Gästebuch: Freigabe ausschalten':'Gästebuch: Freigabe einschalten',async()=>{await api(`/api/event/${event.id}`,'PATCH',{guestbookModeration:!event.guestbook_moderation});await load();});
         button(settingsActions,'Gästelink erneuern',async()=>{if(confirm('Achtung: Alle bisherigen Gästelinks und bereits gedruckten QR-Karten funktionieren danach nicht mehr. Möchtest du trotzdem einen neuen Link erstellen?')){await api(`/api/event/${event.id}/rotate-token`,'POST');await load();}});
+        document.dispatchEvent(new CustomEvent('finalsnap:event-rendered',{detail:{event,card,summarySection,accessSection,active:activeEvent===event.id}}));
       }
       const danger=element('details');danger.className='event-delete-bar';danger.append(element('summary','Veranstaltung entfernen'));card.append(danger);
       button(danger,'Event und Fotos endgültig löschen',async()=>{if(confirm('Event und alle Fotos endgültig löschen?')){await api(`/api/event/${event.id}`,'DELETE');document.getElementById('photo-manager').hidden=true;await load();}}).className='danger';
       if(chooser){chooser.classList.add('booking-panel');card.append(chooser);}
       section.append(card);
-      if(activeEvent){card.hidden=event.id!==activeEvent;open.hidden=true;if(event.id===activeEvent){tabs.hidden=false;if(event.guestUrl){summarySection.hidden=false;photoManager.hidden=true;}else photoManager.hidden=true;}}else{tabs.hidden=true;panels.forEach(panel=>panel.hidden=true);danger.hidden=true;}
+      if(activeEvent){card.hidden=event.id!==activeEvent;open.hidden=true;if(event.id===activeEvent){tabs.hidden=false;if(event.guestUrl&&summarySection){summarySection.hidden=false;photoManager.hidden=true;}else photoManager.hidden=true;}}else{tabs.hidden=true;panels.forEach(panel=>panel.hidden=true);danger.hidden=true;}
 
     }
   }
@@ -304,7 +300,7 @@
   eventDateInput.addEventListener('change',updateTimelinePreview);
   updateTimelinePreview();
   document.getElementById('event-form').onsubmit=async e=>{
-    e.preventDefault();eventIdInput.value=normalizeEventId(eventIdInput.value);if(!/^[a-z0-9][a-z0-9_-]{2,63}$/.test(eventIdInput.value)){message.textContent='Bitte einen Kurznamen mit mindestens 3 Buchstaben oder Zahlen eingeben.';message.scrollIntoView({block:'center'});eventIdInput.focus();return;}try{const created=await api('/api/events','POST',{title:document.getElementById('title').value,eventId:document.getElementById('event-id').value,plan:'event',eventDate:document.getElementById('event-date').value,moderation:document.getElementById('moderation').checked,guestbookModeration:document.getElementById('guestbook-moderation').checked});activeEvent=created.eventId;history.replaceState(null,'',`/dashboard?event=${encodeURIComponent(activeEvent)}`);message.textContent='Veranstaltung erstellt. Als Nächstes kannst du Fotos prüfen und deinen QR-Code teilen.';e.target.reset();organizerNameInput.value=displayName;document.getElementById('guestbook-moderation').checked=true;slugEdited=false;eventStepIndex=displayName?1:0;renderEventStep();await load();message.scrollIntoView({block:'center',behavior:'smooth'});}catch(err){report(err);message.scrollIntoView({block:'center',behavior:'smooth'});}
+    e.preventDefault();eventIdInput.value=normalizeEventId(eventIdInput.value);if(!/^[a-z0-9][a-z0-9_-]{2,63}$/.test(eventIdInput.value)){message.textContent='Bitte einen Kurznamen mit mindestens 3 Buchstaben oder Zahlen eingeben.';message.scrollIntoView({block:'center'});eventIdInput.focus();return;}try{const created=await api('/api/events','POST',{title:document.getElementById('title').value,eventId:document.getElementById('event-id').value,plan:'event',eventDate:document.getElementById('event-date').value,moderation:document.getElementById('moderation').checked,guestbookModeration:document.getElementById('guestbook-moderation').checked,occasion:document.getElementById('event-occasion')?.value||''});activeEvent=created.eventId;history.replaceState(null,'',`/dashboard?event=${encodeURIComponent(activeEvent)}`);message.textContent='Veranstaltung erstellt. Als Nächstes kannst du Fotos prüfen und deinen QR-Code teilen.';e.target.reset();organizerNameInput.value=displayName;document.getElementById('guestbook-moderation').checked=true;slugEdited=false;eventStepIndex=displayName?1:0;renderEventStep();await load();message.scrollIntoView({block:'center',behavior:'smooth'});}catch(err){report(err);message.scrollIntoView({block:'center',behavior:'smooth'});}
   };
   (async()=>{
     try{const account=await api('/api/auth/me');displayName=account.user.displayName||'';if(displayName){organizerNameInput.value=displayName;eventStepIndex=1;renderEventStep();showGreeting();}if(account.emailDeliveryAvailable&&!account.emailVerified){const notice=element('div');notice.className='test-notice';notice.append(element('p','Bitte bestätige deine E-Mail-Adresse über den Link in deiner Mail.'));button(notice,'Bestätigungsmail erneut senden',async()=>{await api('/api/auth/request-verification','POST');message.textContent='Bestätigungsmail angefordert. Bitte auch im Spamordner nachsehen.';});document.getElementById('events').before(notice);}const storage=await api('/api/storage');if(storage.warning)message.textContent=storage.uploadsPaused?'Uploads sind wegen des knappen temporären Speichers vorübergehend pausiert. Bitte in einigen Minuten erneut versuchen.':'Der Speicher wird knapp. Bitte vor weiteren Uploads Speicherbelegung prüfen.';const plans=await api('/api/plans');availablePlans=plans;const dateInput=document.getElementById('event-date');const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Berlin'}).format(new Date());dateInput.min=today;const maxDate=new Date(`${today}T12:00:00Z`);maxDate.setUTCMonth(maxDate.getUTCMonth()+24);dateInput.max=maxDate.toISOString().slice(0,10);if(new URLSearchParams(location.search).get('plan')==='event')document.querySelector('.create-panel').open=true;await load();}catch(err){report(err);}

@@ -490,6 +490,8 @@ function createApp(options = {}) {
     const expiresAt=eventDeadline(eventDate);
     db.prepare('INSERT INTO events (id,email,plan,amount_cents,status,created_at,owner_id,title,event_date,guest_token,moderation,guestbook_moderation,expires_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)').run(id,req.user.email,'event',plan.priceCents,'pending',Date.now(),req.user.id,title,eventDate,random(),req.body.moderation===true?1:0,req.body.guestbookModeration===false?0:1,expiresAt);
     if(trial)db.prepare("UPDATE events SET status='trial', trial_used=1 WHERE id=?").run(id);
+    const occasion=String(req.body.occasion||'');
+    if(['wedding','birthday','summer','company','jubilee','graduation','other'].includes(occasion))db.prepare('UPDATE events SET design_json=? WHERE id=?').run(JSON.stringify({occasion}),id);
     res.status(201).json({eventId:id,trial:!!trial,eventDate});
   });
   app.get('/api/event/:eventId/availability',(req,res)=>res.json({available:/^[a-z0-9][a-z0-9_-]{2,63}$/.test(req.params.eventId)&&!lookup(req.params.eventId)&&!fs.existsSync(path.join(root,req.params.eventId))}));
@@ -1149,7 +1151,7 @@ function createApp(options = {}) {
     ].join('; '));
     res.sendFile(path.join(pub,'design-editor.html'));
   });
-  for(const [suffix,file] of [['','gallery.html'],['/upload','upload.html'],['/gallery','gallery.html'],['/slideshow','slideshow.html'],['/games','games.html'],['/guestbook','guestbook.html']]) app.get(`/event/:eventId${suffix}`,access,(req,res)=>res.sendFile(path.join(pub,file)));
+  for(const [suffix,file] of [['','upload.html'],['/upload','upload.html'],['/gallery','gallery.html'],['/slideshow','slideshow.html'],['/games','games.html'],['/guestbook','guestbook.html']]) app.get(`/event/:eventId${suffix}`,access,(req,res)=>res.sendFile(path.join(pub,file)));
   app.get('/event/:eventId/video-grussbox',access,(req,res)=>{
     if(!videoAvailable||!req.event.video_greetings_enabled||!active(req.event))return fail(res,404,'Die Videogrußbox ist für diese Feier geschlossen.');
     res.set('Permissions-Policy','camera=(self), microphone=(self)');
@@ -1158,7 +1160,7 @@ function createApp(options = {}) {
     res.sendFile(path.join(pub,'video-grussbox.html'));
   });
   // Only intended public assets; source code and generic HTML routes cannot bypass guards.
-  for(const file of ['style.css','design-editor.css','design-editor.js','upload.js','slideshow.js','guest-access.js','account.js','verify-email.js','password-recovery.js','games.js','guestbook.js','video-grussbox.js','payments-admin.js','backups-admin.js','landing.js','reviews.js','reviews-admin.js','finalsnap-logo.webp','success.js','gallery-init.js','admin.js','johanna-bastian.png','photographer.webp','event-wedding.webp','event-birthday.jpg','event-summer.jpg','event-company.jpg']) app.get(`/${file}`,(req,res)=>res.sendFile(path.join(pub,file)));
+  for(const file of ['style.css','fs-design.css','guest-experience.js','event-journey.js','event-wizard.js','landing-enhance.js','design-editor.css','design-editor.js','upload.js','slideshow.js','guest-access.js','account.js','verify-email.js','password-recovery.js','games.js','guestbook.js','video-grussbox.js','payments-admin.js','backups-admin.js','landing.js','reviews.js','reviews-admin.js','finalsnap-logo.webp','success.js','gallery-init.js','admin.js','johanna-bastian.png','photographer.webp','event-wedding.webp','event-birthday.jpg','event-summer.jpg','event-company.jpg']) app.get(`/${file}`,(req,res)=>res.sendFile(path.join(pub,file)));
   for(const file of ['qr-einladung.webp','fotos-sammeln.webp','live-diashow.webp','hochzeit-party.webp','geburtstag.webp','party.webp','why-finalsnap-poster.jpg']) app.get(`/preview-assets/${file}`,(req,res)=>res.sendFile(path.join(pub,'preview-assets',file)));
   for(const file of ['finalsnap-mascot-landscape-poster.jpg','finalsnap-mascot-landscape.mp4']) app.get(`/animations/${file}`,(req,res)=>res.sendFile(path.join(pub,'animations',file)));
   // Liveness stays cheap for the host's restart check. Readiness checks critical dependencies.
