@@ -202,3 +202,11 @@
 .lp-mascot-copy h2 { margin: 10px 0 12px; font-size: clamp(1.8rem, 3.2vw, 2.6rem); line-height: 1.1; }
 .lp-mascot-copy p { font-size: 1.06rem; margin: 0 0 22px; }
 @media (max-width: 960px) { .lp-mascot { grid-template-columns: 1fr; gap: 26px; } }
+/* Erklärvideo */
+.lp-video { display: grid; grid-template-columns: minmax(240px, 340px) 1fr; gap: 56px; align-items: center; }
+.lp-video-frame { margin: 0; padding: 10px; border-radius: 34px; background: #0b0c0f; box-shadow: 0 30px 80px #000a, inset 0 0 0 2px #2c3038; }
+.lp-video-frame video { display: block; width: 100%; height: auto; aspect-ratio: 9 / 16; border-radius: 26px; background: #000; object-fit: cover; }
+.lp-video-copy h2 { margin: 10px 0 14px; font-size: clamp(1.9rem, 3.6vw, 2.8rem); line-height: 1.1; }
+.lp-video-copy p { font-size: 1.08rem; }
+.lp-ai-note { font-size: .85rem !important; opacity: .8; }
+@media (max-width: 760px) { .lp-video { grid-template-columns: 1fr; gap: 24px; } .lp-video-frame { width: min(300px, 100%); justify-self: center; } }
