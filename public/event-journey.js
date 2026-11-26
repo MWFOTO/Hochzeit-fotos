@@ -116,7 +116,8 @@
     var booked = event.status === 'paid' || event.status === 'pilot';
     var steps = [
       { title: 'Feier angelegt', hint: 'Name und Datum sind gespeichert.', done: true },
-      { title: 'Album gestalten', hint: 'Farbe, Schrift und Titelbild für eure Gäste wählen.', done: Object.keys(design).filter(function (k) { return k !== 'occasion'; }).length > 0,
+      { title: 'Album gestalten', hint: 'Farbe, Schrift und Titelbild für eure Gäste wählen.', // Erst erledigt, wenn im Design-Editor gespeichert wurde (beim Anlegen werden schon Standardwerte gespeichert)
+        done: Number(event.design_saved) === 1,
         action: function () { return linkBtn('Design öffnen', '/event/' + encodeURIComponent(id) + '/design', 'fs-btn--primary fs-btn--small'); } },
       { title: 'Selbst ausprobieren', hint: 'Ladet ein Testfoto hoch – so seht ihr genau, was eure Gäste erleben.', done: (Number(event.photoCount) || 0) > 0,
         action: function () { return event.guestUrl ? linkBtn('Als Gast testen', event.guestUrl, 'fs-btn--primary fs-btn--small', { newTab: true }) : null; } },
