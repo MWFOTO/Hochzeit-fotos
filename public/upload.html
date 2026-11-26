@@ -3,60 +3,98 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#1c1e23" />
   <title>Fotos teilen</title>
-  <link rel="stylesheet" href="/style.css" />
-<script src="/guest-access.js"></script>
+  <!-- Gestaltet von Claude (25.11.2026). Ersetzt public/upload.html.
+       Alle IDs, die upload.js und guest-access.js brauchen, sind unverändert vorhanden. -->
+  <link rel="stylesheet" href="/fs-design.css" />
+  <script src="/guest-access.js"></script>
 </head>
-<body>
-  <header class="site-header"><a class="brand" href="/" aria-label="FinalSnap Startseite"><span class="brand-mark">ϟ</span><span>FinalSnap</span></a><a class="button secondary manage-back" id="manage-back" href="/dashboard" hidden>← Zur Veranstaltungsverwaltung</a><span class="eyebrow">GÄSTEALBUM</span></header>
-  <main class="upload-page">
+<body class="fs-page">
 
-    <!-- Platzhalter-Logo. Einfach durch <img src="..."> ersetzen, falls ihr ein echtes Logo habt -->
-    <span class="eyebrow">EUER GEMEINSAMES FOTOALBUM</span>
+  <header class="site-header fs-header">
+    <a class="brand fs-logo" href="/" aria-label="FinalSnap Startseite">
+      <img src="/finalsnap-logo.webp" alt="FinalSnap" width="64" height="38" />
+    </a>
+    <div class="fs-header__actions">
+      <!-- Nur für Veranstalter sichtbar (guest-access.js) -->
+      <a class="fs-btn fs-btn--secondary fs-btn--small" id="manage-back" href="/dashboard" hidden>Zur Verwaltung</a>
+    </div>
+  </header>
 
-    <h1 class="event-title">Unsere Veranstaltung</h1>
-    <p class="event-subtitle">
-      Schön, dass du dabei bist! Teile deine schönsten Momente –
-      freigegebene Fotos erscheinen für alle Gäste in der gemeinsamen Galerie. Deine eigenen Uploads findest du dort ebenfalls.
-    </p>
+  <!-- Titelbild: Motiv aus dem Design-Editor, sonst Farbverlauf in der Farbe der Feier -->
+  <div class="fs-hero" aria-hidden="true">
+    <div class="fs-hero__fallback"></div>
+    <img class="fs-hero__img" id="fs-hero-img" alt="" hidden />
+  </div>
 
-    <!-- Sichtbarer Button, öffnet auf dem Smartphone Kamera oder Galerie -->
-    <button class="upload-btn" id="upload-trigger" type="button">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
-        <circle cx="12" cy="13" r="4"></circle>
-      </svg>
-      Fotos hochladen
-    </button>
+  <main class="fs-welcome upload-page" id="fs-welcome">
+    <span class="fs-eyebrow" id="fs-eyebrow">Willkommen</span>
 
-    <button class="button secondary" id="camera-trigger" type="button">Foto aufnehmen</button>
-    <input type="file" id="camera-input" accept="image/*" capture="environment" hidden />
-    <p class="small">Vorhandene Fotos auswählen oder auf dem Handy ein neues Foto aufnehmen.</p>
-    <!-- Verstecktes Datei-Input-Feld.
-         accept="image/*" + capture="environment" -> öffnet auf Mobilgeräten bevorzugt die Kamera,
-         Nutzer können aber trotzdem in die Galerie wechseln.
-         multiple -> mehrere Fotos auf einmal auswählbar. -->
-    <p class="privacy-note">Bitte lade nur Fotos hoch, die du teilen darfst. Der Veranstalter hat das Album angelegt und kann alle Fotos verwalten. Fotos sind bis 90 Kalendertage nach dem Veranstaltungsdatum im Album verfügbar; danach werden sie aus den aktiven Systemen gelöscht. Bereits heruntergeladene Kopien bleiben erhalten. <a href="/datenschutz">Datenschutzhinweise</a>. Fragen oder Löschwünsche zu diesem Album richtest du zuerst an den Veranstalter; du kannst dich zusätzlich an <a href="mailto:info@finalsnap.de">FinalSnap</a> wenden.</p>
-    <input
-      type="file"
-      id="file-input"
-      accept="image/*"
-      multiple
-    />
+    <!-- Titel und Schrift setzt guest-access.js aus dem Design der Feier -->
+    <h1 class="fs-title event-title">Unsere Feier</h1>
 
-    <div class="progress-wrap" id="progress-wrap">
-      <div class="progress-bar" id="progress-bar"></div>
+    <p class="fs-lead event-subtitle">Schön, dass du da bist! Teile deine Fotos von heute – jeder Blickwinkel zählt.</p>
+
+    <div class="fs-actions">
+      <button class="fs-btn fs-btn--primary fs-btn--xl fs-btn--block" id="upload-trigger" type="button">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>
+        Fotos teilen
+      </button>
+      <button class="fs-btn fs-btn--secondary fs-btn--block" id="camera-trigger" type="button">Foto jetzt aufnehmen</button>
+      <input type="file" id="file-input" accept="image/*" multiple hidden />
+      <input type="file" id="camera-input" accept="image/*" capture="environment" hidden />
     </div>
 
+    <!-- Fortschritt & Meldungen: werden von upload.js gesteuert -->
+    <div class="progress-wrap" id="progress-wrap" aria-hidden="true"><div class="progress-bar" id="progress-bar"></div></div>
     <p class="status" id="status" role="status" aria-live="polite"></p>
-    <div class="actions"><a class="button secondary" id="gallery-link">Zur Fotogalerie</a><a class="button secondary" id="games-link">Fotoaufgaben</a><a class="button secondary" id="guestbook-link">Gästebuch</a><a class="button secondary" id="video-greetings-link" hidden>Videogruß aufnehmen</a></div>
-    <p id="retention-hint"></p>
 
-    <p class="small">Fotos werden für die Galerie auf maximal 2.560 Pixel verkleinert und als JPEG gespeichert. Unveränderte Originaldateien werden nicht aufbewahrt.</p>
-    <!-- Kleine Vorschau der Fotos, die dieser Gast selbst gerade hochgeladen hat -->
-    <div class="thumbs" id="thumbs"></div>
+    <!-- Hierhin verschiebt guest-experience.js den Kontingent-Hinweis -->
+    <div id="fs-quota-slot" style="width: 100%"></div>
+
+    <nav class="fs-tiles" aria-label="Mehr in diesem Album" style="grid-template-columns: repeat(auto-fit, minmax(88px, 1fr))">
+      <a class="fs-tile" id="gallery-link" href="#">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>
+        Album
+      </a>
+      <a class="fs-tile" id="guestbook-link" href="#">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V2H6.5A2.5 2.5 0 0 0 4 4.5v15z"></path><path d="M8 7h8M8 11h6"></path></svg>
+        Gästebuch
+      </a>
+      <a class="fs-tile" id="games-link" href="#">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l3 7h7l-5.5 4.5 2 7.5-6.5-4.5-6.5 4.5 2-7.5L2 9h7z"></path></svg>
+        Fotoaufgaben
+      </a>
+      <a class="fs-tile" id="video-greetings-link" href="#" hidden>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="6" width="14" height="12" rx="2"></rect><path d="M16 10l6-3v10l-6-3z"></path></svg>
+        Videogruß
+      </a>
+    </nav>
+
+    <!-- Eigene Uploads auf diesem Gerät (upload.js befüllt #thumbs) -->
+    <section class="fs-own" aria-label="Deine geteilten Fotos">
+      <span class="fs-small">Deine geteilten Fotos</span>
+      <div class="thumbs" id="thumbs"></div>
+    </section>
+
+    <!-- Rechtliche Hinweise: Inhalt unverändert, nur eingeklappt -->
+    <details class="fs-details">
+      <summary>Bitte nur Fotos teilen, die du teilen darfst · Datenschutz &amp; Speicherdauer</summary>
+      <p class="privacy-note">Bitte lade nur Fotos hoch, die du teilen darfst. Der Veranstalter hat das Album angelegt und kann alle Fotos verwalten. Fotos sind bis 90 Kalendertage nach dem Veranstaltungsdatum im Album verfügbar; danach werden sie aus den aktiven Systemen gelöscht. Bereits heruntergeladene Kopien bleiben erhalten. <a href="/datenschutz">Datenschutzhinweise</a>. Fragen oder Löschwünsche zu diesem Album richtest du zuerst an den Veranstalter; du kannst dich zusätzlich an <a href="mailto:info@finalsnap.de">FinalSnap</a> wenden.</p>
+      <p id="retention-hint"></p>
+      <!-- TODO bei Umsetzung von N1 (Originale) ersetzen durch:
+           „Fotos werden in voller Originalauflösung gespeichert. Standortdaten (GPS) werden automatisch entfernt.“ -->
+      <p>Fotos werden für die Galerie auf maximal 2.560 Pixel verkleinert und als JPEG gespeichert. Unveränderte Originaldateien werden nicht aufbewahrt.</p>
+    </details>
   </main>
 
+  <footer class="fs-footer">
+    <div class="fs-footer__brand">Fotos geteilt mit <img src="/finalsnap-logo.webp" alt="FinalSnap" width="54" height="32" /></div>
+    <div><a href="/impressum">Impressum</a> · <a href="/datenschutz">Datenschutz</a> · <a href="mailto:info@finalsnap.de">Kontakt</a></div>
+  </footer>
+
   <script src="/upload.js"></script>
-<footer class="legal-footer"><a href="/impressum">Impressum</a> · <a href="/datenschutz">Datenschutz</a> · <a href="mailto:info@finalsnap.de">Kontakt</a></footer></body>
+  <script src="/guest-experience.js"></script>
+</body>
 </html>

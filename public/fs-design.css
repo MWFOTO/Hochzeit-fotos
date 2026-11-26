@@ -1,0 +1,587 @@
+/* ===================================================================
+   FinalSnap Design-Grundlage (fs-design.css)
+   Gestaltet von Claude, 25.11.2026 – bitte 1:1 übernehmen.
+
+   - Gilt nur für Seiten mit <body class="fs-page">. Bestehende Seiten,
+     die style.css nutzen, bleiben unverändert.
+   - Keine externen Schriften (Google Fonts wären durch die CSP blockiert
+     und datenschutzrechtlich heikel) – es wird die Systemschrift genutzt.
+   - Farben der Veranstaltung: guest-access.js setzt --color-accent aus dem
+     Design-Editor. Diese Datei übernimmt sie als --fs-accent.
+   =================================================================== */
+
+/* ---------- 1. Design-Tokens ---------- */
+.fs-page {
+  --fs-bg: #1c1e23;
+  --fs-bg-raised: #22242a;
+  --fs-surface: #2a2d34;
+  --fs-surface-2: #30343c;
+  --fs-line: rgba(255, 255, 255, 0.12);
+  --fs-line-strong: rgba(255, 255, 255, 0.2);
+  --fs-text: #f4f5f7;
+  --fs-muted: #c0c3cb;
+  --fs-subtle: #9aa0ab;
+
+  --fs-brand: #49d5e8;          /* FinalSnap Türkis */
+  --fs-brand-2: #dd75c9;        /* FinalSnap Magenta */
+  --fs-yellow: #ffd43b;
+  --fs-orange: #ff883e;
+  --fs-success: #9be6c0;
+  --fs-danger: #ff9c94;
+
+  --fs-accent: var(--color-accent, var(--fs-brand));  /* Farbe der Feier (Flächen, Buttons) */
+  --fs-on-accent: #15171b;                              /* Schrift auf der Akzentfläche – per JS angepasst */
+  --fs-accent-text: var(--fs-accent);                   /* Akzent als Schrift auf dunklem Grund – per JS aufgehellt, falls zu dunkel */
+
+  --fs-radius-s: 10px;
+  --fs-radius: 14px;
+  --fs-radius-l: 18px;
+  --fs-radius-xl: 24px;
+  --fs-shadow: 0 14px 34px rgba(0, 0, 0, 0.35);
+
+  --fs-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --fs-ease: cubic-bezier(.2, .9, .3, 1.2);
+}
+
+/* ---------- 2. Basis ---------- */
+html:has(body.fs-page) { background: #1c1e23; }
+body.fs-page {
+  margin: 0;
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--fs-bg);
+  color: var(--fs-text);
+  font-family: var(--fs-font);
+  font-size: 16px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: 100%;
+}
+.fs-page *, .fs-page *::before, .fs-page *::after { box-sizing: border-box; }
+.fs-page [hidden] { display: none !important; }
+.fs-page img { max-width: 100%; }
+.fs-page a:not([class]) { color: var(--fs-accent-text); }
+.fs-page :focus-visible { outline: 3px solid var(--fs-brand); outline-offset: 3px; border-radius: 6px; }
+.fs-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* ---------- 3. Header & Footer ---------- */
+.fs-header {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  min-height: 60px;
+  padding: 8px max(16px, env(safe-area-inset-right)) 8px max(16px, env(safe-area-inset-left));
+  background: rgba(28, 30, 35, 0.92);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--fs-line);
+}
+.fs-logo { display: inline-flex; align-items: center; min-height: 44px; flex-shrink: 0; }
+.fs-logo img { height: 38px; width: auto; display: block; }
+.fs-header__actions { display: flex; align-items: center; gap: 8px; min-width: 0; }
+
+.fs-footer {
+  margin-top: auto;
+  padding: 18px 16px calc(20px + env(safe-area-inset-bottom));
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  font-size: 13px; color: var(--fs-subtle);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.fs-footer__brand { display: flex; align-items: center; gap: 8px; }
+.fs-footer__brand img { height: 32px; width: auto; }
+.fs-footer a { color: var(--fs-subtle); }
+
+/* ---------- 4. Typografie ---------- */
+.fs-eyebrow {
+  display: block; margin: 0;
+  font-size: 12px; font-weight: 800; letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--fs-accent-text);
+}
+.fs-title {
+  margin: 0;
+  font-size: clamp(30px, 8.4vw, 44px);
+  line-height: 1.12; letter-spacing: -0.03em; font-weight: 900;
+  overflow-wrap: anywhere;
+}
+.fs-lead { margin: 0; font-size: 16px; line-height: 1.6; color: var(--fs-muted); }
+.fs-small { font-size: 13px; color: var(--fs-subtle); }
+
+/* ---------- 5. Buttons ---------- */
+.fs-btn {
+  -webkit-appearance: none; appearance: none;
+  display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+  min-height: 48px; padding: 12px 20px;
+  border-radius: var(--fs-radius); border: 1px solid transparent;
+  font: inherit; font-weight: 800; font-size: 16px; line-height: 1.2;
+  text-decoration: none; text-align: center; cursor: pointer;
+  transition: transform .15s ease, background-color .15s ease, box-shadow .15s ease, opacity .15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.fs-btn:active { transform: scale(0.98); }
+.fs-btn:disabled { opacity: .55; cursor: wait; transform: none; }
+.fs-btn svg { flex-shrink: 0; }
+.fs-btn--primary {
+  background: var(--fs-accent); color: var(--fs-on-accent);
+  box-shadow: 0 10px 26px color-mix(in srgb, var(--fs-accent) 30%, transparent);
+}
+.fs-btn--primary:hover { filter: brightness(1.06); }
+.fs-btn--secondary { background: transparent; color: var(--fs-text); border-color: var(--fs-line-strong); }
+.fs-btn--secondary:hover { background: rgba(255, 255, 255, 0.05); }
+.fs-btn--ghost { background: transparent; color: var(--fs-muted); min-height: 44px; padding: 8px 12px; font-weight: 600; }
+.fs-btn--small { min-height: 40px; padding: 8px 14px; font-size: 14px; border-radius: var(--fs-radius-s); }
+.fs-btn--xl { min-height: 64px; font-size: 19px; font-weight: 900; border-radius: var(--fs-radius-l); }
+.fs-btn--block { display: flex; width: 100%; }
+
+/* ---------- 6. Karten & Kacheln ---------- */
+.fs-card {
+  background: var(--fs-surface);
+  border: 1px solid var(--fs-line);
+  border-radius: var(--fs-radius-l);
+  padding: 16px;
+}
+.fs-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; width: 100%; }
+.fs-tile {
+  min-height: 68px; padding: 10px 6px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
+  border-radius: var(--fs-radius); background: var(--fs-surface);
+  color: var(--fs-text); text-decoration: none; font-size: 13px; font-weight: 700; text-align: center;
+  border: 1px solid transparent;
+  transition: border-color .15s ease, background-color .15s ease;
+}
+.fs-tile:hover { border-color: var(--fs-line-strong); background: var(--fs-surface-2); }
+.fs-tile svg { color: var(--fs-accent-text); }
+
+/* ---------- 7. Aufklapp-Hinweise ---------- */
+.fs-details { width: 100%; text-align: left; font-size: 13px; line-height: 1.6; color: var(--fs-subtle); }
+.fs-details summary {
+  cursor: pointer; list-style: none; color: var(--fs-muted); font-weight: 600;
+  display: flex; gap: 8px; align-items: flex-start; padding: 6px 0;
+}
+.fs-details summary::-webkit-details-marker { display: none; }
+.fs-details summary::before { content: "ⓘ"; color: var(--fs-accent-text); font-weight: 800; }
+.fs-details[open] summary { margin-bottom: 6px; }
+.fs-details p { margin: 0 0 10px; }
+
+/* ---------- 8. Fortschritt & Status (von upload.js gesteuert) ---------- */
+.fs-page .progress-wrap {
+  display: none; width: 100%; height: 12px; border-radius: 12px;
+  background: var(--fs-surface); overflow: hidden;
+}
+.fs-page .progress-wrap.active { display: block; }
+.fs-page .progress-bar { height: 100%; width: 0; background: var(--fs-accent); border-radius: 12px; transition: width .25s linear; }
+.fs-page .status { margin: 0; width: 100%; font-size: 15px; line-height: 1.5; color: var(--fs-muted); }
+.fs-page .status:empty { display: none; }
+.fs-page .status.loading { color: var(--fs-muted); }
+.fs-page .status.success { color: var(--fs-success); font-weight: 700; }
+.fs-page .status.error {
+  color: var(--fs-text); background: rgba(255, 156, 148, 0.12);
+  border: 1px solid rgba(255, 156, 148, 0.35); border-radius: var(--fs-radius); padding: 12px 14px;
+}
+.fs-page .status.notice {
+  color: var(--fs-text); background: color-mix(in srgb, var(--fs-brand-2) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--fs-brand-2) 30%, transparent); border-radius: var(--fs-radius); padding: 12px 14px;
+}
+
+/* Kontingent-Hinweis (wird von guest-access.js eingefügt) */
+.fs-page .quota-notice {
+  width: 100%; margin: 0; padding: 14px 16px; text-align: left;
+  border-radius: var(--fs-radius); background: var(--fs-surface); border: 1px solid var(--fs-line);
+  font-size: 14px; color: var(--fs-muted);
+}
+.fs-page .quota-notice p { margin: 0 0 8px; }
+.fs-page .quota-notice p:last-child { margin-bottom: 0; }
+.fs-page .quota-notice .button {
+  display: inline-flex; align-items: center; min-height: 40px; padding: 8px 14px; margin: 4px 0 8px;
+  border-radius: var(--fs-radius-s); background: var(--fs-accent); color: var(--fs-on-accent);
+  font-weight: 800; text-decoration: none;
+}
+
+/* Vorschau der eigenen Uploads (von upload.js befüllt) */
+.fs-own { width: 100%; display: flex; flex-direction: column; gap: 8px; text-align: left; }
+.fs-own:has(.thumbs:empty) { display: none; }
+.fs-page .thumbs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.fs-page .thumbs img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: var(--fs-radius-s); display: block; }
+.fs-page .thumbs img:first-child { animation: fs-pop .5s var(--fs-ease) both; }
+
+/* ---------- 9. Gäste-Startseite (Willkommen & Upload) ---------- */
+.fs-hero { position: relative; height: 240px; flex-shrink: 0; overflow: hidden; }
+.fs-hero__img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+.fs-hero__fallback {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(120% 90% at 15% 10%, color-mix(in srgb, var(--fs-accent) 55%, transparent), transparent 60%),
+    radial-gradient(90% 80% at 90% 30%, color-mix(in srgb, var(--fs-brand-2) 40%, transparent), transparent 60%),
+    var(--fs-bg-raised);
+}
+.fs-hero::after {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(180deg, rgba(28, 30, 35, 0) 35%, var(--fs-bg) 100%);
+}
+.fs-welcome {
+  position: relative; z-index: 1;
+  width: 100%; max-width: 520px; margin: -56px auto 0;
+  padding: 0 22px 28px;
+  display: flex; flex-direction: column; align-items: center; gap: 18px; text-align: center;
+  animation: fs-rise .45s ease both;
+}
+.fs-welcome .fs-actions { width: 100%; display: flex; flex-direction: column; gap: 10px; }
+.fs-welcome .fs-lead { max-width: 420px; }
+
+/* ---------- 10. Erfolgsmoment (Overlay mit Konfetti) ---------- */
+.fs-celebrate {
+  position: fixed; inset: 0; z-index: 50;
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px; background: rgba(20, 22, 26, 0.86);
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  animation: fs-fade .25s ease both;
+}
+.fs-celebrate__panel {
+  position: relative; z-index: 1;
+  width: 100%; max-width: 380px;
+  display: flex; flex-direction: column; align-items: center; gap: 16px; text-align: center;
+}
+.fs-celebrate__photo {
+  width: 148px; height: 148px; border-radius: 22px; overflow: hidden;
+  border: 4px solid var(--fs-accent); box-shadow: var(--fs-shadow);
+  transform: rotate(-3deg); animation: fs-pop .6s var(--fs-ease) both;
+  background: var(--fs-surface);
+}
+.fs-celebrate__photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.fs-celebrate__photo--empty { display: flex; align-items: center; justify-content: center; color: var(--fs-accent-text); }
+.fs-celebrate h2 { margin: 0; font-size: 30px; line-height: 1.15; letter-spacing: -0.03em; font-weight: 900; }
+.fs-celebrate p { margin: 0; color: var(--fs-muted); line-height: 1.55; }
+.fs-celebrate .fs-actions { width: 100%; display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+
+.fs-confetti { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 0; }
+.fs-confetti i {
+  position: absolute; top: -20px; width: 9px; height: 14px; border-radius: 2px;
+  animation: fs-fall 2.6s ease-in both;
+}
+
+/* ---------- 11. Animationen ---------- */
+@keyframes fs-rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+@keyframes fs-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fs-pop { 0% { transform: scale(.4) rotate(-8deg); opacity: 0; } 65% { transform: scale(1.1) rotate(-2deg); opacity: 1; } 100% { transform: scale(1) rotate(-3deg); } }
+@keyframes fs-fall { 0% { transform: translateY(0) rotate(0); opacity: 1; } 100% { transform: translateY(105vh) rotate(560deg); opacity: .2; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .fs-page *, .fs-page *::before, .fs-page *::after { animation: none !important; transition: none !important; }
+  .fs-confetti { display: none; }
+}
+
+/* ---------- 12. Größere Bildschirme ---------- */
+@media (min-width: 720px) {
+  .fs-hero { height: 320px; }
+  .fs-welcome { margin-top: -72px; }
+}
+
+/* ===================================================================
+   13. Einbettung im Veranstalterbereich (Dashboard)
+   Die Bausteine von event-journey.js liegen in <section class="fs-page fs-embed">.
+   Der Präfix .fs-embed sorgt dafür, dass die Regeln aus style.css
+   (z. B. ".account-page button") das Design nicht überschreiben.
+   =================================================================== */
+.fs-embed {
+  display: flex; flex-direction: column; gap: 16px;
+  margin: 0 0 20px; color: var(--fs-text); font-family: var(--fs-font); text-align: left;
+}
+.fs-embed h2, .fs-embed h3 { margin: 0; color: var(--fs-text); letter-spacing: -0.01em; }
+.fs-embed p { margin: 0; color: var(--fs-muted); }
+.fs-embed .fs-btn { margin: 0; padding: 12px 20px; }
+.fs-embed .fs-btn--small { padding: 8px 14px; }
+.fs-embed a.fs-btn, .fs-embed a.fs-btn:hover { text-decoration: none; }
+.fs-embed .fs-btn--primary, .fs-embed .fs-btn--primary:hover { color: var(--fs-on-accent); background: var(--fs-accent); }
+.fs-embed .fs-btn--secondary, .fs-embed .fs-btn--secondary:hover { color: var(--fs-text); background: transparent; border-color: var(--fs-line-strong); }
+.fs-embed .fs-btn--secondary:hover { background: rgba(255, 255, 255, 0.05); }
+
+/* Countdown */
+.fs-countdown {
+  display: flex; align-items: center; gap: 16px; padding: 16px 18px;
+  border-radius: var(--fs-radius-xl);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--fs-brand) 18%, transparent), color-mix(in srgb, var(--fs-brand-2) 14%, transparent));
+  border: 1px solid var(--fs-line);
+}
+.fs-countdown__days {
+  width: 78px; height: 78px; flex-shrink: 0; border-radius: 18px; background: var(--fs-bg);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+.fs-countdown__days strong { font-size: 28px; line-height: 1; font-weight: 900; }
+.fs-countdown__days span { font-size: 12px; color: var(--fs-muted); font-weight: 600; }
+.fs-countdown__text { display: flex; flex-direction: column; gap: 3px; }
+.fs-countdown__text strong { font-size: 17px; }
+.fs-countdown__text span { font-size: 14px; color: var(--fs-muted); }
+
+/* Checkliste */
+.fs-checklist { display: flex; flex-direction: column; gap: 14px; }
+.fs-checklist__head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.fs-checklist__head h3 { font-size: 19px; font-weight: 800; }
+.fs-checklist__count { font-size: 14px; font-weight: 700; color: var(--fs-brand); white-space: nowrap; }
+.fs-meter { height: 8px; border-radius: 8px; background: var(--fs-bg); overflow: hidden; }
+.fs-meter > span { display: block; height: 100%; background: var(--fs-brand); border-radius: 8px; transition: width .4s ease; }
+.fs-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.fs-step { display: flex; gap: 12px; align-items: flex-start; padding: 12px; border-radius: var(--fs-radius); border: 1px solid transparent; }
+.fs-step--next { background: var(--fs-bg); border-color: color-mix(in srgb, var(--fs-brand) 45%, transparent); }
+.fs-step__mark {
+  width: 30px; height: 30px; flex-shrink: 0; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  border: 2px solid rgba(255, 255, 255, 0.35); color: #101a1d;
+}
+.fs-step--done .fs-step__mark { background: var(--fs-brand); border-color: var(--fs-brand); animation: fs-tick .35s ease both; }
+.fs-step__body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.fs-step__title { font-size: 16px; font-weight: 700; color: var(--fs-text); }
+.fs-step--done .fs-step__title { color: var(--fs-subtle); text-decoration: line-through; }
+.fs-step__hint { font-size: 13px; line-height: 1.45; color: var(--fs-muted); }
+.fs-step__body .fs-btn { align-self: flex-start; margin-top: 6px; }
+.fs-step:not(.fs-step--next) .fs-step__body .fs-btn--primary { background: transparent; color: var(--fs-brand); border-color: color-mix(in srgb, var(--fs-brand) 50%, transparent); box-shadow: none; }
+@keyframes fs-tick { 0% { transform: scale(.5); } 70% { transform: scale(1.2); } 100% { transform: scale(1); } }
+
+/* Infozeile (Sichtbarkeit & Freigabe) */
+.fs-facts { display: flex; flex-direction: column; gap: 8px; font-size: 14px; line-height: 1.5; }
+.fs-fact { display: flex; gap: 10px; align-items: flex-start; color: var(--fs-muted); }
+.fs-fact svg { flex-shrink: 0; margin-top: 1px; color: var(--fs-brand-2); }
+.fs-fact strong { color: var(--fs-text); }
+
+/* QR-Bereich */
+.fs-qr { display: flex; flex-direction: column; gap: 18px; }
+.fs-qr__code {
+  align-self: center; background: #fff; border-radius: var(--fs-radius-xl); padding: 16px;
+  display: flex; flex-direction: column; align-items: center; gap: 8px; box-shadow: var(--fs-shadow);
+}
+.fs-qr__code img { width: 220px; height: 220px; display: block; image-rendering: pixelated; }
+.fs-qr__code span { font-size: 13px; font-weight: 800; color: #22242a; max-width: 220px; text-align: center; overflow-wrap: anywhere; }
+.fs-callout {
+  display: flex; gap: 10px; align-items: flex-start; padding: 14px; border-radius: var(--fs-radius);
+  background: color-mix(in srgb, var(--fs-brand) 10%, transparent); border: 1px solid color-mix(in srgb, var(--fs-brand) 35%, transparent);
+  font-size: 14px; line-height: 1.5; color: var(--fs-text);
+}
+.fs-callout svg { flex-shrink: 0; color: var(--fs-brand); }
+.fs-dl { display: flex; flex-direction: column; gap: 10px; }
+.fs-dl__group { background: var(--fs-surface); border: 1px solid var(--fs-line); border-radius: var(--fs-radius-l); padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.fs-dl__head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.fs-dl__head strong { color: var(--fs-text); }
+.fs-dl__row { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 8px; }
+.fs-studio-link {
+  min-height: 56px; border-radius: var(--fs-radius);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--fs-brand) 22%, transparent), color-mix(in srgb, var(--fs-brand-2) 22%, transparent));
+  border: 1px solid var(--fs-line-strong);
+}
+.fs-embed .fs-studio-link, .fs-embed .fs-studio-link:hover { color: var(--fs-text); }
+.fs-guest-preview { display: flex; gap: 14px; align-items: center; }
+.fs-phone {
+  width: 132px; flex-shrink: 0; border-radius: 22px; border: 6px solid #111317; background: var(--fs-bg);
+  padding: 16px 10px; display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center;
+  color: var(--fs-text); text-decoration: none;
+}
+.fs-phone small { font-size: 7px; font-weight: 800; letter-spacing: .12em; color: var(--fs-brand); text-transform: uppercase; }
+.fs-phone b { font-size: 11px; line-height: 1.25; overflow-wrap: anywhere; }
+.fs-phone i { font-style: normal; width: 100%; height: 26px; border-radius: 8px; background: var(--fs-brand); color: #101a1d; font-size: 10px; font-weight: 800; display: flex; align-items: center; justify-content: center; }
+@media (min-width: 900px) {
+  .fs-qr { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; column-gap: 28px; }
+  .fs-qr__code { grid-row: span 3; }
+}
+
+/* ===================================================================
+   14. Assistent „Neue Feier anlegen“ (dashboard-create-panel.html)
+   =================================================================== */
+details.create-panel.fs-wizard-panel {
+  background: #2a2d34; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 22px;
+  padding: 0; margin-top: 24px; overflow: hidden; color: #f4f5f7;
+}
+details.fs-wizard-panel > summary.fs-wizard-summary {
+  list-style: none; cursor: pointer; display: flex; align-items: center; gap: 14px;
+  padding: 18px 20px; min-height: 76px; font-size: 1rem;
+}
+details.fs-wizard-panel > summary.fs-wizard-summary::-webkit-details-marker { display: none; }
+.fs-wizard-summary__icon {
+  width: 44px; height: 44px; flex-shrink: 0; border-radius: 14px; background: #49d5e8; color: #101a1d;
+  display: flex; align-items: center; justify-content: center; font-size: 24px; font-weight: 900;
+}
+.fs-wizard-summary strong { display: block; font-size: 18px; font-weight: 800; color: #f4f5f7; }
+.fs-wizard-summary small { display: block; font-size: 14px; color: #c0c3cb; font-weight: 500; }
+details.fs-wizard-panel[open] > summary.fs-wizard-summary { border-bottom: 1px solid rgba(255, 255, 255, 0.1); }
+details.fs-wizard-panel[open] .fs-wizard-summary__icon { background: transparent; color: #c0c3cb; border: 1px solid rgba(255, 255, 255, 0.2); }
+
+.fs-wizard { padding: 20px; margin: 0; }
+.fs-embed .fs-wizard__form { display: flex; flex-direction: column; gap: 20px; margin: 0; }
+
+.fs-embed .fs-wizard__progress { display: flex; flex-direction: column; gap: 8px; margin: 0; }
+.fs-embed .fs-wizard__progress p { margin: 0; font-size: 13px; font-weight: 700; color: var(--fs-muted); }
+.fs-embed .fs-wizard__progress progress {
+  -webkit-appearance: none; appearance: none; width: 100%; height: 8px; border: 0; border-radius: 8px;
+  background: var(--fs-surface-2); overflow: hidden;
+}
+.fs-embed .fs-wizard__progress progress::-webkit-progress-bar { background: var(--fs-surface-2); border-radius: 8px; }
+.fs-embed .fs-wizard__progress progress::-webkit-progress-value { background: var(--fs-brand); border-radius: 8px; transition: width .35s ease; }
+.fs-embed .fs-wizard__progress progress::-moz-progress-bar { background: var(--fs-brand); border-radius: 8px; }
+.fs-embed .fs-wizard__error {
+  margin: 0; padding: 12px 14px; border-radius: var(--fs-radius);
+  background: rgba(255, 156, 148, 0.12); border: 1px solid rgba(255, 156, 148, 0.35); color: var(--fs-text);
+}
+
+.fs-embed .fs-wizard__step { border: 0; padding: 0; margin: 0; min-width: 0; display: flex; flex-direction: column; gap: 16px; animation: fs-rise .35s ease both; }
+.fs-embed .fs-wizard__step[hidden] { display: none; }
+.fs-embed .fs-wizard__step legend {
+  padding: 0; margin: 0 0 4px; font-size: 26px; line-height: 1.15; font-weight: 900; letter-spacing: -0.03em; color: var(--fs-text);
+}
+.fs-embed .fs-wizard__lead { margin: 0; color: var(--fs-muted); line-height: 1.55; }
+
+/* Eingabefelder */
+.fs-embed .fs-field { display: flex; flex-direction: column; gap: 8px; font-size: 14px; font-weight: 700; color: var(--fs-text); }
+.fs-embed .fs-field small { font-size: 13px; font-weight: 500; color: var(--fs-subtle); }
+.fs-embed .fs-field input {
+  margin: 0; width: 100%; min-height: 50px; padding: 0 14px; border-radius: 12px;
+  border: 1px solid var(--fs-line-strong); background: var(--fs-bg); color: var(--fs-text);
+  font: inherit; font-size: 16px; font-weight: 500; color-scheme: dark;
+}
+.fs-embed .fs-field input::placeholder { color: var(--fs-subtle); }
+.fs-embed .fs-field input:focus { outline: none; border-color: var(--fs-brand); box-shadow: 0 0 0 3px color-mix(in srgb, var(--fs-brand) 30%, transparent); }
+.fs-embed .fs-slug { display: flex; align-items: stretch; border-radius: 12px; border: 1px solid var(--fs-line-strong); background: var(--fs-bg); overflow: hidden; }
+.fs-embed .fs-slug:focus-within { border-color: var(--fs-brand); box-shadow: 0 0 0 3px color-mix(in srgb, var(--fs-brand) 30%, transparent); }
+.fs-embed .fs-slug__prefix { display: flex; align-items: center; padding: 0 0 0 14px; color: var(--fs-subtle); font-weight: 500; font-size: 14px; white-space: nowrap; }
+.fs-embed .fs-slug input { border: 0; background: transparent; padding-left: 2px; min-width: 0; }
+.fs-embed .fs-slug input:focus { box-shadow: none; }
+@media (max-width: 420px) { .fs-embed .fs-slug__prefix { display: none; } .fs-embed .fs-slug input { padding-left: 14px; } }
+
+/* Auswahlkarten (Anlass) */
+.fs-choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+@media (min-width: 700px) { .fs-choices { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.fs-embed .fs-choice { position: relative; display: block; margin: 0; cursor: pointer; font-weight: 400; }
+.fs-embed .fs-choice input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.fs-embed .fs-choice span {
+  min-height: 84px; padding: 14px; border-radius: var(--fs-radius); display: flex; flex-direction: column; justify-content: center; gap: 3px;
+  background: var(--fs-bg); border: 2px solid var(--fs-line); transition: border-color .15s ease, background-color .15s ease;
+}
+.fs-embed .fs-choice strong { font-size: 16px; color: var(--fs-text); }
+.fs-embed .fs-choice small { font-size: 13px; color: var(--fs-muted); }
+.fs-embed .fs-choice:hover span { border-color: var(--fs-line-strong); }
+.fs-embed .fs-choice input:checked + span { border-color: var(--fs-brand); background: color-mix(in srgb, var(--fs-brand) 12%, transparent); }
+.fs-embed .fs-choice input:focus-visible + span { outline: 3px solid var(--fs-brand); outline-offset: 2px; }
+
+/* Schalter (Freigabe) */
+.fs-embed .fs-toggle {
+  display: flex; align-items: flex-start; gap: 14px; margin: 0; padding: 14px; cursor: pointer; font-weight: 400;
+  border-radius: var(--fs-radius); background: var(--fs-bg); border: 1px solid var(--fs-line);
+}
+.fs-embed .fs-toggle input {
+  -webkit-appearance: none; appearance: none; flex-shrink: 0; margin: 2px 0 0; width: 46px; height: 28px; border-radius: 28px;
+  background: var(--fs-surface-2); border: 1px solid var(--fs-line-strong); position: relative; cursor: pointer; transition: background-color .2s ease;
+}
+.fs-embed .fs-toggle input::after {
+  content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%;
+  background: #f4f5f7; transition: transform .2s ease;
+}
+.fs-embed .fs-toggle input:checked { background: var(--fs-brand); border-color: var(--fs-brand); }
+.fs-embed .fs-toggle input:checked::after { transform: translateX(18px); background: #101a1d; }
+.fs-embed .fs-toggle span { display: flex; flex-direction: column; gap: 3px; }
+.fs-embed .fs-toggle strong { color: var(--fs-text); font-size: 16px; }
+.fs-embed .fs-toggle small { color: var(--fs-muted); font-size: 13px; line-height: 1.45; }
+
+/* Zeitplan & Paket */
+.fs-embed .fs-timeline, .fs-embed .fs-offer {
+  margin: 0; padding: 16px; border-radius: var(--fs-radius-l); background: var(--fs-bg); border: 1px solid var(--fs-line);
+  display: flex; flex-direction: column; gap: 10px; color: var(--fs-muted); font-size: 14px; line-height: 1.5;
+}
+.fs-embed .fs-timeline strong, .fs-embed .fs-offer strong { color: var(--fs-text); font-size: 15px; }
+.fs-embed .fs-timeline p, .fs-embed .fs-offer p { margin: 0; }
+.fs-embed .fs-timeline ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
+.fs-embed .fs-timeline li { position: relative; padding-left: 22px; }
+.fs-embed .fs-timeline li::before {
+  content: ""; position: absolute; left: 3px; top: 7px; width: 9px; height: 9px; border-radius: 50%; background: var(--fs-brand);
+}
+.fs-embed .fs-timeline li:last-child::before { background: var(--fs-brand-2); }
+
+/* Buttons unten */
+.fs-embed .fs-wizard__actions { display: flex; gap: 12px; margin: 0; padding-top: 4px; }
+.fs-embed .fs-wizard__actions .fs-btn { flex: 1; min-height: 52px; white-space: nowrap; padding-left: 14px; padding-right: 14px; }
+.fs-embed .fs-wizard__actions .fs-btn--primary { flex: 2; }
+.fs-embed .fs-wizard__actions [hidden] { display: none !important; }
+
+/* ===================================================================
+   15. Startseite – Ergänzungen (landing-enhance.js)
+   Wirkt nur, wenn landing-enhance.js der Seite die Klasse fs-lp-ready gibt.
+   Die bewusst hohe Spezifität (body.landing-body.fs-lp-ready …) überstimmt die
+   mehrfachen Header-Regeln in style.css, ohne style.css zu ändern.
+   =================================================================== */
+.fs-lp-tools { display: none; }
+.fs-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+@media (max-width: 760px) {
+  body.landing-body.fs-lp-ready .site-header {
+    display: flex !important; flex-wrap: nowrap !important; align-items: center !important; justify-content: space-between !important;
+    gap: 10px !important; min-height: 64px; padding: 8px 16px !important;
+  }
+  body.landing-body.fs-lp-ready .site-header .brand img { width: auto !important; height: 42px !important; }
+  body.landing-body.fs-lp-ready .fs-lp-tools { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+  body.landing-body.fs-lp-ready .fs-lp-cta {
+    display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; border-radius: 12px;
+    background: #49d5e8; color: #101a1d; font-weight: 800; font-size: 14px; text-decoration: none; white-space: nowrap;
+  }
+  body.landing-body.fs-lp-ready .fs-lp-menu {
+    width: 44px; height: 44px; min-height: 44px; margin: 0; padding: 0; border-radius: 12px;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: #2a2d34; color: #f4f5f7; border: 1px solid rgba(255, 255, 255, 0.16); box-shadow: none; cursor: pointer;
+  }
+  body.landing-body.fs-lp-ready .fs-lp-menu path { transition: transform .2s ease, opacity .2s ease; transform-origin: 12px 12px; }
+  body.landing-body.fs-lp-menu-open .fs-lp-menu__a { transform: translateY(5px) rotate(45deg); }
+  body.landing-body.fs-lp-menu-open .fs-lp-menu__b { opacity: 0; }
+  body.landing-body.fs-lp-menu-open .fs-lp-menu__c { transform: translateY(-5px) rotate(-45deg); }
+
+  /* Navigation als aufklappbares Menü unter dem Header */
+  body.landing-body.fs-lp-ready .site-header .landing-nav {
+    display: none !important;
+    position: absolute; top: 100%; left: 0; right: 0; z-index: 30;
+    flex-direction: column !important; align-items: stretch !important; gap: 0 !important;
+    width: auto !important; margin: 0 !important; padding: 8px 16px 16px !important; overflow: visible !important;
+    background: #1c1e23; border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: 0 18px 30px rgba(0, 0, 0, 0.35);
+  }
+  body.landing-body.fs-lp-menu-open .site-header .landing-nav { display: flex !important; animation: fs-fade .2s ease both; }
+  body.landing-body.fs-lp-ready .site-header .landing-nav > a {
+    display: flex !important; align-items: center; justify-content: flex-start !important;
+    min-height: 50px !important; width: auto !important; margin: 0 !important; padding: 0 4px !important;
+    border: 0 !important; border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important; border-radius: 0 !important;
+    background: transparent !important; box-shadow: none !important;
+    color: #f4f5f7 !important; font-size: 16px !important; font-weight: 600 !important; text-align: left !important;
+  }
+  body.landing-body.fs-lp-ready .site-header .landing-nav > a.button { color: #49d5e8 !important; font-weight: 800 !important; border-bottom: 0 !important; }
+}
+
+/* Begrüßung für angemeldete Kunden */
+.fs-lp-hello { margin: 0 0 4px; color: #49d5e8 !important; font-weight: 700; }
+
+/* Mitmach-Demo im Handy-Bild */
+.landing-body .fs-lp-add {
+  width: calc(100% - 2px); font-family: inherit; cursor: pointer; text-align: left; white-space: nowrap;
+  position: relative; transition: transform .15s ease, box-shadow .15s ease;
+  box-shadow: 0 0 0 0 rgba(73, 213, 232, 0.6); animation: fs-lp-pulse 2.2s ease-out infinite;
+}
+.landing-body .fs-lp-add:hover { transform: translateY(-1px); }
+.landing-body .fs-lp-add:active { transform: scale(0.97); }
+.landing-body .fs-lp-add:focus-visible { outline: 3px solid #49d5e8; outline-offset: 3px; }
+@keyframes fs-lp-pulse { 0% { box-shadow: 0 0 0 0 rgba(73, 213, 232, 0.55); } 70% { box-shadow: 0 0 0 10px rgba(73, 213, 232, 0); } 100% { box-shadow: 0 0 0 0 rgba(73, 213, 232, 0); } }
+.landing-body .phone-photo.fs-lp-new { animation: fs-lp-pop .55s cubic-bezier(.2, .9, .3, 1.2) both; box-shadow: 0 0 0 2px #49d5e8; }
+@keyframes fs-lp-pop { 0% { transform: scale(.4) rotate(-8deg); opacity: 0; } 70% { transform: scale(1.06) rotate(2deg); opacity: 1; } 100% { transform: none; } }
+.landing-body .fs-lp-badge {
+  position: absolute !important; z-index: 2; top: 6px !important; left: 6px !important; bottom: auto !important;
+  padding: 2px 6px; border-radius: 20px; background: #49d5e8; color: #101a1d !important;
+  font-size: .5rem !important; font-weight: 800 !important; text-transform: uppercase; letter-spacing: .04em;
+}
+.landing-body .fs-lp-chip__dot {
+  width: 10px; height: 10px; border-radius: 50%; background: #dd75c9; flex-shrink: 0;
+  animation: fs-lp-blink 1.4s ease-in-out infinite;
+}
+.landing-body .fs-lp-chip--done .fs-lp-chip__dot { background: #49d5e8; animation: none; }
+@keyframes fs-lp-blink { 50% { opacity: .3; } }
+.landing-body .fs-lp-demo-cta {
+  margin: 18px auto 0; max-width: 360px; padding: 16px; border-radius: 18px;
+  background: #1c1e23; border: 1px solid rgba(73, 213, 232, 0.35);
+  display: flex; flex-direction: column; gap: 12px; text-align: left;
+  animation: fs-rise .4s ease both;
+}
+.landing-body .fs-lp-demo-cta p { margin: 0; color: #c0c3cb; font-size: .95rem; line-height: 1.5; }
+.landing-body .fs-lp-demo-cta strong { color: #f4f5f7; }
+.landing-body .fs-lp-demo-cta .button { justify-content: center; }
+@media (prefers-reduced-motion: reduce) {
+  .landing-body .fs-lp-add, .landing-body .phone-photo.fs-lp-new, .landing-body .fs-lp-chip__dot, .landing-body .fs-lp-demo-cta { animation: none !important; }
+}

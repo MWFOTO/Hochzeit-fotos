@@ -51,8 +51,10 @@ test('Registration, login, session, CSRF and protected dashboard',async()=>{
   assert.equal((await request('/dashboard',{user})).status,200);
 });
 test('Multiple events, ownership and pending payment gate',async()=>{
-  for(const eventId of ['birthday','company'])assert.equal((await request('/api/events',{method:'POST',user,body:{eventId,title:'Test Event',eventDate,plan:'event',trial:false,...(eventId==='birthday'?{moderation:true}:{})}})).status,201);
+  for(const eventId of ['birthday','company'])assert.equal((await request('/api/events',{method:'POST',user,body:{eventId,title:'Test Event',eventDate,plan:'event',trial:false,...(eventId==='birthday'?{moderation:true,occasion:'birthday'}:{occasion:'<script>'})}})).status,201);
   const ownerEvents=(await request('/api/events',{user})).data.events;assert.equal(ownerEvents.length,2);assert.ok(ownerEvents.every(event=>event.guestbook_moderation===1));
+  assert.equal(JSON.parse(app.locals.db.prepare('SELECT design_json FROM events WHERE id=?').get('birthday').design_json).occasion,'birthday');
+  assert.equal(JSON.parse(app.locals.db.prepare('SELECT design_json FROM events WHERE id=?').get('company').design_json||'{}').occasion,undefined);
   assert.equal((await request('/api/events',{method:'POST',user:other,body:{eventId:'birthday',title:'Collision',eventDate,plan:'event'}})).status,409);
   assert.equal((await request('/event/birthday')).status,402);
   assert.equal((await request('/api/event/birthday/qr',{user})).status,402);
@@ -83,7 +85,7 @@ test('Checkout idempotency, signature, unpaid/amount/live rejection and delayed 
   assert.equal((await request('/event/birthday')).status,403);
   const guestLanding=await request(`/event/birthday?token=${token}`,{guest:guestA});
   assert.equal(guestLanding.status,200);
-  assert.match(Buffer.from(guestLanding.data).toString(),/id="upload-link"/);
+  assert.match(Buffer.from(guestLanding.data).toString(),/id="upload-trigger"/);
   const uploadPage=await request(`/event/birthday/upload?token=${token}`,{guest:guestA});
   assert.equal(uploadPage.status,200);
   assert.match(Buffer.from(uploadPage.data).toString(),/id="file-input"/);
