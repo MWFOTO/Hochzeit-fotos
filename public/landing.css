@@ -193,3 +193,12 @@
   .lp-table td.lp-us::before { color: var(--lp-cyan); }
   .lp-table tr td:last-child { padding-bottom: 14px; }
 }
+/* Maskottchen-Animation */
+.lp-mascot { display: grid; grid-template-columns: 1.35fr .65fr; gap: 44px; align-items: center; }
+.lp-mascot-stage { position: relative; overflow: hidden; border-radius: 28px; background: #0b0c10; box-shadow: 0 30px 80px #0009, 0 0 0 1px #49d5e833; }
+.lp-mascot-stage::after { content: ''; position: absolute; inset: 0; pointer-events: none; border-radius: inherit; box-shadow: inset 0 0 60px #49d5e822; }
+.lp-mascot-stage video { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; }
+.lp-mascot-play { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); min-height: 48px; padding: 10px 20px; border: 0; border-radius: 999px; background: var(--lp-cyan); color: #0f1a1d; font: inherit; font-weight: 800; cursor: pointer; }
+.lp-mascot-copy h2 { margin: 10px 0 12px; font-size: clamp(1.8rem, 3.2vw, 2.6rem); line-height: 1.1; }
+.lp-mascot-copy p { font-size: 1.06rem; margin: 0 0 22px; }
+@media (max-width: 960px) { .lp-mascot { grid-template-columns: 1fr; gap: 26px; } }
