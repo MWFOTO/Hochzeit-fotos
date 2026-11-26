@@ -21,7 +21,7 @@ const { createPaymentReceipt } = require('./payment-receipt');
 const { createUploadCapacity, GiB, MiB, MIN_UPLOAD_FREE_BYTES, uploadDiskWarningThreshold } = require('./upload-capacity');
 const { createEventUploadQueues } = require('./upload-queues');
 const { preparePhoto, originalKey } = require('./photo-processing');
-const { createCardAssistant, normalizeAnswers, LIMITS: CARD_TEXT_LIMITS } = require('./card-assistant');
+const CARD_TEXT_LIMITS = { kicker:40, invite:120, backKicker:40, backInvite:120 };
 const scrypt = promisify(crypto.scrypt);
 const PLANS = { event:{label:'FinalSnap Fotoalbum',months:3,retentionDays:90,priceCents:4990}, '1m':{label:'1 Monat (alt)',months:1,priceCents:1900,legacy:true}, '3m':{label:'3 Monate (alt)',months:3,priceCents:2900,legacy:true}, '6m':{label:'6 Monate (alt)',months:6,priceCents:3900,legacy:true}, '12m':{label:'12 Monate (alt)',months:12,priceCents:5900,legacy:true} };
 const TERMS_VERSION = '2026-11-04-2';
@@ -82,7 +82,6 @@ const readable = e => e && ['paid','trial','pilot'].includes(e.status) && retent
 function createApp(options = {}) {
   const cfg = {...process.env, ...options};
   const mailer=options.mailer||require('./mailer').createMailer(cfg);
-  const cardAssistant=options.cardAssistant||createCardAssistant(cfg);
   const invoicePdfFetcher=options.invoicePdfFetcher||(async(url)=>{
     const response=await fetch(url,{signal:AbortSignal.timeout(15000)});
     if(!response.ok)throw new Error(`Stripe-PDF konnte nicht geladen werden (${response.status}).`);
@@ -364,7 +363,6 @@ function createApp(options = {}) {
   const authLimit=rateLimit({windowMs:15*60*1000,limit:20,standardHeaders:'draft-8',legacyHeaders:false});
   const uploadLimit=rateLimit({windowMs:60*1000,limit:120,standardHeaders:'draft-8',legacyHeaders:false,keyGenerator:req=>`${ipKeyGenerator(req.ip)}:${req.guestTokenHash||req.user?.id||'guest'}`});
   const guestbookLimit=rateLimit({windowMs:15*60*1000,limit:5,standardHeaders:'draft-8',legacyHeaders:false});
-  const cardAssistantLimit=rateLimit({windowMs:60*60*1000,limit:20,standardHeaders:'draft-8',legacyHeaders:false,keyGenerator:req=>`card:${req.user?.id||ipKeyGenerator(req.ip)}`,message:{error:'Du hast den KI-Assistenten gerade sehr oft genutzt. Bitte versuche es in einer Stunde wieder.'}});
   const experienceReviewLimit=rateLimit({windowMs:6*60*60*1000,limit:3,standardHeaders:'draft-8',legacyHeaders:false});
   function loginRequired(req,res,next) { if(!req.user) return fail(res,401,'Bitte anmelden.'); if(deletingUsers.has(req.user.id)) return fail(res,409,'Kontolöschung läuft. Bitte kurz warten.'); next(); }
   async function passwordHash(password,salt=random()) {return `${salt}:${(await scrypt(password,salt,64)).toString('hex')}`;}
@@ -715,17 +713,6 @@ function createApp(options = {}) {
     if(!readable(req.event))return fail(res,402,'Für dieses Event ist noch kein Gästezugang verfügbar.');
     res.json({event:{id:req.event.id,title:req.event.title,eventDate:req.event.event_date},design:publicDesign(req.event)});
   });
-  // KI-Assistent für Tischkarten: nur aktiv mit AI_CARD_ASSISTANT=on und ANTHROPIC_API_KEY.
-  // Übertragen werden ausschließlich die Antworten aus dem Fragebogen (keine Fotos, keine E-Mail, kein Gästelink).
-  app.get('/api/event/:eventId/card-assistant',loginRequired,owner,(req,res)=>res.json({enabled:cardAssistant.enabled,provider:cardAssistant.enabled?'Anthropic (Claude)':null}));
-  app.post('/api/event/:eventId/card-assistant',loginRequired,owner,cardAssistantLimit,wrap(async(req,res)=>{
-    if(!readable(req.event))return fail(res,402,'Für dieses Event ist noch kein Gästezugang verfügbar.');
-    if(!cardAssistant.enabled)return fail(res,503,'Der KI-Assistent ist noch nicht eingeschaltet.');
-    const answers=normalizeAnswers(req.body?.answers);
-    if(!answers)return fail(res,400,'Bitte sag uns zuerst, wer feiert.');
-    try{res.json({success:true,suggestion:await cardAssistant.suggest(answers)});}
-    catch(error){return fail(res,error.status&&error.status<600?error.status:502,error.status?error.message:'Der KI-Assistent ist gerade nicht erreichbar.');}
-  }));
   app.patch('/api/event/:eventId/design',loginRequired,owner,(req,res)=>{
     if(!readable(req.event))return fail(res,402,'Für dieses Event ist noch kein Gästezugang verfügbar.');
     const value=req.body?.design;

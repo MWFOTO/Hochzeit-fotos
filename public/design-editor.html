@@ -54,7 +54,6 @@
             <label><input type="radio" name="cs-palette" value="terracotta"><i style="background:#d9825b"></i> Terrakotta</label>
             <label><input type="radio" name="cs-palette" value="neon"><i style="background:#49d5e8"></i> FinalSnap Türkis</label>
           </div>
-          <input id="cs-colors" class="cs-ai-only" maxlength="80" autocomplete="off" placeholder="Oder in eigenen Worten, z. B. „Olivgrün wie unsere Deko“" aria-label="Eigener Farbwunsch" hidden>
         </div>
         <div class="cs-step" data-step="3" hidden>
           <p class="cs-bubble">Wie sprecht ihr eure Gäste an?</p>
@@ -64,9 +63,9 @@
           </div>
         </div>
         <div class="cs-step" data-step="4" hidden>
-          <p class="cs-bubble" id="cs-wish-question">Noch ein besonderer Wunsch? <span>optional</span></p>
-          <textarea id="cs-wish" rows="2" maxlength="300" placeholder="z. B. locker und herzlich, mit einem Augenzwinkern"></textarea>
-          <p class="cs-privacy" id="cs-privacy" hidden>Für den Entwurf schicken wir nur diese Antworten an unseren KI-Dienst (Claude von Anthropic), keine Fotos und keine Kontaktdaten. Bitte trag keine Gästenamen oder sensiblen Angaben ein. <a href="/datenschutz#ki-assistent" target="_blank" rel="noopener">Mehr dazu</a></p>
+          <p class="cs-bubble">Möchtet ihr einen eigenen Satz auf der Karte? <span>optional</span></p>
+          <textarea id="cs-own" rows="2" maxlength="120" placeholder="Leer lassen – dann schlage ich einen passenden Satz vor"></textarea>
+          <p class="cs-privacy">Der Entwurf entsteht direkt hier in deinem Browser. Es werden keine Daten an andere Dienste übertragen.</p>
         </div>
 
         <div class="cs-result" id="cs-result" hidden>

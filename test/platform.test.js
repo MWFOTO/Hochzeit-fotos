@@ -88,9 +88,8 @@ test('Event preparation checklist flags are persisted when design is saved and Q
   // Kartentexte und QR-Position werden gespeichert und bereinigt
   assert.equal((await request('/api/event/checklist-event/design',{method:'PATCH',user:account,body:{design:{title:'Mara & Jonas',occasion:'wedding',theme:'garden',accent:'#aabbcc',font:'classic',qrPosition:'lowerRight',cardText:{kicker:'UNSERE HOCHZEIT',invite:'Scannt den Code\nund teilt eure Fotos.',backInvite:'x'.repeat(500),evil:'nein'}}}})).status,200);
   const saved=(await request('/api/event/checklist-event/design',{user:account})).data.design;assert.equal(saved.qrPosition,'lowerRight');assert.equal(saved.cardText.kicker,'UNSERE HOCHZEIT');assert.equal(saved.cardText.invite,'Scannt den Code und teilt eure Fotos.');assert.equal(saved.cardText.backInvite.length,120);assert.equal(saved.cardText.evil,undefined);
-  // KI-Assistent ist ohne Schalter und Schlüssel aus
-  assert.deepEqual((await request('/api/event/checklist-event/card-assistant',{user:account})).data,{enabled:false,provider:null});
-  assert.equal((await request('/api/event/checklist-event/card-assistant',{method:'POST',user:account,body:{answers:{hosts:'Mara & Jonas'}}})).status,503);
+  // Es gibt keine KI-Schnittstelle
+  assert.equal((await request('/api/event/checklist-event/card-assistant',{method:'POST',user:account,body:{answers:{hosts:'x'}}})).status,404);
   assert.equal((await request('/card-studio.js')).status,200);
   const editor=Buffer.from((await request('/event/checklist-event/design',{user:account})).data).toString();assert.match(editor,/Karten-Assistent|card-assistant/);assert.match(editor,/Salbei &amp; Creme/);assert.match(editor,/finalsnap-logo\.webp/);assert.doesNotMatch(editor,/ϟ/);assert.match(editor,/card-studio\.js/);assert.match(editor,/qrOnlySvg/);assert.match(editor,/Das Bild ist eine fertige Karte/);assert.match(editor,/qrPlacement/);const editorScript=Buffer.from((await request('/design-editor.js')).data).toString();assert.match(editorScript,/4 × 4 cm/);
   const qr=await request('/api/event/checklist-event/qr',{user:account});assert.equal(qr.status,200);assert.match(qr.res.headers.get('content-type'),/image\/png/);
