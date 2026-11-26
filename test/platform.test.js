@@ -59,20 +59,20 @@ test('Registration, login, session, CSRF and protected dashboard',async()=>{
   assert.match(Buffer.from(landing.data).toString(),/src="\/landing\.js"/);
   const landingHtml=Buffer.from(landing.data).toString();assert.match(landingHtml,/id="landing-menu-toggle"/);assert.match(landingHtml,/id="demo-add-photo"/);assert.match(landingHtml,/id="landing-hero-cta"/);assert.equal((landingHtml.match(/Stripe befindet sich aktuell im Testmodus/g)||[]).length,1);assert.match(landingHtml,/phone-ai-note/);assert.doesNotMatch(landingHtml,/class="ai-image-tag"/);
   const loginPage=Buffer.from((await request('/login')).data).toString();assert.match(loginPage,/finalsnap-logo\.webp/);assert.match(loginPage,/Zur Startseite/);assert.doesNotMatch(loginPage,/Mein Konto/);
-  for(const file of ['landing.js','success.js','gallery-init.js','welcome.js','account.js','admin.js'])assert.equal((await request(`/${file}`)).status,200);
-  assert.match(Buffer.from((await request('/account.js')).data).toString(),/Spam-Ordner/);
+  for(const file of ['landing.js','landing-enhance.js','success.js','gallery-init.js','account.js','admin.js','event-journey.js','event-wizard.js','guest-experience.js'])assert.equal((await request(`/${file}`)).status,200);
+  assert.match(Buffer.from((await request('/account.js')).data).toString(),/Spam.?Ordner/i);
   assert.equal((await request('/dashboard')).status,302);
   user=await register('owner@example.com');other=await register('other@example.com');
   assert.equal((await request('/api/auth/login',{method:'POST',body:{email:'owner@example.com',password:'wrong-password'}})).status,401);
   assert.equal((await request('/api/auth/login',{method:'POST',body:{email:'owner@example.com',password:'a-good-long-password'}})).status,200);
   assert.equal((await request('/api/events',{method:'POST',user:{...user,csrf:''},body:{}})).status,403);
   assert.equal((await request('/api/events',{method:'POST',user,headers:{Origin:'https://evil.example'},body:{}})).status,403);
-  const dashboard=await request('/dashboard',{user});assert.equal(dashboard.status,200);const dashboardHtml=Buffer.from(dashboard.data).toString();assert.match(dashboardHtml,/id="create-event"/);assert.match(dashboardHtml,/Neue Feier anlegen/g);assert.match(dashboardHtml,/name="occasion"/);assert.match(dashboardHtml,/name="theme"/);assert.match(dashboardHtml,/Schritt 1 von 4 · Anlass/);const accountScript=Buffer.from((await request('/account.js')).data).toString();assert.match(accountScript,/Bereit für eure Feier/);assert.match(accountScript,/qr-access-preview/);
+  const dashboard=await request('/dashboard',{user});assert.equal(dashboard.status,200);const dashboardHtml=Buffer.from(dashboard.data).toString();assert.match(dashboardHtml,/id="create-event"/);assert.match(dashboardHtml,/Neue Feier anlegen/g);assert.match(dashboardHtml,/name="occasion"/);assert.match(dashboardHtml,/id="event-occasion"/);assert.match(dashboardHtml,/Schritt 1 von 4 · Dein Name/);const journeyScript=Buffer.from((await request('/event-journey.js')).data).toString();assert.match(journeyScript,/Bereit für eure Feier/);assert.match(journeyScript,/fs-guest-preview/);
 });
 test('Multiple events, ownership and pending payment gate',async()=>{
-  for(const eventId of ['birthday','company'])assert.equal((await request('/api/events',{method:'POST',user,body:{eventId,title:'Test Event',eventDate,plan:'event',trial:false,...(eventId==='birthday'?{moderation:true,occasion:'wedding',theme:'garden',accent:'#aabbcc'}:{occasion:'unknown',theme:'not-a-theme',accent:'url(javascript:alert(1))'})}})).status,201);
+  for(const eventId of ['birthday','company'])assert.equal((await request('/api/events',{method:'POST',user,body:{eventId,title:'Test Event',eventDate,plan:'event',trial:false,...(eventId==='birthday'?{moderation:true,occasion:'birthday',theme:'garden',accent:'#aabbcc'}:{occasion:'<script>',theme:'not-a-theme',accent:'url(javascript:alert(1))'})}})).status,201);
   const ownerEvents=(await request('/api/events',{user})).data.events;assert.equal(ownerEvents.length,2);assert.ok(ownerEvents.every(event=>event.guestbook_moderation===1));
-  assert.deepEqual(JSON.parse(ownerEvents.find(event=>event.id==='birthday').design_json),{occasion:'wedding',theme:'garden',accent:'#aabbcc',title:'Test Event',occasionLabel:'Hochzeit'});
+  assert.deepEqual(JSON.parse(ownerEvents.find(event=>event.id==='birthday').design_json),{occasion:'birthday',theme:'garden',accent:'#aabbcc',title:'Test Event',occasionLabel:'Geburtstag'});
   assert.deepEqual(JSON.parse(ownerEvents.find(event=>event.id==='company').design_json),{occasion:'other',theme:'afterglow',accent:'#efb85d',title:'Test Event',occasionLabel:'Feier'});
   assert.equal((await request('/api/events',{method:'POST',user:other,body:{eventId:'birthday',title:'Collision',eventDate,plan:'event'}})).status,409);
   assert.equal((await request('/event/birthday')).status,402);
@@ -124,9 +124,7 @@ test('Checkout idempotency, signature, unpaid/amount/live rejection and delayed 
   assert.equal((await request('/event/birthday')).status,403);
   const guestLanding=await request(`/event/birthday?token=${token}`,{guest:guestA});
   assert.equal(guestLanding.status,200);
-  assert.match(Buffer.from(guestLanding.data).toString(),/id="welcome-upload"/);
-  assert.match(Buffer.from(guestLanding.data).toString(),/Willkommen zu eurer Feier/);
-  assert.match(Buffer.from(guestLanding.data).toString(),/id="welcome-camera"/);
+  assert.match(Buffer.from(guestLanding.data).toString(),/id="upload-trigger"/);
   const uploadPage=await request(`/event/birthday/upload?token=${token}`,{guest:guestA});
   assert.equal(uploadPage.status,200);
   assert.match(Buffer.from(uploadPage.data).toString(),/id="file-input"/);

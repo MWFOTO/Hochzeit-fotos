@@ -486,14 +486,15 @@ function createApp(options = {}) {
     const id=String(req.body.eventId||''); const plan=PLANS.event; const title=String(req.body.title||'').trim(),eventDate=String(req.body.eventDate||'');
     if(!/^[a-z0-9][a-z0-9_-]{2,63}$/.test(id) || !title || title.length>120 || !validEventDate(eventDate)) return fail(res,400,'Bitte Event-ID, Titel und ein Veranstaltungsdatum innerhalb der nächsten 24 Monate angeben.');
     if(lookup(id) || fs.existsSync(path.join(root,id))) return fail(res,409,'Event-ID bereits vergeben, auch für Bestandsdaten.');
-    const occasion=['wedding','birthday','party','company'].includes(req.body.occasion)?req.body.occasion:'other';
+    const occasion=['wedding','birthday','party','summer','company','jubilee','graduation','other'].includes(req.body.occasion)?req.body.occasion:'other';
     const theme=['afterglow','midnight','garden'].includes(req.body.theme)?req.body.theme:'afterglow';
     const accent=/^#[0-9a-f]{6}$/i.test(String(req.body.accent||''))?String(req.body.accent).toLowerCase():'#efb85d';
     // During the test-only phase each newly created event can use the 25-photo
     // trial. Checkout remains a Stripe test checkout and can never charge live.
     const trial=req.body.trial!==false;
     const expiresAt=eventDeadline(eventDate);
-    db.prepare('INSERT INTO events (id,email,plan,amount_cents,status,created_at,owner_id,title,event_date,guest_token,moderation,guestbook_moderation,expires_at,design_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(id,req.user.email,'event',plan.priceCents,'pending',Date.now(),req.user.id,title,eventDate,random(),req.body.moderation===true?1:0,req.body.guestbookModeration===false?0:1,expiresAt,JSON.stringify({occasion,theme,accent,title,occasionLabel:{wedding:'Hochzeit',birthday:'Geburtstag',party:'Party',company:'Firmenfeier',other:'Feier'}[occasion]}));
+    const occasionLabel={wedding:'Hochzeit',birthday:'Geburtstag',party:'Party',summer:'Sommerfest',company:'Firmenfeier',jubilee:'Jubiläum',graduation:'Abschlussfeier',other:'Feier'}[occasion];
+    db.prepare('INSERT INTO events (id,email,plan,amount_cents,status,created_at,owner_id,title,event_date,guest_token,moderation,guestbook_moderation,expires_at,design_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(id,req.user.email,'event',plan.priceCents,'pending',Date.now(),req.user.id,title,eventDate,random(),req.body.moderation===true?1:0,req.body.guestbookModeration===false?0:1,expiresAt,JSON.stringify({occasion,theme,accent,title,occasionLabel}));
     if(trial)db.prepare("UPDATE events SET status='trial', trial_used=1 WHERE id=?").run(id);
     res.status(201).json({eventId:id,trial:!!trial,eventDate});
   });
@@ -1188,8 +1189,7 @@ function createApp(options = {}) {
     ].join('; '));
     res.sendFile(path.join(pub,'design-editor.html'));
   });
-  app.get('/event/:eventId',access,(req,res)=>res.sendFile(path.join(pub,'welcome.html')));
-  for(const [suffix,file] of [['/upload','upload.html'],['/gallery','gallery.html'],['/slideshow','slideshow.html'],['/games','games.html'],['/guestbook','guestbook.html']]) app.get(`/event/:eventId${suffix}`,access,(req,res)=>res.sendFile(path.join(pub,file)));
+  for(const [suffix,file] of [['','upload.html'],['/upload','upload.html'],['/gallery','gallery.html'],['/slideshow','slideshow.html'],['/games','games.html'],['/guestbook','guestbook.html']]) app.get(`/event/:eventId${suffix}`,access,(req,res)=>res.sendFile(path.join(pub,file)));
   app.get('/event/:eventId/video-grussbox',access,(req,res)=>{
     if(!videoAvailable||!req.event.video_greetings_enabled||!active(req.event))return fail(res,404,'Die Videogrußbox ist für diese Feier geschlossen.');
     res.set('Permissions-Policy','camera=(self), microphone=(self)');
@@ -1198,7 +1198,7 @@ function createApp(options = {}) {
     res.sendFile(path.join(pub,'video-grussbox.html'));
   });
   // Only intended public assets; source code and generic HTML routes cannot bypass guards.
-  for(const file of ['style.css','design-editor.css','design-editor.js','upload.js','slideshow.js','guest-access.js','welcome.js','account.js','verify-email.js','password-recovery.js','games.js','guestbook.js','video-grussbox.js','payments-admin.js','backups-admin.js','operations-admin.js','landing.js','reviews.js','reviews-admin.js','finalsnap-logo.webp','success.js','gallery-init.js','admin.js','johanna-bastian.png','photographer.webp','event-wedding.webp','event-birthday.jpg','event-summer.jpg','event-company.jpg']) app.get(`/${file}`,(req,res)=>res.sendFile(path.join(pub,file)));
+  for(const file of ['style.css','fs-design.css','guest-experience.js','event-journey.js','event-wizard.js','landing-enhance.js','design-editor.css','design-editor.js','upload.js','slideshow.js','guest-access.js','account.js','verify-email.js','password-recovery.js','games.js','guestbook.js','video-grussbox.js','payments-admin.js','backups-admin.js','operations-admin.js','landing.js','reviews.js','reviews-admin.js','finalsnap-logo.webp','success.js','gallery-init.js','admin.js','johanna-bastian.png','photographer.webp','event-wedding.webp','event-birthday.jpg','event-summer.jpg','event-company.jpg']) app.get(`/${file}`,(req,res)=>res.sendFile(path.join(pub,file)));
   for(const file of ['qr-einladung.webp','fotos-sammeln.webp','live-diashow.webp','hochzeit-party.webp','geburtstag.webp','party.webp','why-finalsnap-poster.jpg']) app.get(`/preview-assets/${file}`,(req,res)=>res.sendFile(path.join(pub,'preview-assets',file)));
   for(const file of ['finalsnap-mascot-landscape-poster.jpg','finalsnap-mascot-landscape.mp4']) app.get(`/animations/${file}`,(req,res)=>res.sendFile(path.join(pub,'animations',file)));
   // Liveness stays cheap for the host's restart check. Readiness checks critical dependencies.
