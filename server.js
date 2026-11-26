@@ -1052,7 +1052,7 @@ function createApp(options = {}) {
       : db.prepare('SELECT * FROM photos WHERE event_id=? AND approved=1 AND uploader_token_hash=? ORDER BY created_at,id').all(req.event.id,req.guestTokenHash);
     if(!photos.length) return fail(res,404,'Keine Fotos vorhanden.');
     res.attachment(`event-${req.event.id}-fotos.zip`);
-    const archive=new archiver.ZipArchive({zlib:{level:1}});
+    const archive=new archiver.ZipArchive({store:true});
     archive.on('error',()=>res.destroy());res.on('close',()=>archive.abort());archive.pipe(res);
     for(const p of photos) {
       const filename=p.original_filename?originalKey(p):p.filename;
