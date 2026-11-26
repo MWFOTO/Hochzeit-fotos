@@ -19,17 +19,17 @@ Stand: 4. November 2026. FinalSnap ist auf Render Frankfurt live; echte Zahlunge
 
 - `GET /health` ist der schnelle Liveness-Endpunkt für den Prozess.
 - `GET /ready` prüft SQLite, mindestens 100 MiB freien Upload-Speicher und den konfigurierten Fotospeicher. Bei einem Fehler antwortet die App mit HTTP 503, ohne interne Details öffentlich auszugeben.
-- Die App prüft alle 15 Minuten den Render-Datenträger und den aus der Fototabelle summierten Hetzner-Speicher. Sie warnt, wenn der freie Render-Platz unter dem höheren Wert aus 25 % der Disk und 2,5 GiB liegt, sowie bei 75-%- und 90-%-Schwellen des Hetzner-Fotospeichers. Bei weniger als 2 GiB freiem Render-Platz werden neue Uploads vor dem Empfang der Dateien pausiert. Es sind höchstens zwei Upload-Requests gleichzeitig aktiv, pro Album einer. Meldungen und Entwarnungen gehen an `PAYMENT_ALERT_EMAIL`; je Alarm wird höchstens einmal in 24 Stunden erneut benachrichtigt.
+- Die App prüft alle fünf Minuten den Render-Datenträger, den aus der Fototabelle summierten Hetzner-Speicher und Upload-Fehler der letzten 15 Minuten. Sie warnt, wenn der freie Render-Platz unter dem höheren Wert aus 25 % der Disk und 2,5 GiB liegt, bei 75-%- und 90-%-Schwellen des Hetzner-Fotospeichers sowie bei mindestens fünf fehlgeschlagenen Uploads pro Album oder einer Fehlerquote über 20 %. Upload-Warnungen enthalten nur Album-ID, Fehlerzahl und grobe Kategorien wie Speicher, Dateiformat, Warteschlange oder Zeitüberschreitung, keine Gastdaten oder Fotos; je Album höchstens eine Warnmail pro Stunde. Speicheralarme werden höchstens einmal in 24 Stunden erneut gemeldet. Bei weniger als 2 GiB freiem Render-Platz werden neue Uploads vor dem Empfang der Dateien pausiert. Es sind höchstens zwei Upload-Requests gleichzeitig aktiv, pro Album einer. Meldungen gehen an `PAYMENT_ALERT_EMAIL`.
 - Der Hetzner-Wert ist eine App-Schätzung aus aktiven Fotometadaten. Er umfasst keine verwaisten Objekte oder Anbieter-Abrechnung. Hetzner-Kostenwarnungen müssen zusätzlich im Hetzner-Konto eingerichtet werden.
 - Die GitHub-Actions-Datei `.github/workflows/finalsnap-availability.yml` im Standardzweig prüft `/health` und `/ready` alle fünf Minuten von außerhalb Render; nach zwei Wiederholungen schlägt der Workflow fehl. Ein geplanter Lauf ist noch nicht verifiziert, und der E-Mail-Empfang bei fehlgeschlagenen Läufen ist nicht bestätigt. Vor Verlass darauf GitHub-Actions-Fehlerbenachrichtigungen im Konto aktivieren und einen Alarmempfang prüfen.
 - Bei wiederholtem Fehler zuerst Providerstatus und Runtime-Logs ansehen, dann Datenbank, Upload-Datenträger und Object Storage prüfen. Nicht durch mehrfaches Neustarten versuchen, einen Speicher- oder Datenbankfehler zu beheben.
 
 ## Speicherbetrieb
 
-- Jedes bezahlte Album hat derzeit ein technisches Limit von 25 GB im Hetzner-Fotospeicher. Alle Veranstaltungen teilen sich zusätzlich das Provider-Kontingent. Render hält SQLite und vorübergehend Original- und verarbeitete Uploaddateien; die Anwendung begrenzt die parallele Staging-Last und hält mindestens 2 GiB als Uploadreserve frei.
+- Jedes bezahlte Album hat derzeit ein technisches Limit von 25 GB im Hetzner-Fotospeicher. Das Limit zählt Originaldateien sowie Anzeige- und Vorschaubilder. Alle Veranstaltungen teilen sich zusätzlich das Provider-Kontingent. Render hält SQLite und vorübergehend Original- und verarbeitete Uploaddateien; die Anwendung begrenzt die parallele Staging-Last und hält mindestens 2 GiB als Uploadreserve frei.
 - Im Object-Storage-Betrieb stoppt die App Uploads standardmäßig bei 900 GiB gemeinsam genutzter Fotos. Das lässt Abstand zum 1-TB-Kontingent; es ist keine separate Warnung im Hostinganbieter.
 - Bei lokalem Fotospeicher stoppt die App Uploads ebenfalls bei weniger als 2 GiB freiem Speicher. Der Veranstalterbereich zeigt den Foto- und Uploadspeicher getrennt an.
-- Gespeicherte Bilder sind verkleinerte JPEGs; Originaldateien werden nicht aufbewahrt.
+- Originalfotos bleiben in voller Auflösung erhalten. GPS-Standortdaten werden entfernt, Aufnahmedatum und Kamerainformationen bleiben bestehen. Für Galerie und Diashow erzeugt die App zusätzlich JPEG-Anzeigeversionen bis 2.560 Pixel und Vorschaubilder bis 480 Pixel. Das Speicherlimit zählt alle Versionen; auch alle Versionen werden in den Hetzner-Foto-Backups mitgesichert.
 - Hetzner Object Storage verschlüsselt Objekte nicht automatisch im Ruhezustand. Der Produktivcode verlangt für S3-Betrieb SSE-C mit `S3_SSE_C_KEY`; der 32-Byte-Schlüssel muss getrennt vom Hosting-Secret gesichert werden. Bei Schlüsselverlust sind die verschlüsselten Fotos nicht wiederherstellbar. Objektmetadaten werden durch SSE-C nicht verschlüsselt.
 - Datierte Alben laufen 90 Kalendertage ab Veranstaltungsdatum (Europe/Berlin), ohne zusätzliche Downloadphase. Der Zugriff endet an der Frist; der stündliche Löschlauf und der Startlauf entfernen die Fotos. Undatierte Altalben behalten ihre bisherige Frist. Der tatsächliche Ablauf muss vor Verkauf mit einem Testevent bestätigt werden.
 - Ein Hosting-Datenträger oder Object Storage ist kein geprüftes, unabhängiges Backup.
@@ -49,12 +49,15 @@ Render-Cronjobs können nicht auf die Web-Service-Disk zugreifen. Deshalb läuft
 
 Vor jeder Änderung am Live-Dienst Identität des Dienstes, Branch, Region, Umgebungswerte, Datenpfade und letzten erfolgreichen Deploy verifizieren. Vor einem Datenbank- oder Speicherwechsel zuerst Sicherung und Wiederherstellung nachweisen.
 
+Geplante Deploys finden möglichst Montag bis Donnerstag statt. Freitag ab 12 Uhr sowie Samstag und Sonntag werden keine geplanten Deploys durchgeführt. Vor jedem Deploy die interne Übersicht `https://finalsnap.de/ops/events` prüfen: Sie listet Veranstaltungen von heute bis einschließlich der nächsten drei Tage. Während einer Feier wird kein geplantes Update gestartet. Die Übersicht ist ein Hilfsmittel und ersetzt keine Rückfrage bei unklarer Lage oder technische Prüfung; bei Unsicherheit wird der Deploy verschoben.
+
 Nach einem Deploy `/health`, `/ready`, Anmeldung, Eventübersicht und einen kontrollierten Fotozugriff prüfen. Bei Fehlern Logs sichern und zum vorherigen App-Stand zurückkehren; Datenbank und Fotos nicht zurücksetzen oder löschen, solange Ursache und Kompatibilität unklar sind.
 
 Supportfälle mit Event-Kurzname, Zeitpunkt, Gerät/Browser und genauer Fehlermeldung erfassen. Häufige erste Prüfungen:
 
 - **QR-Code oder Gästelink funktioniert nicht:** Eventstatus und Fristen prüfen. Ein erneuerter Gästelink macht bereits gedruckte QR-Codes ungültig.
 - **Foto-Upload schlägt fehl:** Verbindung, Dateityp, Dateigröße, Testfoto-Limit, Eventlimit und gemeinsamen Speicher prüfen.
+- **Upload-Alarm:** Alarmmail nennt Album-ID und aggregierte Fehlerkategorien. Zeitraum und Ursache in den Runtime-Logs sowie Status von Render und Hetzner prüfen; keine Gast- oder Fotodaten per E-Mail weiterleiten.
 - **Foto fehlt:** Veranstalterfreigabe, Uploadstatus und Eventfilter prüfen. Gäste sehen auf ihrem Gerät nur die dort hochgeladenen Fotos; der Veranstalter sieht alle.
 - **Ablauf:** Datierte Alben sind nach 90 Tagen vollständig gesperrt und werden beim nächsten Löschlauf entfernt. Eine getrennte Downloadphase gilt nur noch für undatierte Altalben.
 

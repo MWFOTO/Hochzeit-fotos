@@ -123,7 +123,7 @@ function runUploader({files = [], responses, decode = async () => ({width: 4000,
   };
 }
 
-test('shrinks selected photos and uploads more than ten individually in sequence', async () => {
+test('preserves original photos and uploads more than ten individually in sequence', async () => {
   const files = Array.from({length: 30}, (_, index) => new File([new Uint8Array(8 * 1024 * 1024)], `photo-${index}.heic`, {type: 'image/heic'}));
   const responses = [
     {status: 429, body: JSON.stringify({error: 'busy'})},
@@ -135,12 +135,11 @@ test('shrinks selected photos and uploads more than ten individually in sequence
 
   assert.equal(app.requests.length, 31);
   assert.ok(app.requests.every(request => request.method === 'POST' && request.url.endsWith('/api/event/demo/upload')));
-  assert.ok(app.requests.every(request => request.file.type === 'image/jpeg' && request.file.size < 1.5 * 1024 * 1024));
-  assert.ok(app.requests.every(request => request.file.name.endsWith('.jpg')));
-  assert.equal(app.createdCanvases[0].width, 2560);
-  assert.equal(app.createdCanvases[0].height, 1920);
-  assert.equal(app.createdCanvases[0].options.quality, 0.9);
-  assert.equal(app.maxActiveDecodes, 1);
+  assert.ok(app.requests.every(request => request.file.type === 'image/heic' && request.file.size === 8 * 1024 * 1024));
+  assert.ok(app.requests.every(request => /^photo-\d+\.heic$/.test(request.file.name)));
+  assert.equal(new Set(app.requests.map(request=>request.file.name)).size,30);
+  assert.equal(app.createdCanvases.length, 0);
+  assert.equal(app.maxActiveDecodes, 0);
   assert.equal(app.requests[0].headers['X-Upload-Id'], app.requests[1].headers['X-Upload-Id']);
   assert.equal(app.controls.status.textContent, '✓ 30 Fotos wurden hochgeladen.');
 });

@@ -20,6 +20,7 @@ const { createContractConfirmation } = require('./contract-confirmation');
 const { createPaymentReceipt } = require('./payment-receipt');
 const { createUploadCapacity, GiB, MiB, MIN_UPLOAD_FREE_BYTES, uploadDiskWarningThreshold } = require('./upload-capacity');
 const { createEventUploadQueues } = require('./upload-queues');
+const { preparePhoto, originalKey } = require('./photo-processing');
 const scrypt = promisify(crypto.scrypt);
 const PLANS = { event:{label:'FinalSnap Fotoalbum',months:3,retentionDays:90,priceCents:4990}, '1m':{label:'1 Monat (alt)',months:1,priceCents:1900,legacy:true}, '3m':{label:'3 Monate (alt)',months:3,priceCents:2900,legacy:true}, '6m':{label:'6 Monate (alt)',months:6,priceCents:3900,legacy:true}, '12m':{label:'12 Monate (alt)',months:12,priceCents:5900,legacy:true} };
 const TERMS_VERSION = '2026-11-04-2';
@@ -37,7 +38,7 @@ function retentionUntil(e) {
 }
 const TEST_PHOTO_LIMIT = 25;
 const TEST_STORAGE_BYTES = 250*1024**2;
-const MAX_UPLOAD_FILE_BYTES = 20*1024*1024;
+const MAX_UPLOAD_FILE_BYTES = 50*1024*1024;
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
 const random = () => crypto.randomBytes(32).toString('hex');
 const fail = (res, status, error) => res.status(status).json({error});
@@ -143,10 +144,11 @@ function createApp(options = {}) {
     const design=readDesign(e);
     return {
       title:typeof design.title==='string'?design.title:e?.title||'Veranstaltung',
-      occasion:['wedding','birthday','summer','company','jubilee','graduation','other'].includes(design.occasion)?design.occasion:'other',
+      occasion:['wedding','birthday','party','summer','company','jubilee','graduation','other'].includes(design.occasion)?design.occasion:'other',
       theme:['afterglow','midnight','garden'].includes(design.theme)?design.theme:'afterglow',
       accent:/^#[0-9a-f]{6}$/i.test(design.accent||'')?design.accent:'#e99a69',
       font:['classic','palatino','modern','verdana','relaxed','typewriter'].includes(design.font)?design.font:'classic',
+      customArtwork:design.customArtwork===true,
       hasCover:typeof design.coverFilename==='string'&&/^[a-z0-9-]+\.jpg$/.test(design.coverFilename)
     };
   };
@@ -484,14 +486,16 @@ function createApp(options = {}) {
     const id=String(req.body.eventId||''); const plan=PLANS.event; const title=String(req.body.title||'').trim(),eventDate=String(req.body.eventDate||'');
     if(!/^[a-z0-9][a-z0-9_-]{2,63}$/.test(id) || !title || title.length>120 || !validEventDate(eventDate)) return fail(res,400,'Bitte Event-ID, Titel und ein Veranstaltungsdatum innerhalb der nächsten 24 Monate angeben.');
     if(lookup(id) || fs.existsSync(path.join(root,id))) return fail(res,409,'Event-ID bereits vergeben, auch für Bestandsdaten.');
+    const occasion=['wedding','birthday','party','summer','company','jubilee','graduation','other'].includes(req.body.occasion)?req.body.occasion:'other';
+    const theme=['afterglow','midnight','garden'].includes(req.body.theme)?req.body.theme:'afterglow';
+    const accent=/^#[0-9a-f]{6}$/i.test(String(req.body.accent||''))?String(req.body.accent).toLowerCase():'#efb85d';
     // During the test-only phase each newly created event can use the 25-photo
     // trial. Checkout remains a Stripe test checkout and can never charge live.
     const trial=req.body.trial!==false;
     const expiresAt=eventDeadline(eventDate);
-    db.prepare('INSERT INTO events (id,email,plan,amount_cents,status,created_at,owner_id,title,event_date,guest_token,moderation,guestbook_moderation,expires_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)').run(id,req.user.email,'event',plan.priceCents,'pending',Date.now(),req.user.id,title,eventDate,random(),req.body.moderation===true?1:0,req.body.guestbookModeration===false?0:1,expiresAt);
+    const occasionLabel={wedding:'Hochzeit',birthday:'Geburtstag',party:'Party',summer:'Sommerfest',company:'Firmenfeier',jubilee:'Jubiläum',graduation:'Abschlussfeier',other:'Feier'}[occasion];
+    db.prepare('INSERT INTO events (id,email,plan,amount_cents,status,created_at,owner_id,title,event_date,guest_token,moderation,guestbook_moderation,expires_at,design_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(id,req.user.email,'event',plan.priceCents,'pending',Date.now(),req.user.id,title,eventDate,random(),req.body.moderation===true?1:0,req.body.guestbookModeration===false?0:1,expiresAt,JSON.stringify({occasion,theme,accent,title,occasionLabel}));
     if(trial)db.prepare("UPDATE events SET status='trial', trial_used=1 WHERE id=?").run(id);
-    const occasion=String(req.body.occasion||'');
-    if(['wedding','birthday','summer','company','jubilee','graduation','other'].includes(occasion))db.prepare('UPDATE events SET design_json=? WHERE id=?').run(JSON.stringify({occasion}),id);
     res.status(201).json({eventId:id,trial:!!trial,eventDate});
   });
   app.get('/api/event/:eventId/availability',(req,res)=>res.json({available:/^[a-z0-9][a-z0-9_-]{2,63}$/.test(req.params.eventId)&&!lookup(req.params.eventId)&&!fs.existsSync(path.join(root,req.params.eventId))}));
@@ -502,6 +506,15 @@ function createApp(options = {}) {
     if(!user?.email_verified_at||!paymentAdminEmails.has(String(req.user.email||'').toLowerCase()))return fail(res,403,'Kein Zugriff auf die Zahlungsverwaltung.');
     next();
   }
+  app.get('/ops/events',paymentAdminRequired,(req,res)=>res.sendFile(path.join(__dirname,'public','operations-admin.html')));
+  app.get('/api/admin/upcoming-events',paymentAdminRequired,(req,res)=>{
+    const parts=Object.fromEntries(berlinParts.formatToParts(new Date()).map(part=>[part.type,part.value]));
+    const today=`${parts.year}-${parts.month}-${parts.day}`;
+    const untilDate=new Date(`${today}T12:00:00Z`);untilDate.setUTCDate(untilDate.getUTCDate()+3);
+    const through=untilDate.toISOString().slice(0,10);
+    const events=db.prepare("SELECT id,title,event_date eventDate,status,upload_successes uploadSuccesses,upload_failures uploadFailures FROM events WHERE event_date BETWEEN ? AND ? AND deleted_at IS NULL AND status NOT IN ('expired','cancelled') ORDER BY event_date,id").all(today,through);
+    res.json({today,through,events});
+  });
   app.get('/ops/reviews',paymentAdminRequired,(req,res)=>res.sendFile(path.join(__dirname,'public','reviews-admin.html')));
   app.get('/api/admin/reviews',paymentAdminRequired,(req,res)=>{
     const reviews=db.prepare('SELECT id,rating,message,tester_attested,publish_consent,publish_consent_at,approved,created_at FROM experience_reviews ORDER BY created_at DESC LIMIT 200').all();
@@ -696,9 +709,9 @@ function createApp(options = {}) {
     const theme=String(value.theme||'');
     const accent=String(value.accent||'');
     const font=String(value.font||'');
-    if(!title||title.length>80||!['wedding','birthday','summer','company','jubilee','graduation','other'].includes(occasion)||!['afterglow','midnight','garden'].includes(theme)||!/^#[0-9a-f]{6}$/i.test(accent)||!['classic','palatino','modern','verdana','relaxed','typewriter'].includes(font))return fail(res,400,'Bitte prüfe Titel, Anlass, Vorlage, Farbe und Schrift.');
-    const design={...readDesign(req.event),title,occasion,theme,accent,font};
-    db.prepare('UPDATE events SET design_json=? WHERE id=?').run(JSON.stringify(design),req.event.id);
+    if(!title||title.length>80||!['wedding','birthday','party','summer','company','jubilee','graduation','other'].includes(occasion)||!['afterglow','midnight','garden'].includes(theme)||!/^#[0-9a-f]{6}$/i.test(accent)||!['classic','palatino','modern','verdana','relaxed','typewriter'].includes(font))return fail(res,400,'Bitte prüfe Titel, Anlass, Vorlage, Farbe und Schrift.');
+    const design={...readDesign(req.event),title,occasion,theme,accent,font,customArtwork:value.customArtwork===true};
+    db.prepare('UPDATE events SET design_json=?,design_saved=1 WHERE id=?').run(JSON.stringify(design),req.event.id);
     res.json({success:true,design:publicDesign(lookup(req.event.id))});
   });
   app.patch('/api/event/:eventId',loginRequired,owner,(req,res)=>{
@@ -719,17 +732,20 @@ function createApp(options = {}) {
   app.get('/api/event/:eventId/qr',loginRequired,owner,wrap(async(req,res)=>{
     if(!readable(req.event)) return fail(res,402,'Album und Downloadzeitraum sind abgelaufen.');
     const url=`${baseUrl.origin}/event/${req.event.id}?token=${req.event.guest_token}`;
+    db.prepare('UPDATE events SET qr_downloaded=1 WHERE id=?').run(req.event.id);
     res.type('png').attachment(`${req.event.id}-qr.png`).send(await QRCode.toBuffer(url,{width:2000,margin:4,errorCorrectionLevel:'M'}));
   }));
   app.get('/api/event/:eventId/qr.svg',loginRequired,owner,wrap(async(req,res)=>{
     if(!readable(req.event))return fail(res,402,'Album und Downloadzeitraum sind abgelaufen.');
     const url=`${baseUrl.origin}/event/${req.event.id}?token=${req.event.guest_token}`;
+    db.prepare('UPDATE events SET qr_downloaded=1 WHERE id=?').run(req.event.id);
     const svg=await QRCode.toString(url,{type:'svg',width:2000,margin:4,errorCorrectionLevel:'M'});
     res.type('svg').attachment(`${req.event.id}-qr.svg`).send(svg);
   }));
   app.get('/api/event/:eventId/qr.pdf',loginRequired,owner,wrap(async(req,res)=>{
     if(!readable(req.event))return fail(res,402,'Album und Downloadzeitraum sind abgelaufen.');
     const url=`${baseUrl.origin}/event/${req.event.id}?token=${req.event.guest_token}`;
+    db.prepare('UPDATE events SET qr_downloaded=1 WHERE id=?').run(req.event.id);
     const qr=QRCode.create(url,{errorCorrectionLevel:'M'}),quiet=4,total=qr.modules.size+quiet*2,doc=new PDFDocument({size:[283.46,283.46],margin:0,compress:true});
     const chunks=[];doc.on('data',chunk=>chunks.push(chunk));
     const done=new Promise((resolve,reject)=>{doc.on('end',resolve);doc.on('error',reject);});
@@ -738,7 +754,11 @@ function createApp(options = {}) {
     for(let y=0;y<qr.modules.size;y++)for(let x=0;x<qr.modules.size;x++)if(qr.modules.get(x,y))doc.rect((x+quiet)*moduleSize,(y+quiet)*moduleSize,moduleSize+.15,moduleSize+.15).fill();
     doc.end();await done;res.type('pdf').attachment(`${req.event.id}-qr-10cm.pdf`).send(Buffer.concat(chunks));
   }));
-  // Disk staging bounds RAM usage. Re-encoding validates content and strips EXIF/GPS.
+  app.get('/api/event/:eventId/guest-qr.png',access,wrap(async(req,res)=>{
+    const url=`${baseUrl.origin}/event/${encodeURIComponent(req.event.id)}?token=${encodeURIComponent(req.event.guest_token)}`;
+    res.set('Cache-Control','private, no-store').type('png').send(await QRCode.toBuffer(url,{width:520,margin:4,errorCorrectionLevel:'M'}));
+  }));
+  // Disk staging bounds RAM usage. Original files are retained, with GPS metadata removed.
   const temp=path.join(root,'.tmp');fs.mkdirSync(temp,{recursive:true});
   const upload=multer({dest:temp,limits:{fileSize:MAX_UPLOAD_FILE_BYTES,files:10,fields:0,parts:10}}).array('photos',10);
   const designCoverUpload=multer({dest:temp,limits:{fileSize:8*1024*1024,files:1,fields:0,parts:1}}).single('cover');
@@ -792,6 +812,11 @@ function createApp(options = {}) {
     }
   }));
   const isUploadBusy=id=>eventUploads.isBusy(id);
+  function recordUploadFailure(eventId,errorOrReason){
+    const value=typeof errorOrReason==='string'?errorOrReason:String(errorOrReason?.message||'');
+    const reason=/speicher|disk|storage|space|limit_file_size/i.test(value)?'storage':/datei|format|bild|image|heif|jpeg|webp|png|raw|dng/i.test(value)?'format':/timeout|zeitüberschreitung/i.test(value)?'timeout':/warteschlange|queue|zu viele|429/i.test(value)?'queue':'other';
+    try{operationsMonitor.recordUploadAttempt(eventId,'failure',reason);}catch(logError){console.error('Upload-Fehler konnte nicht für den Betriebsmonitor erfasst werden:',logError.message);}
+  }
   let remoteStorageReservedBytes=0;
   const storedObjectBytes=()=>db.prepare(`SELECT
     (SELECT COALESCE(SUM(bytes),0) FROM photos)+(SELECT COALESCE(SUM(bytes),0) FROM video_greetings) AS bytes`).get().bytes;
@@ -886,9 +911,9 @@ function createApp(options = {}) {
     if(initial.owner_id && deletingUsers.has(initial.owner_id)) return fail(res,409,'Das Konto wird gerade gelöscht. Uploads sind gesperrt.');
     if(!active(initial)) return fail(res,402,'Der Albumzeitraum ist beendet. Fotos können noch während der Downloadphase angesehen und heruntergeladen werden.');
     const queued=eventUploads.reserve(initial.id);
-    if(!queued.ok){res.set('Retry-After','3');return fail(res,429,'Viele Gäste laden gerade hoch. Bitte versuche es gleich erneut.');}
+    if(!queued.ok){db.prepare('UPDATE events SET upload_failures=upload_failures+1 WHERE id=?').run(initial.id);recordUploadFailure(initial.id,'queue');res.set('Retry-After','3');return fail(res,429,'Viele Gäste laden gerade hoch. Bitte versuche es gleich erneut.');}
     const staged=uploadCapacity.reserveStaging(req,{maxBytes:10*MAX_UPLOAD_FILE_BYTES+64*1024});
-    if(!staged.ok){queued.release();res.set('Retry-After',staged.reason==='disk'?'10':'3');return fail(res,staged.reason==='disk'?503:429,staged.reason==='disk'?'Der temporäre Uploadspeicher ist gerade stark belegt. Bitte in einigen Minuten erneut versuchen.':'Die Upload-Warteschlange ist voll. Bitte gleich erneut versuchen.');}
+    if(!staged.ok){queued.release();db.prepare('UPDATE events SET upload_failures=upload_failures+1 WHERE id=?').run(initial.id);recordUploadFailure(initial.id,staged.reason==='disk'?'storage':'queue');res.set('Retry-After',staged.reason==='disk'?'10':'3');return fail(res,staged.reason==='disk'?503:429,staged.reason==='disk'?'Der temporäre Uploadspeicher ist gerade stark belegt. Bitte in einigen Minuten erneut versuchen.':'Die Upload-Warteschlange ist voll. Bitte gleich erneut versuchen.');}
     upload(req,res,async err=>{
       const written=[];
       try {
@@ -905,7 +930,7 @@ function createApp(options = {}) {
             const requestId=String(req.get('X-Upload-Id')||req.get('X-FinalSnap-Upload-Id')||crypto.randomUUID());
             if(!/^[A-Za-z0-9_-]{16,80}$/.test(requestId))return {status:400,message:'Ungültige Upload-Kennung.'};
             const existing=db.prepare('SELECT photo_count FROM photo_upload_requests WHERE event_id=? AND request_id=?').get(current.id,requestId);
-            if(existing)return {status:200,body:{success:true,count:existing.photo_count,pending:!!current.moderation}};
+            if(existing){operationsMonitor.recordUploadAttempt(current.id,'success');return {status:200,body:{success:true,count:existing.photo_count,pending:!!current.moderation}};}
             const disk=fs.statfsSync(root);if(Number(disk.bavail)*Number(disk.bsize)<100*1024**2)return {status:503,message:'Fotospeicher vorübergehend ausgelastet. Bitte den Veranstalter informieren.'};
             const dir=photoStorage.mode==='local'?path.join(root,current.id):temp;if(photoStorage.mode==='local')fs.mkdirSync(dir,{recursive:true});
             const total=db.prepare('SELECT COUNT(*) count, COALESCE(SUM(bytes),0) bytes FROM photos WHERE event_id=?').get(current.id);
@@ -913,49 +938,53 @@ function createApp(options = {}) {
             if(photoLimit!==null&&total.count+req.files.length>photoLimit)throw new Error('Die 25 kostenlosen Testfotos sind genutzt. Nach bestätigter Buchung gilt das Eventpaket ab dem Veranstaltungsdatum.');
             let bytes=total.bytes;
             for(const file of req.files) {
-              const image=sharp(file.path,{limitInputPixels:40000000,animated:false});
-              const meta=await image.metadata();
-              if(!['jpeg','png','webp','heif'].includes(meta.format))throw new Error('Nur JPEG, PNG, WebP und unterstützte HEIF-Bilder erlaubt.');
-              const id=crypto.randomUUID(),filename=`${id}.jpg`,dest=path.join(dir,filename);
-              written.push({id,filename,dest});
-              await image.rotate().resize({width:2560,height:2560,fit:'inside',withoutEnlargement:true}).jpeg({quality:82,mozjpeg:true}).toFile(dest);
-              const size=fs.statSync(dest).size;if(size>MAX_UPLOAD_FILE_BYTES)throw new Error('Dieses Foto ist nach der Verarbeitung zu groß. Bitte eine kleinere Datei hochladen.');bytes+=size;written.at(-1).bytes=size;
+              if(file.size>MAX_UPLOAD_FILE_BYTES)throw new Error('Ein Foto darf höchstens 50 MB groß sein.');
+              const processed=await preparePhoto({inputPath:file.path,outputDirectory:dir,id:crypto.randomUUID(),originalName:file.originalname});
+              const objects=[
+                {filename:processed.originalKey,path:processed.originalPath,contentType:processed.originalMime},
+                {filename:processed.displayFilename,path:processed.displayPath,contentType:'image/jpeg'},
+                {filename:processed.thumbFilename,path:processed.thumbPath,contentType:'image/jpeg'},
+              ];
+              written.push({...processed,objects});
+              bytes+=processed.bytes;
               if(bytes>storageLimit)throw new Error('Der Fotospeicher dieses Albums ist ausgeschöpft. Bitte den Veranstalter informieren.');
             }
             if(photoStorage.mode==='s3') {
               const usedBytes=storedObjectBytes(),incomingBytes=written.reduce((sum,file)=>sum+file.bytes,0);
               if(usedBytes+remoteStorageReservedBytes+incomingBytes>storageLimit)throw new Error('Der gemeinsame Fotospeicher ist ausgeschöpft. Bitte den Veranstalter informieren.');
               remoteStorageReservedBytes+=incomingBytes;
-              try{for(const file of written)await photoStorage.put(current.id,file.filename,file.dest);}
+              try{for(const file of written)for(const object of file.objects)await photoStorage.put(current.id,object.filename,object.path,object.contentType);}
               finally{remoteStorageReservedBytes-=incomingBytes;}
             }
             const latest=lookup(current.id);
             if(!active(latest)||latest.owner_id&&deletingUsers.has(latest.owner_id))throw new Error('Event inzwischen abgelaufen.');
             db.transaction(()=>{
               db.prepare('INSERT INTO photo_upload_requests (event_id,request_id,photo_count,pending,created_at) VALUES (?,?,?,?,?)').run(current.id,requestId,written.length,current.moderation?1:0,Date.now());
-              for(const f of written)db.prepare('INSERT INTO photos (id,event_id,filename,bytes,approved,created_at,uploader_token_hash) VALUES (?,?,?,?,?,?,?)').run(f.id,current.id,f.filename,f.bytes,current.moderation?0:1,Date.now(),req.guestTokenHash||null);
+              for(const f of written)db.prepare('INSERT INTO photos (id,event_id,filename,bytes,approved,created_at,uploader_token_hash,original_filename,original_bytes,original_mime,display_filename,thumb_filename) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)').run(f.id,current.id,f.displayFilename,f.bytes,current.moderation?0:1,Date.now(),req.guestTokenHash||null,f.originalFilename,f.originalBytes,f.originalMime,f.displayFilename,f.thumbFilename);
               db.prepare('UPDATE events SET upload_successes=upload_successes+1 WHERE id=?').run(current.id);
+              operationsMonitor.recordUploadAttempt(current.id,'success');
             })();
             return {status:200,body:{success:true,count:written.length,pending:!!current.moderation}};
           } finally {capacity.release();}
         });
-        if(!queueOutcome.ok){res.set('Retry-After','3');return fail(res,429,'Viele Gäste laden gerade hoch. Dein Foto wartet kurz in der Warteschlange.');}
+        if(!queueOutcome.ok){db.prepare('UPDATE events SET upload_failures=upload_failures+1 WHERE id=?').run(initial.id);recordUploadFailure(initial.id,'queue');res.set('Retry-After','3');return fail(res,429,'Viele Gäste laden gerade hoch. Dein Foto wartet kurz in der Warteschlange.');}
         const queuedResult=queueOutcome.value;
-        if(queuedResult.status!==200){if(queuedResult.status===429||queuedResult.status===503)res.set('Retry-After','3');if(queuedResult.status===400||queuedResult.status===402)db.prepare('UPDATE events SET upload_failures=upload_failures+1 WHERE id=?').run(initial.id);return fail(res,queuedResult.status,queuedResult.message);}
+        if(queuedResult.status!==200){db.prepare('UPDATE events SET upload_failures=upload_failures+1 WHERE id=?').run(initial.id);recordUploadFailure(initial.id,queuedResult.message);if(queuedResult.status===429||queuedResult.status===503)res.set('Retry-After','3');return fail(res,queuedResult.status,queuedResult.message);}
         res.status(queuedResult.status).json(queuedResult.body);
       } catch(error) {
         db.prepare('UPDATE events SET upload_failures=upload_failures+1 WHERE id=?').run(initial.id);
-        for(const f of written){try{if(photoStorage.mode==='s3'){await photoStorage.deletePhoto(initial.id,f.filename);await backupService.deletePhoto(initial.id,f.filename);}else fs.rmSync(f.dest,{force:true});}catch(cleanupError){console.error('Upload-Aufräumen fehlgeschlagen:',cleanupError.message);}}
+        recordUploadFailure(initial.id,error);
+        for(const f of written){for(const object of f.objects){try{if(photoStorage.mode==='s3'){await photoStorage.deletePhoto(initial.id,object.filename);await backupService.deletePhoto(initial.id,object.filename);}else fs.rmSync(object.path,{force:true});}catch(cleanupError){console.error('Upload-Aufräumen fehlgeschlagen:',cleanupError.message);}}}
         if(error.code==='PHOTO_STORAGE_UNAVAILABLE')console.error('Hetzner Object Storage:',error.cause?.message||error.message);
         fail(res,error.code==='PHOTO_STORAGE_UNAVAILABLE'?503:400,error.message);
       } finally {
         for(const f of req.files||[])fs.rmSync(f.path,{force:true});
-        if(photoStorage.mode==='s3')for(const f of written)fs.rmSync(f.dest,{force:true});
+        if(photoStorage.mode==='s3')for(const f of written)for(const object of f.objects)fs.rmSync(object.path,{force:true});
         staged.release();queued.release();
       }
     });
   });
-  function photoUrl(req,p) {return `/uploads/${req.event.id}/${p.filename}${own(req,req.event)?'':`?token=${req.event.guest_token}`}`;}
+  function photoUrl(req,p,variant='display') {const query=new URLSearchParams();if(variant!=='display')query.set('variant',variant);if(!own(req,req.event))query.set('token',req.event.guest_token);return `/uploads/${req.event.id}/${encodeURIComponent(p.filename)}${query.size?`?${query}`:''}`;}
   app.get('/api/event/:eventId/info',access,(req,res)=>{
     const canManage=own(req,req.event);
     const photoCount=canManage
@@ -992,14 +1021,19 @@ function createApp(options = {}) {
     const photos=own(req,req.event)
       ? db.prepare(`SELECT * FROM photos WHERE event_id=? ${admin?'':'AND approved=1'} ORDER BY created_at,id`).all(req.event.id)
       : db.prepare('SELECT * FROM photos WHERE event_id=? AND approved=1 AND uploader_token_hash=? ORDER BY created_at,id').all(req.event.id,req.guestTokenHash);
-    res.json({photos:photos.map(p=>({id:p.id,url:photoUrl(req,p),timestamp:p.created_at,approved:!!p.approved})),serverTime:Date.now()});
+    res.json({photos:photos.map(p=>({id:p.id,url:photoUrl(req,p),thumbUrl:photoUrl(req,p,'thumb'),downloadUrl:photoUrl(req,p,'original'),timestamp:p.created_at,approved:!!p.approved})),serverTime:Date.now()});
   });
   app.get('/uploads/:eventId/:filename',access,wrap(async(req,res)=>{
     const p=db.prepare('SELECT * FROM photos WHERE event_id=? AND filename=?').get(req.event.id,req.params.filename);
     if(!p || (!own(req,req.event)&&(!p.approved||p.uploader_token_hash!==req.guestTokenHash))) return fail(res,404,'Foto nicht gefunden.');
-    if(photoStorage.mode==='local') return res.sendFile(path.join(root,req.event.id,p.filename));
-    const stream=await photoStorage.getStream(req.event.id,p.filename);
-    res.type('jpeg');res.set('Cache-Control','private, no-store');stream.on('error',()=>res.destroy());stream.pipe(res);
+    const variant=['original','display','thumb'].includes(req.query.variant)?req.query.variant:'display';
+    const filename=variant==='original'?(p.original_filename?originalKey(p):p.filename):variant==='thumb'?(p.thumb_filename||p.display_filename||p.filename):(p.display_filename||p.filename);
+    const contentType=variant==='original'?(p.original_mime||'image/jpeg'):'image/jpeg';
+    res.set('Cache-Control','private, no-store').type(contentType);
+    if(variant==='original')res.attachment(p.original_filename||p.filename);
+    if(photoStorage.mode==='local')return res.sendFile(path.join(root,req.event.id,filename));
+    const stream=await photoStorage.getStream(req.event.id,filename);
+    stream.on('error',()=>res.destroy());stream.pipe(res);
   }));
   app.patch('/api/event/:eventId/photos/:photoId',loginRequired,owner,(req,res)=>{
     if(typeof req.body.approved!=='boolean') return fail(res,400,'Freigabe muss true oder false sein.');
@@ -1009,7 +1043,9 @@ function createApp(options = {}) {
   app.delete('/api/event/:eventId/photos/:photoId',loginRequired,owner,wrap(async(req,res)=>{
     const p=db.prepare('SELECT * FROM photos WHERE id=? AND event_id=?').get(req.params.photoId,req.event.id);
     if(!p) return fail(res,404,'Foto nicht gefunden.');
-    await photoStorage.deletePhoto(req.event.id,p.filename);await backupService.deletePhoto(req.event.id,p.filename);db.prepare('DELETE FROM photos WHERE id=?').run(p.id);res.json({success:true});
+    const files=[p.filename,p.original_filename?originalKey(p):null,p.display_filename,p.thumb_filename].filter(Boolean);
+    for(const filename of new Set(files)){await photoStorage.deletePhoto(req.event.id,filename);await backupService.deletePhoto(req.event.id,filename);}
+    db.prepare('DELETE FROM photos WHERE id=?').run(p.id);res.json({success:true});
   }));
   app.get('/api/event/:eventId/download',access,wrap(async(req,res)=>{
     const photos=own(req,req.event)
@@ -1017,11 +1053,13 @@ function createApp(options = {}) {
       : db.prepare('SELECT * FROM photos WHERE event_id=? AND approved=1 AND uploader_token_hash=? ORDER BY created_at,id').all(req.event.id,req.guestTokenHash);
     if(!photos.length) return fail(res,404,'Keine Fotos vorhanden.');
     res.attachment(`event-${req.event.id}-fotos.zip`);
-    const archive=new archiver.ZipArchive({zlib:{level:1}});
+    const archive=new archiver.ZipArchive({store:true});
     archive.on('error',()=>res.destroy());res.on('close',()=>archive.abort());archive.pipe(res);
     for(const p of photos) {
-      if(photoStorage.mode==='local') archive.file(path.join(root,req.event.id,p.filename),{name:p.filename});
-      else archive.append(await photoStorage.getStream(req.event.id,p.filename),{name:p.filename});
+      const filename=p.original_filename?originalKey(p):p.filename;
+      const archiveName=p.original_filename||p.filename;
+      if(photoStorage.mode==='local') archive.file(path.join(root,req.event.id,filename),{name:archiveName});
+      else archive.append(await photoStorage.getStream(req.event.id,filename),{name:archiveName});
     }
     archive.finalize();
   }));
@@ -1160,7 +1198,7 @@ function createApp(options = {}) {
     res.sendFile(path.join(pub,'video-grussbox.html'));
   });
   // Only intended public assets; source code and generic HTML routes cannot bypass guards.
-  for(const file of ['style.css','fs-design.css','guest-experience.js','event-journey.js','event-wizard.js','landing-enhance.js','gallery-experience.js','design-editor.css','design-editor.js','upload.js','slideshow.js','guest-access.js','account.js','verify-email.js','password-recovery.js','games.js','guestbook.js','video-grussbox.js','payments-admin.js','backups-admin.js','landing.js','reviews.js','reviews-admin.js','finalsnap-logo.webp','success.js','gallery-init.js','admin.js','johanna-bastian.png','photographer.webp','event-wedding.webp','event-birthday.jpg','event-summer.jpg','event-company.jpg']) app.get(`/${file}`,(req,res)=>res.sendFile(path.join(pub,file)));
+  for(const file of ['style.css','fs-design.css','guest-experience.js','event-journey.js','event-wizard.js','gallery-experience.js','design-editor.css','design-editor.js','upload.js','slideshow.js','guest-access.js','account.js','verify-email.js','password-recovery.js','games.js','guestbook.js','video-grussbox.js','payments-admin.js','backups-admin.js','operations-admin.js','landing.js','reviews.js','reviews-admin.js','finalsnap-logo.webp','success.js','gallery-init.js','admin.js','johanna-bastian.png','photographer.webp','event-wedding.webp','event-birthday.jpg','event-summer.jpg','event-company.jpg']) app.get(`/${file}`,(req,res)=>res.sendFile(path.join(pub,file)));
   for(const file of ['qr-einladung.webp','fotos-sammeln.webp','live-diashow.webp','hochzeit-party.webp','geburtstag.webp','party.webp','why-finalsnap-poster.jpg']) app.get(`/preview-assets/${file}`,(req,res)=>res.sendFile(path.join(pub,'preview-assets',file)));
   for(const file of ['finalsnap-mascot-landscape-poster.jpg','finalsnap-mascot-landscape.mp4']) app.get(`/animations/${file}`,(req,res)=>res.sendFile(path.join(pub,'animations',file)));
   // Liveness stays cheap for the host's restart check. Readiness checks critical dependencies.

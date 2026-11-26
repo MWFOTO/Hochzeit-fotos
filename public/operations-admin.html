@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Feiern im Blick · FinalSnap</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="site-header"><a class="brand" href="/" aria-label="FinalSnap Startseite"><span class="brand-mark">ϟ</span><span>FinalSnap</span></a><nav class="actions"><a class="button secondary" href="/ops/backups">Sicherungen</a><a class="button secondary" href="/ops/payments">Zahlungen</a><a class="button secondary" href="/dashboard">Zum Konto</a></nav></header>
+  <main class="account-page">
+    <div class="page-heading"><div><span class="eyebrow">BETRIEB</span><h1>Anstehende Feiern</h1><p>Diese Übersicht hilft vor einem Update zu prüfen, ob gerade Veranstaltungen laufen.</p></div></div>
+    <p id="status" role="status" aria-live="polite">Veranstaltungen werden geladen …</p>
+    <section id="events" class="plan-grid" aria-label="Veranstaltungen der nächsten drei Tage"></section>
+    <p class="small">Wartungsregel: Updates möglichst Montag bis Donnerstag durchführen. Freitag ab 12 Uhr sowie Samstag und Sonntag keine geplanten Updates. Vor jedem Update diese Liste prüfen. Technische Fehler können die Liste beeinträchtigen; bei Unsicherheit kein Update während einer Feier starten.</p>
+  </main>
+  <script src="/operations-admin.js"></script>
+  <footer class="legal-footer"><a href="/impressum">Impressum</a> · <a href="/datenschutz">Datenschutz</a></footer>
+</body>
+</html>

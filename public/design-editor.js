@@ -8,6 +8,7 @@
   const dateInput = $('#eventDate');
   const colorInput = $('#accentColor');
   const fontInput = $('#fontStyle');
+  const customArtworkInput=$('#customArtwork');
   const phone = $('#phonePreview');
   const coverName = $('#uploadFilename');
   const status = $('#saveStatus');
@@ -24,8 +25,10 @@
     midnight: { accent: '#64cdd1', label: 'Lagune', end: '#203c48' },
     garden: { accent: '#a8bf83', label: 'Salbei', end: '#3e5947' }
   };
+  const stylePresets={elegant:{theme:'garden',font:'palatino'},playful:{theme:'afterglow',font:'relaxed'},modern:{theme:'midnight',font:'modern'},romantic:{theme:'garden',font:'classic'}};
+  const palettes={sage:{accent:'#a8bf83',name:'Salbei'},gold:{accent:'#d3ad63',name:'Gold'},rose:{accent:'#e8a9b8',name:'Rosé'},neon:{accent:'#49d5e8',name:'FinalSnap Türkis'}};
   const occasions = {
-    wedding: 'UNSERE HOCHZEIT', birthday: 'GEBURTSTAG', summer: 'SOMMERFEST',
+    wedding: 'UNSERE HOCHZEIT', birthday: 'GEBURTSTAG', party:'UNSERE PARTY', summer: 'SOMMERFEST',
     company: 'FIRMENFEIER', jubilee: 'JUBILÄUM', graduation: 'ABSCHLUSSFEIER', other: 'UNSER EVENT'
   };
   let csrf = '';
@@ -71,6 +74,7 @@
     phone.classList.add('custom-cover');
     phone.style.setProperty('--custom-cover', `linear-gradient(0deg,#161415a8,#16141508 76%),url("${coverUrl}")`);
     coverName.textContent = name;
+    customArtworkInput.disabled=false;
   }
 
   function dataUrlToBlob(value) {
@@ -121,6 +125,24 @@
   }
 
   document.querySelectorAll('.template-card').forEach(button => button.addEventListener('click', () => selectTheme(button.dataset.template)));
+  const guidedStyleInputs=[...document.querySelectorAll('[name="guided-style"]')];
+  const guidedPalette=$('#guided-palette');
+  const guidedIdea=$('#guided-idea');
+  const guidedStatus=$('#guided-inspiration-status');
+  const guidedInspiration=$('#guided-inspiration');
+  function applyGuidedDesign({rotate=false}={}){
+    if(rotate){const current=Math.max(0,guidedStyleInputs.findIndex(input=>input.checked));guidedStyleInputs[(current+1)%guidedStyleInputs.length].checked=true;const palettesList=Object.keys(palettes);guidedPalette.value=palettesList[(palettesList.indexOf(guidedPalette.value)+1)%palettesList.length];}
+    const style=guidedStyleInputs.find(input=>input.checked)?.value||'elegant';const preset=stylePresets[style]||stylePresets.elegant;const palette=palettes[guidedPalette.value]||palettes.sage;
+    selectTheme(preset.theme);fontInput.value=preset.font;colorInput.value=palette.accent;$('#colorLabel').textContent=palette.name;updatePreview();
+    $('#guided-title').textContent='Euer Entwurf ist bereit';
+    status.textContent='Entwurf wird gespeichert …';
+    form.requestSubmit();
+  }
+  $('#generate-guided-design').addEventListener('click',()=>applyGuidedDesign());
+  $('#another-guided-variant').addEventListener('click',()=>applyGuidedDesign({rotate:true}));
+  $('#customize-guided-design').addEventListener('click',()=>{$('#step-design').scrollIntoView({behavior:'smooth',block:'start'});titleInput.focus({preventScroll:true});});
+  guidedInspiration.addEventListener('change',()=>{const file=guidedInspiration.files?.[0];if(!file)return;if(!['image/jpeg','image/png','image/webp'].includes(file.type)||file.size>8*1024*1024){guidedStatus.textContent='Bitte ein JPG-, PNG- oder WEBP-Bild bis 8 MB auswählen.';guidedInspiration.value='';$('#use-guided-inspiration').hidden=true;return;}guidedStatus.textContent=`„${file.name}“ bleibt als Orientierung auf diesem Gerät. Es wird nicht an FinalSnap übertragen.`;$('#use-guided-inspiration').hidden=false;});
+  $('#use-guided-inspiration').addEventListener('click',()=>{const file=guidedInspiration.files?.[0];if(!file)return;if(typeof DataTransfer!=='function'){guidedStatus.textContent='Wähle das Bild bitte zusätzlich über „PNG, JPG oder WEBP auswählen“ aus, um es als Titelmotiv zu speichern.';return;}const transfer=new DataTransfer();transfer.items.add(file);$('#coverUpload').files=transfer.files;$('#coverUpload').dispatchEvent(new Event('change',{bubbles:true}));guidedStatus.textContent='Du hast ausgewählt, dieses Bild als Titelmotiv bei FinalSnap zu speichern.';});
   document.querySelectorAll('.progress-step, .next-step-button').forEach(link => link.addEventListener('click', () => {
     const target = link.getAttribute('href');
     document.querySelectorAll('.progress-step').forEach(step => step.classList.toggle('active', step.getAttribute('href') === target));
@@ -165,7 +187,7 @@
   $('#copyAiBrief').addEventListener('click', async () => {
     const templateName = $('.template-card.selected .template-name')?.textContent || 'Afterglow';
     const occasionName = occasionInput.options[occasionInput.selectedIndex]?.text || occasionInput.value;
-    const prompt = `Erstelle ein hochwertiges Titelmotiv als Hintergrund für ein FinalSnap-Fotoalbum. Anlass: ${occasionName}. Albumtitel: ${titleInput.value.trim() || 'Euer Event'}. Stil: ${templateName}. Akzentfarbe: ${colorInput.value}. Schriftstil für den später ergänzten Titel: ${fonts[fontInput.value]?.name || fonts.classic.name}. Vertikales Format 4:5, passend für eine moderne Feier, klare Bildkomposition und ausreichend ruhiger Bereich in der Mitte. Nur Bildmotiv: keine Schrift, keine Buchstaben, kein Logo und kein QR-Code; Titel und QR-Code werden später im FinalSnap-Editor ergänzt.`;
+    const prompt = `Erstelle ein hochwertiges Kartendesign für FinalSnap. Anlass: ${occasionName}. Albumtitel: ${titleInput.value.trim() || 'Euer Event'}. Stil: ${templateName}. Akzentfarbe: ${colorInput.value}. Schriftstil: ${fonts[fontInput.value]?.name || fonts.classic.name}. Idee: ${guidedIdea.value.trim()||'keine zusätzliche Idee'}. Hochformat, klare gut lesbare Gestaltung, ausreichender Kontrast. Lass in der Mitte ein freies Feld von ca. 4 × 4 cm für den QR-Code. Keinen QR-Code selbst zeichnen. Keine fehleranfälligen Texte und kein FinalSnap-Logo einbauen; Titel und echter QR-Code werden anschließend im FinalSnap-Editor ergänzt.`;
     const field = $('#aiBriefText');
     field.value = prompt;
     try {
@@ -189,6 +211,7 @@
       fontFamily: fonts[fontInput.value]?.css || fonts.classic.css,
       format: selectedFormat,
       theme: selected?.dataset.template || 'afterglow'
+      ,qrPosition:$('#qrPlacement')?.value||'center',customArtwork:!!customArtworkInput?.checked
     };
   }
 
@@ -203,7 +226,7 @@
     const qrSize = tent ? '33mm' : poster ? '50mm' : '36mm';
     const themeEnd = data.theme === 'midnight' ? '#203c48' : data.theme === 'garden' ? '#3e5947' : '#44343a';
     const designBg = data.image ? `linear-gradient(0deg,#151416bb,#15141624 82%),url('${data.image}') center/cover` : `linear-gradient(145deg,${data.accent} 0%,${themeEnd} 100%)`;
-    const qr = `<div class="qr-placeholder real-qr" style="width:${qrSize};height:${qrSize};padding:2mm"><img src="${data.qr}" alt="QR-Code zum Eventalbum" style="width:100%;height:100%;object-fit:contain"></div>`;
+    const qr = `<div class="qr-placeholder real-qr qr-${data.qrPosition}" style="width:${qrSize};height:${qrSize};padding:2mm"><img src="${data.qr}" alt="QR-Code zum Eventalbum" style="width:100%;height:100%;object-fit:contain"></div>`;
     const panel = (back = false) => `<section class="panel ${back ? 'back' : ''}" style="--art:${designBg};--accent:${data.accent}"><div class="wash"></div><div class="content"><div class="brand">FINAL<span>SNAP</span></div><p class="kicker">${safeText(back ? 'TEILT EURE MOMENTE' : data.occasionLabel)}</p><h1 style="font-family:${data.fontFamily}">${safeText(data.title)}</h1>${data.date ? `<p class="date">${safeText(data.date)}</p>` : ''}<p class="invite" style="font-family:${data.fontFamily}">${back ? 'Scannen, Fotos teilen und die Feier aus vielen Blickwinkeln erleben.' : 'Macht mit und ladet eure Fotos in unser gemeinsames Album.'}</p>${qr}<p class="qr-hint">Scannen und eigene Fotos teilen</p></div></section>`;
     const body = tent ? `<main class="sheet tent">${panel(true)}${panel(false)}<div class="fold"></div></main>` : `<main class="sheet single ${poster ? 'poster' : 'card'}">${panel(false)}</main>`;
     return `<!doctype html><html lang="de"><head><meta charset="utf-8"><title>${safeText(data.title)} · FinalSnap Druck</title><style>@page{size:${pageSize};margin:0}*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;font-family:Arial,sans-serif;color:#fff}.sheet{position:relative;width:100vw;height:100vh;overflow:hidden;background:#29252a}.tent{display:flex}.panel{position:relative;width:100%;height:100%;display:flex;align-items:center;justify-content:center;text-align:center;background:var(--art);background-position:center;background-size:cover;overflow:hidden}.tent .panel{width:50%;height:100%}.tent .panel.back{transform:rotate(180deg)}.fold{position:absolute;left:50%;top:0;height:100%;border-left:1px dashed #fff9;z-index:2}.wash{position:absolute;inset:0;background:linear-gradient(180deg,#17151952,#171519a6)}.content{position:relative;z-index:1;width:82%;max-width:460px;margin:auto;display:flex;align-items:center;flex-direction:column}.tent .content{width:78%}.brand{font-size:14px;letter-spacing:.22em;font-weight:800;margin-bottom:9%}.brand span{font-weight:400}.kicker{font-size:9px;letter-spacing:.24em;font-weight:700;margin:0 0 12px}.content h1{font-size:clamp(27px,5vw,64px);line-height:1.03;font-weight:500;letter-spacing:-.04em;max-width:100%;margin:0 0 10px;overflow-wrap:anywhere}.tent .content h1{font-size:clamp(20px,3vw,38px)}.date{font-size:10px;letter-spacing:.16em;text-transform:uppercase;margin:0 0 14px}.invite{font-style:italic;font-size:14px;line-height:1.4;max-width:340px;margin:0 0 18px}.tent .invite{font-size:11px}.qr-placeholder{background:#fff;color:#272329;display:flex;align-items:center;justify-content:center;flex-direction:column;border:3px solid #fff;border-radius:3px;box-shadow:0 3px 14px #0003}.qr-hint{font:8px Arial,sans-serif;margin:8px 0 0;opacity:.9}.card .content{width:80%}.card .content h1{font-size:28px}.poster .content h1{font-size:44px}@media screen{body{background:#e9e5de;padding:24px;min-height:100vh}.sheet{margin:auto;box-shadow:0 10px 40px #0004}.tent{width:min(100%,1100px);height:auto;aspect-ratio:297/210}.single{width:min(100%,650px);height:auto;aspect-ratio:${data.format === 'card' ? '105/148' : '210/297'}}.tent .content h1{font-size:clamp(22px,4vw,42px)}.single .content h1{font-size:clamp(25px,5vw,52px)}}@media print{.sheet{width:100vw;height:100vh}.fold{border-color:#fff7}}</style></head><body>${body}<script>window.addEventListener('load',()=>setTimeout(()=>window.print(),250));</script></body></html>`;
@@ -217,17 +240,19 @@
     const panels = data.format === 'tent' ? [[0,0,width/2,height,true],[width/2,0,width/2,height,false]] : [[0,0,width,height,false]];
     const drawPanel = (x,y,w,h,back) => {
       const gradient=ctx.createLinearGradient(x,y,x+w,y+h); gradient.addColorStop(0,data.accent); gradient.addColorStop(1,themes[data.theme]?.end||themes.afterglow.end); ctx.fillStyle=gradient; ctx.fillRect(x,y,w,h);
-      if(uploadedImage){ctx.save();ctx.globalAlpha=.43;ctx.drawImage(uploadedImage,x,y,w,h);ctx.restore();}
-      ctx.fillStyle='#15141680';ctx.fillRect(x,y,w,h);ctx.textAlign='center';ctx.fillStyle='#fff';const centerX=x+w/2;let top=y+h*.18;
+      if(uploadedImage){ctx.save();ctx.globalAlpha=data.customArtwork?1:.43;ctx.drawImage(uploadedImage,x,y,w,h);ctx.restore();}
+      if(!data.customArtwork){ctx.fillStyle='#15141680';ctx.fillRect(x,y,w,h);}ctx.textAlign='center';ctx.fillStyle='#fff';const centerX=x+w/2;let top=y+h*.18;
       if(back){ctx.save();ctx.translate(centerX,y+h/2);ctx.rotate(Math.PI);ctx.translate(-centerX,-(y+h/2));}
+      if(!data.customArtwork){
       ctx.font='700 22px Arial';ctx.fillText('FINALSNAP',centerX,top);top+=h*.12;
       ctx.font='700 13px Arial';ctx.letterSpacing='3px';ctx.fillText(back?'TEILT EURE MOMENTE':data.occasionLabel,centerX,top);top+=h*.095;ctx.letterSpacing='0px';
       ctx.font=`500 ${data.format==='tent'?38:54}px ${data.fontFamily}`;const title=data.title.length>25?`${data.title.slice(0,23)}…`:data.title;ctx.fillText(title,centerX,top,w*.84);top+=h*.07;
       if(data.date){ctx.font='14px Arial';ctx.fillText(data.date.toUpperCase(),centerX,top);top+=h*.07;}
       ctx.font=`italic 17px ${data.fontFamily}`;ctx.fillText(back?'Scannen, Fotos teilen und feiern':'Macht mit und ladet Fotos hoch',centerX,top,w*.82);top+=h*.1;
-      const qrSize=data.format==='poster'?240:data.format==='card'?330:250;ctx.fillStyle='#fff';ctx.fillRect(centerX-qrSize/2,top,qrSize,qrSize);
-      ctx.imageSmoothingEnabled=false;ctx.drawImage(uploadedQr,centerX-qrSize/2+4,top+4,qrSize-8,qrSize-8);ctx.imageSmoothingEnabled=true;
-      ctx.font='11px Arial';ctx.fillStyle='#fff';ctx.fillText('Scannen und eigene Fotos teilen',centerX,top+qrSize+25,w*.88);if(back)ctx.restore();
+      }
+      const qrSize=data.format==='poster'?240:data.format==='card'?330:250;const qrPoint=data.qrPosition==='lowerCenter'?[centerX,y+h*.72]:data.qrPosition==='lowerRight'?[x+w*.75,y+h*.72]:[centerX,data.customArtwork?y+h*.64:top+qrSize/2];const qrX=qrPoint[0]-qrSize/2,qrY=qrPoint[1]-qrSize/2;ctx.fillStyle='#fff';ctx.fillRect(qrX,qrY,qrSize,qrSize);
+      ctx.imageSmoothingEnabled=false;ctx.drawImage(uploadedQr,qrX+4,qrY+4,qrSize-8,qrSize-8);ctx.imageSmoothingEnabled=true;
+      if(!data.customArtwork){ctx.font='11px Arial';ctx.fillStyle='#fff';ctx.fillText('Scannen und eigene Fotos teilen',qrPoint[0],qrY+qrSize+25,w*.88);}if(back)ctx.restore();
     };
     try {
       uploadedQr=new Image();uploadedQr.src=data.qr;await uploadedQr.decode();
@@ -257,7 +282,7 @@
   form.addEventListener('submit', async event => {
     event.preventDefault();
     try {
-      await api(`${endpoint}/design`, 'PATCH', { design: { title:titleInput.value, occasion:occasionInput.value, theme:$('.template-card.selected')?.dataset.template||'afterglow', accent:colorInput.value, font:fontInput.value } });
+      await api(`${endpoint}/design`, 'PATCH', { design: { title:titleInput.value, occasion:occasionInput.value, theme:$('.template-card.selected')?.dataset.template||'afterglow', accent:colorInput.value, font:fontInput.value,customArtwork:customArtworkInput.checked } });
       status.textContent='Design für dieses Event gespeichert.';
     } catch(error) { status.textContent=error.message; }
   });
@@ -278,6 +303,7 @@
     dateInput.value=event.eventDate||'';
     colorInput.value=design.accent||themes.afterglow.accent;
     fontInput.value=design.font||'classic';
+    customArtworkInput.checked=!!design.customArtwork;
     selectTheme(design.theme||'afterglow');
     colorInput.value=design.accent||themes.afterglow.accent;
     updateColorLabel();
