@@ -21,6 +21,7 @@ const { createPaymentReceipt } = require('./payment-receipt');
 const { createUploadCapacity, GiB, MiB, MIN_UPLOAD_FREE_BYTES, uploadDiskWarningThreshold } = require('./upload-capacity');
 const { createEventUploadQueues } = require('./upload-queues');
 const { preparePhoto, originalKey } = require('./photo-processing');
+const { createCardAssistant, normalizeAnswers, LIMITS: CARD_TEXT_LIMITS } = require('./card-assistant');
 const scrypt = promisify(crypto.scrypt);
 const PLANS = { event:{label:'FinalSnap Fotoalbum',months:3,retentionDays:90,priceCents:4990}, '1m':{label:'1 Monat (alt)',months:1,priceCents:1900,legacy:true}, '3m':{label:'3 Monate (alt)',months:3,priceCents:2900,legacy:true}, '6m':{label:'6 Monate (alt)',months:6,priceCents:3900,legacy:true}, '12m':{label:'12 Monate (alt)',months:12,priceCents:5900,legacy:true} };
 const TERMS_VERSION = '2026-11-04-2';
@@ -81,6 +82,7 @@ const readable = e => e && ['paid','trial','pilot'].includes(e.status) && retent
 function createApp(options = {}) {
   const cfg = {...process.env, ...options};
   const mailer=options.mailer||require('./mailer').createMailer(cfg);
+  const cardAssistant=options.cardAssistant||createCardAssistant(cfg);
   const invoicePdfFetcher=options.invoicePdfFetcher||(async(url)=>{
     const response=await fetch(url,{signal:AbortSignal.timeout(15000)});
     if(!response.ok)throw new Error(`Stripe-PDF konnte nicht geladen werden (${response.status}).`);
@@ -140,6 +142,16 @@ function createApp(options = {}) {
     try { return JSON.parse(e?.design_json || '{}'); }
     catch { return {}; }
   };
+  // Eigene Kartentexte (vom Veranstalter oder vom KI-Assistenten vorgeschlagen)
+  const cardText = value => {
+    const out={};
+    if(!value||typeof value!=='object'||Array.isArray(value))return out;
+    for(const key of ['kicker','invite','backKicker','backInvite']){
+      const text=String(value[key]??'').replace(/[\u0000-\u001f\u007f]/g,' ').replace(/\s+/g,' ').trim().slice(0,CARD_TEXT_LIMITS[key]);
+      if(text)out[key]=text;
+    }
+    return out;
+  };
   const publicDesign = e => {
     const design=readDesign(e);
     return {
@@ -149,6 +161,8 @@ function createApp(options = {}) {
       accent:/^#[0-9a-f]{6}$/i.test(design.accent||'')?design.accent:'#e99a69',
       font:['classic','palatino','modern','verdana','relaxed','typewriter'].includes(design.font)?design.font:'classic',
       customArtwork:design.customArtwork===true,
+      qrPosition:['center','lowerCenter','lowerRight'].includes(design.qrPosition)?design.qrPosition:'center',
+      cardText:cardText(design.cardText),
       hasCover:typeof design.coverFilename==='string'&&/^[a-z0-9-]+\.jpg$/.test(design.coverFilename)
     };
   };
@@ -350,6 +364,7 @@ function createApp(options = {}) {
   const authLimit=rateLimit({windowMs:15*60*1000,limit:20,standardHeaders:'draft-8',legacyHeaders:false});
   const uploadLimit=rateLimit({windowMs:60*1000,limit:120,standardHeaders:'draft-8',legacyHeaders:false,keyGenerator:req=>`${ipKeyGenerator(req.ip)}:${req.guestTokenHash||req.user?.id||'guest'}`});
   const guestbookLimit=rateLimit({windowMs:15*60*1000,limit:5,standardHeaders:'draft-8',legacyHeaders:false});
+  const cardAssistantLimit=rateLimit({windowMs:60*60*1000,limit:20,standardHeaders:'draft-8',legacyHeaders:false,keyGenerator:req=>`card:${req.user?.id||ipKeyGenerator(req.ip)}`,message:{error:'Du hast den KI-Assistenten gerade sehr oft genutzt. Bitte versuche es in einer Stunde wieder.'}});
   const experienceReviewLimit=rateLimit({windowMs:6*60*60*1000,limit:3,standardHeaders:'draft-8',legacyHeaders:false});
   function loginRequired(req,res,next) { if(!req.user) return fail(res,401,'Bitte anmelden.'); if(deletingUsers.has(req.user.id)) return fail(res,409,'Kontolöschung läuft. Bitte kurz warten.'); next(); }
   async function passwordHash(password,salt=random()) {return `${salt}:${(await scrypt(password,salt,64)).toString('hex')}`;}
@@ -700,6 +715,17 @@ function createApp(options = {}) {
     if(!readable(req.event))return fail(res,402,'Für dieses Event ist noch kein Gästezugang verfügbar.');
     res.json({event:{id:req.event.id,title:req.event.title,eventDate:req.event.event_date},design:publicDesign(req.event)});
   });
+  // KI-Assistent für Tischkarten: nur aktiv mit AI_CARD_ASSISTANT=on und ANTHROPIC_API_KEY.
+  // Übertragen werden ausschließlich die Antworten aus dem Fragebogen (keine Fotos, keine E-Mail, kein Gästelink).
+  app.get('/api/event/:eventId/card-assistant',loginRequired,owner,(req,res)=>res.json({enabled:cardAssistant.enabled,provider:cardAssistant.enabled?'Anthropic (Claude)':null}));
+  app.post('/api/event/:eventId/card-assistant',loginRequired,owner,cardAssistantLimit,wrap(async(req,res)=>{
+    if(!readable(req.event))return fail(res,402,'Für dieses Event ist noch kein Gästezugang verfügbar.');
+    if(!cardAssistant.enabled)return fail(res,503,'Der KI-Assistent ist noch nicht eingeschaltet.');
+    const answers=normalizeAnswers(req.body?.answers);
+    if(!answers)return fail(res,400,'Bitte sag uns zuerst, wer feiert.');
+    try{res.json({success:true,suggestion:await cardAssistant.suggest(answers)});}
+    catch(error){return fail(res,error.status&&error.status<600?error.status:502,error.status?error.message:'Der KI-Assistent ist gerade nicht erreichbar.');}
+  }));
   app.patch('/api/event/:eventId/design',loginRequired,owner,(req,res)=>{
     if(!readable(req.event))return fail(res,402,'Für dieses Event ist noch kein Gästezugang verfügbar.');
     const value=req.body?.design;
@@ -710,7 +736,8 @@ function createApp(options = {}) {
     const accent=String(value.accent||'');
     const font=String(value.font||'');
     if(!title||title.length>80||!['wedding','birthday','party','summer','company','jubilee','graduation','other'].includes(occasion)||!['afterglow','midnight','garden'].includes(theme)||!/^#[0-9a-f]{6}$/i.test(accent)||!['classic','palatino','modern','verdana','relaxed','typewriter'].includes(font))return fail(res,400,'Bitte prüfe Titel, Anlass, Vorlage, Farbe und Schrift.');
-    const design={...readDesign(req.event),title,occasion,theme,accent,font,customArtwork:value.customArtwork===true};
+    const qrPosition=['center','lowerCenter','lowerRight'].includes(value.qrPosition)?value.qrPosition:'center';
+    const design={...readDesign(req.event),title,occasion,theme,accent,font,customArtwork:value.customArtwork===true,qrPosition,cardText:cardText(value.cardText)};
     db.prepare('UPDATE events SET design_json=?,design_saved=1 WHERE id=?').run(JSON.stringify(design),req.event.id);
     res.json({success:true,design:publicDesign(lookup(req.event.id))});
   });
@@ -1198,7 +1225,7 @@ function createApp(options = {}) {
     res.sendFile(path.join(pub,'video-grussbox.html'));
   });
   // Only intended public assets; source code and generic HTML routes cannot bypass guards.
-  for(const file of ['style.css','fs-design.css','guest-experience.js','event-journey.js','event-wizard.js','gallery-experience.js','design-editor.css','design-editor.js','upload.js','slideshow.js','guest-access.js','account.js','verify-email.js','password-recovery.js','games.js','guestbook.js','video-grussbox.js','payments-admin.js','backups-admin.js','operations-admin.js','landing.js','reviews.js','reviews-admin.js','finalsnap-logo.webp','success.js','gallery-init.js','admin.js','johanna-bastian.png','photographer.webp','event-wedding.webp','event-birthday.jpg','event-summer.jpg','event-company.jpg']) app.get(`/${file}`,(req,res)=>res.sendFile(path.join(pub,file)));
+  for(const file of ['style.css','fs-design.css','guest-experience.js','event-journey.js','event-wizard.js','gallery-experience.js','design-editor.css','design-editor.js','card-studio.js','upload.js','slideshow.js','guest-access.js','account.js','verify-email.js','password-recovery.js','games.js','guestbook.js','video-grussbox.js','payments-admin.js','backups-admin.js','operations-admin.js','landing.js','reviews.js','reviews-admin.js','finalsnap-logo.webp','success.js','gallery-init.js','admin.js','johanna-bastian.png','photographer.webp','event-wedding.webp','event-birthday.jpg','event-summer.jpg','event-company.jpg']) app.get(`/${file}`,(req,res)=>res.sendFile(path.join(pub,file)));
   for(const file of ['qr-einladung.webp','fotos-sammeln.webp','live-diashow.webp','hochzeit-party.webp','geburtstag.webp','party.webp','why-finalsnap-poster.jpg']) app.get(`/preview-assets/${file}`,(req,res)=>res.sendFile(path.join(pub,'preview-assets',file)));
   for(const file of ['finalsnap-mascot-landscape-poster.jpg','finalsnap-mascot-landscape.mp4']) app.get(`/animations/${file}`,(req,res)=>res.sendFile(path.join(pub,'animations',file)));
   // Liveness stays cheap for the host's restart check. Readiness checks critical dependencies.

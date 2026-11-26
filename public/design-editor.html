@@ -9,7 +9,7 @@
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="#" aria-label="FinalSnap Startseite"><span class="brand-mark">ϟ</span><span>Final<span class="brand-light">Snap</span></span></a>
+    <a class="brand" href="/dashboard" aria-label="Zur Übersicht"><img src="/finalsnap-logo.webp" alt="FinalSnap" width="68" height="40"></a>
     <div class="topbar-note"><span class="status-dot"></span> Design-Editor <span class="preview-tag">Dein Event</span></div>
     <a class="text-button" href="/dashboard">Zur Veranstaltungsübersicht</a>
   </header>
@@ -24,13 +24,67 @@
 
       <nav class="progress" aria-label="Ablauf in drei Schritten"><a class="progress-step active" href="#step-design"><b>1</b> Event & Design</a><i></i><a class="progress-step" href="#step-qr"><b>2</b> QR-Code</a><i></i><a class="progress-step" href="#step-download"><b>3</b> Download</a></nav>
 
-      <section class="guided-card" aria-labelledby="guided-title">
-        <span class="eyebrow">SCHNELL ZUM ENTWURF</span><h2 id="guided-title">Wie soll eure Karte wirken?</h2>
-        <div class="guided-options"><fieldset><legend>Stil</legend><label><input type="radio" name="guided-style" value="elegant" checked> Elegant</label><label><input type="radio" name="guided-style" value="playful"> Verspielt</label><label><input type="radio" name="guided-style" value="modern"> Modern</label><label><input type="radio" name="guided-style" value="romantic"> Romantisch</label></fieldset>
-          <label class="palette-label" for="guided-palette">Farbwelt<select id="guided-palette"><option value="sage">Salbei & Creme</option><option value="gold">Gold & Nachtblau</option><option value="rose">Rosé & Weiß</option><option value="neon">FinalSnap Neon</option></select></label></div>
-        <label class="field-label" for="guided-idea">Eure Idee <span>optional</span></label><textarea id="guided-idea" rows="2" placeholder="Zum Beispiel: locker, mit Blumen und unseren Initialen"></textarea>
-        <label class="inspiration-upload" for="guided-inspiration">＋ Inspirationsbild auswählen <small>Optional · PNG, JPG oder WEBP bis 8 MB · bleibt auf diesem Gerät</small></label><input id="guided-inspiration" class="visually-hidden" type="file" accept="image/png,image/jpeg,image/webp"><p id="guided-inspiration-status" class="guided-status" aria-live="polite">Das Bild wird nicht an FinalSnap übertragen.</p><button id="use-guided-inspiration" class="guided-secondary use-inspiration-button" type="button" hidden>Dieses Bild als Titelmotiv in FinalSnap speichern</button>
-        <div class="guided-actions"><button id="generate-guided-design" type="button" class="guided-primary">Karte gestalten</button><button id="another-guided-variant" type="button" class="guided-secondary">Andere Variante</button><button id="customize-guided-design" type="button" class="guided-text-button">Selbst anpassen</button></div>
+      <section class="card-assistant" id="card-assistant" aria-labelledby="cs-title">
+        <div class="cs-head">
+          <span class="cs-avatar" aria-hidden="true">✦</span>
+          <div><span class="eyebrow" id="cs-badge">EUER KARTEN-ASSISTENT</span><h2 id="cs-title">Ich gestalte eure Tischkarte – in fünf kurzen Fragen.</h2></div>
+        </div>
+        <ol class="cs-dots" aria-hidden="true"><li></li><li></li><li></li><li></li><li></li></ol>
+
+        <div class="cs-step" data-step="0">
+          <p class="cs-bubble">Wer feiert? So steht es groß auf der Karte.</p>
+          <input id="cs-hosts" maxlength="80" autocomplete="off" placeholder="z. B. Mara & Jonas" aria-label="Wer feiert?">
+        </div>
+        <div class="cs-step" data-step="1" hidden>
+          <p class="cs-bubble">Welche Stimmung soll die Karte haben?</p>
+          <div class="cs-chips" role="radiogroup" aria-label="Stimmung">
+            <label><input type="radio" name="cs-mood" value="elegant" checked> Elegant</label>
+            <label><input type="radio" name="cs-mood" value="romantic"> Romantisch</label>
+            <label><input type="radio" name="cs-mood" value="playful"> Verspielt</label>
+            <label><input type="radio" name="cs-mood" value="modern"> Modern</label>
+            <label><input type="radio" name="cs-mood" value="natural"> Natürlich</label>
+          </div>
+        </div>
+        <div class="cs-step" data-step="2" hidden>
+          <p class="cs-bubble">Welche Farben passen zu eurer Feier?</p>
+          <div class="cs-chips" role="radiogroup" aria-label="Farbwelt">
+            <label><input type="radio" name="cs-palette" value="sage" checked><i style="background:#a8bf83"></i> Salbei &amp; Creme</label>
+            <label><input type="radio" name="cs-palette" value="gold"><i style="background:#d3ad63"></i> Gold &amp; Nachtblau</label>
+            <label><input type="radio" name="cs-palette" value="rose"><i style="background:#e8a9b8"></i> Rosé &amp; Weiß</label>
+            <label><input type="radio" name="cs-palette" value="terracotta"><i style="background:#d9825b"></i> Terrakotta</label>
+            <label><input type="radio" name="cs-palette" value="neon"><i style="background:#49d5e8"></i> FinalSnap Türkis</label>
+          </div>
+          <input id="cs-colors" class="cs-ai-only" maxlength="80" autocomplete="off" placeholder="Oder in eigenen Worten, z. B. „Olivgrün wie unsere Deko“" aria-label="Eigener Farbwunsch" hidden>
+        </div>
+        <div class="cs-step" data-step="3" hidden>
+          <p class="cs-bubble">Wie sprecht ihr eure Gäste an?</p>
+          <div class="cs-chips" role="radiogroup" aria-label="Anrede">
+            <label><input type="radio" name="cs-address" value="ihr" checked> „Teilt eure Fotos“</label>
+            <label><input type="radio" name="cs-address" value="du"> „Teile deine Fotos“</label>
+          </div>
+        </div>
+        <div class="cs-step" data-step="4" hidden>
+          <p class="cs-bubble" id="cs-wish-question">Noch ein besonderer Wunsch? <span>optional</span></p>
+          <textarea id="cs-wish" rows="2" maxlength="300" placeholder="z. B. locker und herzlich, mit einem Augenzwinkern"></textarea>
+          <p class="cs-privacy" id="cs-privacy" hidden>Für den Entwurf schicken wir nur diese Antworten an unseren KI-Dienst (Claude von Anthropic), keine Fotos und keine Kontaktdaten. Bitte trag keine Gästenamen oder sensiblen Angaben ein. <a href="/datenschutz#ki-assistent" target="_blank" rel="noopener">Mehr dazu</a></p>
+        </div>
+
+        <div class="cs-result" id="cs-result" hidden>
+          <p class="cs-bubble cs-bubble--answer" id="cs-note">Euer Entwurf ist fertig. Der QR-Code ist schon eingesetzt.</p>
+          <img id="cs-preview" class="cs-preview" alt="Vorschau eurer Tischkarte mit QR-Code">
+          <div class="cs-actions">
+            <a class="cs-primary" href="#step-download">Gefällt mir – zum Download</a>
+            <button type="button" class="cs-secondary" id="cs-again">Neuer Vorschlag</button>
+            <button type="button" class="cs-text" id="cs-edit">Texte selbst anpassen</button>
+            <button type="button" class="cs-text" id="cs-restart">Antworten ändern</button>
+          </div>
+        </div>
+
+        <div class="cs-nav" id="cs-nav">
+          <button type="button" class="cs-text" id="cs-back" hidden>← Zurück</button>
+          <button type="button" class="cs-primary" id="cs-next">Weiter</button>
+        </div>
+        <p class="cs-status" id="cs-status" role="status" aria-live="polite"></p>
       </section>
 
       <form id="designForm" class="wizard-step" aria-label="Schritt 1: Event und Design">
@@ -64,8 +118,19 @@
           <label class="custom-art-toggle"><input id="customArtwork" type="checkbox" disabled> Das Bild ist eine fertige Karte. Nur den QR-Code darüberlegen.</label>
           <p class="small-note">Der QR-Code bleibt mindestens 3 × 3 cm groß und wird separat über die Positionsauswahl platziert.</p>
         </section>
+        <section class="form-section" id="card-texts">
+          <div class="section-heading"><span class="section-number">04</span><div><h2>Texte auf der Karte</h2><p>Vom Assistenten vorgeschlagen, von euch frei änderbar.</p></div></div>
+          <label class="field-label" for="cardKicker">Kleine Zeile über dem Titel</label>
+          <input id="cardKicker" maxlength="40" autocomplete="off" placeholder="UNSERE HOCHZEIT">
+          <label class="field-label cs-gap" for="cardInvite">Einladung an die Gäste</label>
+          <input id="cardInvite" maxlength="120" autocomplete="off" placeholder="Macht mit und ladet eure Fotos in unser gemeinsames Album.">
+          <label class="field-label cs-gap" for="cardBackKicker">Rückseite des Tischaufstellers: kleine Zeile</label>
+          <input id="cardBackKicker" maxlength="40" autocomplete="off" placeholder="TEILT EURE MOMENTE">
+          <label class="field-label cs-gap" for="cardBackInvite">Rückseite: Einladung</label>
+          <input id="cardBackInvite" maxlength="120" autocomplete="off" placeholder="Scannen, Fotos teilen und feiern.">
+        </section>
         <section class="ai-brief-section">
-          <div><span class="ai-label">OPTIONAL · KI-WERKZEUGE</span><h2>Eine Idee für dein Motiv</h2><p>Erstelle mit Anlass und Stil einen Brief für Canva oder dein KI-Bildwerkzeug. Das fertige Bild kannst du oben hochladen.</p></div>
+          <div><span class="ai-label">OPTIONAL · EIGENES MOTIV MIT CANVA &amp; CO.</span><h2>Ein Hintergrundbild selbst erstellen</h2><p>Erstelle mit Anlass und Stil einen Brief für Canva oder dein KI-Bildwerkzeug. Das fertige Bild kannst du oben hochladen.</p></div>
           <button id="copyAiBrief" type="button" class="ai-brief-button"><span>✦</span> Prompt für ChatGPT/Canva kopieren</button>
           <div class="tool-links" aria-label="Externe Designwerkzeuge"><span>Tools mit kostenlosem Einstieg · Nutzungslimits gelten:</span><a href="https://chatgpt.com/" target="_blank" rel="noopener noreferrer">ChatGPT</a><a href="https://express.adobe.com/" target="_blank" rel="noopener noreferrer">Adobe Express</a><a href="https://www.canva.com/" target="_blank" rel="noopener noreferrer">Canva</a></div>
           <p id="aiBriefStatus" class="ai-brief-status" aria-live="polite">Kein KI-API-Schlüssel nötig. Das Motiv erstellst du in deinem gewählten Tool.</p>
@@ -90,6 +155,8 @@
         </div>
         <label class="qr-placement-label" for="qrPlacement">QR-Code auf eurem Motiv platzieren<select id="qrPlacement"><option value="center">Mittig unter dem Einladungstext</option><option value="lowerCenter">Unten mittig</option><option value="lowerRight">Unten rechts</option></select></label>
         <div class="download-actions"><button id="pdfButton" type="button" class="download-button primary-download"><span class="download-symbol">↓</span><span><strong>PDF herunterladen</strong><small>Fertige Druckdatei mit 3 mm Beschnitt</small></span></button><button id="pngButton" type="button" class="download-button"><span class="download-symbol">▧</span><span><strong>PNG herunterladen</strong><small>Bilddatei zum digitalen Teilen</small></span></button></div>
+        <figure class="cs-print-preview"><img id="printPreview" alt="Vorschau der Druckdatei mit eurem QR-Code"><figcaption>Vorschau · so wird gedruckt</figcaption></figure>
+        <div class="qr-only" aria-label="Nur den QR-Code herunterladen"><strong>Nur den QR-Code?</strong><span>Für eigene Karten oder die Druckerei:</span><a id="qrOnlyPng" download>PNG</a><a id="qrOnlySvg" download>SVG</a><a id="qrOnlyPdf" download>PDF · 10 cm</a></div>
         <p class="print-note">Druckt den QR dunkel auf hellem Untergrund. Für einen zuverlässigen Scan sollte er mindestens 3 × 3 cm groß sein. Druckt die PDF in Originalgröße; Tischaufsteller an der Mittellinie falten.</p>
         <p class="download-status" id="downloadStatus" role="status" aria-live="polite">Der QR-Code wird direkt aus deinem Event geladen.</p>
       </section>
@@ -102,11 +169,11 @@
           <div class="phone-frame"><div class="phone-island"></div><div class="phone-screen">
             <div class="phone-status"><span>9:41</span><span>● ● ●</span></div>
             <div class="guest-gallery">
-              <div class="gallery-brand"><span class="mini-mark">F</span> FINALSNAP</div>
+              <div class="gallery-brand"><img src="/finalsnap-logo.webp" alt="FinalSnap" width="34" height="20"></div>
               <div class="cover-photo" id="coverPhoto"><div class="cover-shade"></div><span class="cover-kicker" id="previewOccasion">UNSERE HOCHZEIT</span><h3 id="previewTitle">Mara & Jonas feiern</h3><p id="previewDate">22. AUGUST 2027</p><span class="cover-sparkle">✦</span></div>
               <div class="gallery-caption"><div><strong>Momente, die bleiben.</strong><small>Von euch allen zusammen.</small></div><span class="guest-count">✧</span></div>
               <div class="photo-grid">
-                <figure><img src="/event-wedding.jpg" alt="Beispielbild: Hochzeit"/><figcaption>Hochzeit</figcaption></figure>
+                <figure><img src="/event-wedding.webp" alt="Beispielbild: Hochzeit"/><figcaption>Hochzeit</figcaption></figure>
                 <figure><img src="/event-birthday.jpg" alt="Beispielbild: Geburtstag"/><figcaption>Geburtstag</figcaption></figure>
                 <figure><img src="/event-summer.jpg" alt="Beispielbild: Sommerfest"/><figcaption>Sommerfest</figcaption></figure>
                 <figure><img src="/event-company.jpg" alt="Beispielbild: Firmenfeier"/><figcaption>Firmenfeier</figcaption></figure>
@@ -128,6 +195,7 @@
     </aside>
   </main>
   <script src="/design-editor.js"></script>
+  <script src="/card-studio.js"></script>
 <footer class="legal-footer"><a href="/impressum">Impressum</a> · <a href="/datenschutz">Datenschutz</a></footer>
 </body>
 </html>

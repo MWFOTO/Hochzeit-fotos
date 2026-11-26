@@ -78,3 +78,60 @@ body{background:var(--bg);color:var(--ink);font-size:16px;line-height:1.6}
 .custom-art-toggle input{flex:none;width:18px!important;height:18px;min-height:0!important;margin:2px 0 0;accent-color:var(--accent)}
 .small-note{font-size:11px;color:#aeb1b8;margin:0 0 6px 26px}
 .use-inspiration-button{margin:0 0 8px;padding:8px 10px;border-radius:8px;font:inherit;font-size:12px;cursor:pointer}
+
+/* ---------- Karten-Assistent (Claude, 26.11.2026) ---------- */
+.brand img{display:block;height:40px;width:auto}
+.card-assistant{margin:0 0 26px;padding:22px;border:1px solid #ffffff25;border-radius:18px;background:radial-gradient(120% 90% at 0 0,color-mix(in srgb,var(--accent) 14%,transparent),transparent 60%),linear-gradient(145deg,#30333a,#25282e);box-shadow:0 14px 36px #0003;position:relative}
+.cs-head{display:flex;gap:14px;align-items:flex-start;margin-bottom:14px}
+.cs-avatar{flex:none;display:grid;place-items:center;width:44px;height:44px;border-radius:14px;background:var(--accent);color:#17191d;font-size:22px;box-shadow:0 6px 18px color-mix(in srgb,var(--accent) 35%,transparent)}
+.card-assistant.is-busy .cs-avatar{animation:cs-pulse 1.1s ease-in-out infinite}
+@keyframes cs-pulse{50%{transform:scale(1.08) rotate(8deg)}}
+@media (prefers-reduced-motion:reduce){.card-assistant.is-busy .cs-avatar{animation:none}}
+.cs-head h2{font-size:20px;line-height:1.25;margin:5px 0 0;letter-spacing:-.3px}
+.cs-dots{display:flex;gap:6px;list-style:none;padding:0;margin:0 0 16px}
+.cs-dots li{height:5px;flex:1;max-width:46px;border-radius:5px;background:#ffffff1f;transition:background .2s}
+.cs-dots li.is-done,.cs-dots li.is-current{background:var(--accent)}
+.cs-dots li.is-current{opacity:.65}
+.cs-step{animation:cs-in .25s ease}
+@keyframes cs-in{from{opacity:0;transform:translateY(6px)}}
+.cs-bubble{display:inline-block;margin:0 0 12px;padding:11px 15px;border-radius:16px 16px 16px 4px;background:#ffffff12;color:#f3f4f6;font-size:15px;line-height:1.4}
+.cs-bubble span{color:#a9acb3;font-size:12px;margin-left:4px}
+.cs-bubble--answer{background:color-mix(in srgb,var(--accent) 22%,#2b2e34);outline:none}
+.card-assistant input:not([type=radio]),.card-assistant textarea{display:block;width:100%;padding:12px 14px;border:1px solid #ffffff30;border-radius:11px;background:#1f2227;color:#f3f4f6;font:inherit;font-size:15px;outline:none}
+.card-assistant input:not([type=radio]):focus,.card-assistant textarea:focus{border-color:var(--accent)}
+.card-assistant textarea{resize:vertical}
+.card-assistant input::placeholder,.card-assistant textarea::placeholder{color:#8f939b}
+.cs-chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+.cs-chips label{position:relative;display:inline-flex;align-items:center;gap:7px;cursor:pointer;min-height:42px;padding:8px 14px;border:1px solid #ffffff2a;border-radius:22px;color:#e1e3e7;font-size:14px;transition:border-color .15s,background .15s}
+.cs-chips label:hover{border-color:#ffffff60}
+.cs-chips input{position:absolute;opacity:0;pointer-events:none}
+.cs-chips label:has(input:checked){border-color:var(--accent);background:var(--accent);color:#17191d;font-weight:700}
+.cs-chips label:has(input:focus-visible){outline:2px solid #fff;outline-offset:2px}
+.cs-chips i{width:14px;height:14px;border-radius:50%;box-shadow:0 0 0 2px #ffffff40}
+.cs-privacy{margin:10px 0 0;font-size:12px;line-height:1.5;color:#b5b8bf}
+.cs-privacy a{color:var(--accent)}
+.cs-nav,.cs-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:14px}
+.cs-nav{justify-content:space-between}
+.cs-primary,.cs-secondary,.cs-text{min-height:44px;padding:10px 16px;border-radius:11px;font:inherit;font-size:14px;font-weight:700;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
+.cs-primary{border:1px solid var(--accent);background:var(--accent);color:#17191d;margin-left:auto}
+.cs-actions .cs-primary{margin-left:0}
+.cs-primary:disabled{opacity:.6;cursor:progress}
+.cs-secondary{border:1px solid #ffffff30;background:#ffffff0b;color:#e7e8eb}
+.cs-text{border:0;background:transparent;color:#cfd2d8;padding-left:6px;padding-right:6px}
+.cs-text:hover,.cs-secondary:hover{color:#fff}
+.cs-status{min-height:16px;margin:8px 0 0;font-size:12px;color:#aeb1b8}
+.cs-preview{display:block;width:100%;margin:4px 0 2px;border-radius:10px;box-shadow:0 10px 30px #0006;background:#111}
+.cs-gap{margin-top:12px}
+#card-texts input{font-size:13px}
+.cs-print-preview{margin:14px 0 0}
+.cs-print-preview img{display:block;width:100%;border-radius:8px;box-shadow:0 8px 24px #0005;background:#111;min-height:60px}
+.cs-print-preview img:not([src]){display:none}
+.cs-print-preview figcaption{font-size:11px;color:#9a9da4;margin-top:6px;text-align:center}
+.qr-only{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin-top:14px;padding:12px 14px;border:1px solid #ffffff1c;border-radius:10px;background:#ffffff07;font-size:12px;color:#b9bcc3}
+.qr-only strong{color:#eceef1}
+.qr-only a{padding:6px 11px;border:1px solid #ffffff30;border-radius:8px;color:#eef0f3;text-decoration:none;font-weight:700}
+.qr-only a:hover{border-color:var(--accent);color:#fff}
+@media(max-width:800px){.card-assistant{padding:18px}.cs-head h2{font-size:18px}.cs-actions>*{flex:1 1 auto}}
+.gallery-brand img{display:block;height:20px;width:auto}
+.card-assistant [hidden],.qr-only[hidden]{display:none!important}
+@media(max-width:600px){.topbar-note{display:none}.topbar{gap:12px}.text-button{font-size:13px;text-align:right}}

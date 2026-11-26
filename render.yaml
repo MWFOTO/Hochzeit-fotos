@@ -56,6 +56,10 @@ services:
         sync: false
       - key: BREVO_API_KEY
         sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: AI_CARD_ASSISTANT
+        value: "off"
       - key: BREVO_SENDER_EMAIL
         value: info@finalsnap.de
       - key: PAYMENT_ADMIN_EMAILS
