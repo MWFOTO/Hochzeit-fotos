@@ -142,8 +142,9 @@
         }
         if(event.checkoutStarted)chooser.append(element('p','Die begonnene Testzahlung ist an das einmalige FinalSnap-Fotoalbum gebunden.'));
       }
+      let summarySection=null;
       if(event.guestUrl) {
-        const summarySection=element('div');summarySection.className='event-section event-overview-panel';summarySection.append(element('h3','Dein Album auf einen Blick'));
+        summarySection=element('div');summarySection.className='event-section event-overview-panel';summarySection.append(element('h3','Dein Album auf einen Blick'));
         const summaryCopy=element('p',`${event.photoCount} ${event.photoCount===1?'Foto':'Fotos'} im Album · ${event.upload_successes} Uploads erfolgreich. Hier kannst du dein Album gestalten, den QR-Code teilen und die Freigabe verwalten.`);summarySection.append(summaryCopy);
         const summaryActions=element('div');summaryActions.className='actions';summarySection.append(summaryActions);
         link(summaryActions,'Design-Editor öffnen',`/event/${encodeURIComponent(event.id)}/design`);
@@ -225,7 +226,7 @@
       button(danger,'Event und Fotos endgültig löschen',async()=>{if(confirm('Event und alle Fotos endgültig löschen?')){await api(`/api/event/${event.id}`,'DELETE');document.getElementById('photo-manager').hidden=true;await load();}}).className='danger';
       if(chooser){chooser.classList.add('booking-panel');card.append(chooser);}
       section.append(card);
-      if(activeEvent){card.hidden=event.id!==activeEvent;open.hidden=true;if(event.id===activeEvent){tabs.hidden=false;if(event.guestUrl){summarySection.hidden=false;photoManager.hidden=true;}else photoManager.hidden=true;}}else{tabs.hidden=true;panels.forEach(panel=>panel.hidden=true);danger.hidden=true;}
+      if(activeEvent){card.hidden=event.id!==activeEvent;open.hidden=true;if(event.id===activeEvent){tabs.hidden=false;if(event.guestUrl&&summarySection){summarySection.hidden=false;photoManager.hidden=true;}else photoManager.hidden=true;}}else{tabs.hidden=true;panels.forEach(panel=>panel.hidden=true);danger.hidden=true;}
 
     }
   }
