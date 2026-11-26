@@ -79,7 +79,7 @@
     info = data;
     var design = data.design || {};
     var title = design.title || data.title;
-    if (title) document.title = title + ' · Fotos teilen';
+    if (title) document.title = title + (document.body.classList.contains('fs-gallery-page') ? ' · Fotoalbum' : ' · Fotos teilen');
 
     var eyebrow = $('fs-eyebrow');
     if (eyebrow) {
