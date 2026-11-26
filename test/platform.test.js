@@ -83,8 +83,9 @@ test('Event preparation checklist flags are persisted when design is saved and Q
   const account=await register('event-checklist@example.com');
   assert.equal((await request('/api/events',{method:'POST',user:account,body:{eventId:'checklist-event',title:'Mara & Jonas',eventDate,occasion:'wedding',theme:'garden',accent:'#aabbcc'}})).status,201);
   let event=(await request('/api/events',{user:account})).data.events[0];assert.equal(event.design_saved,0);assert.equal(event.qr_downloaded,0);
-  assert.equal((await request('/api/event/checklist-event/design',{method:'PATCH',user:account,body:{design:{title:'Mara & Jonas',occasion:'wedding',theme:'garden',accent:'#aabbcc',font:'classic'}}})).status,200);
-  event=(await request('/api/events',{user:account})).data.events[0];assert.equal(event.design_saved,1);
+  assert.equal((await request('/api/event/checklist-event/design',{method:'PATCH',user:account,body:{design:{title:'Mara & Jonas',occasion:'wedding',theme:'garden',accent:'#aabbcc',font:'classic',customArtwork:true}}})).status,200);
+  event=(await request('/api/events',{user:account})).data.events[0];assert.equal(event.design_saved,1);const design=(await request('/api/event/checklist-event/design',{user:account})).data.design;assert.equal(design.customArtwork,true);
+  const editor=Buffer.from((await request('/event/checklist-event/design',{user:account})).data).toString();assert.match(editor,/Karte gestalten/);assert.match(editor,/Salbei & Creme/);assert.match(editor,/Das Bild ist eine fertige Karte/);assert.match(editor,/qrPlacement/);const editorScript=Buffer.from((await request('/design-editor.js')).data).toString();assert.match(editorScript,/4 × 4 cm/);
   const qr=await request('/api/event/checklist-event/qr',{user:account});assert.equal(qr.status,200);assert.match(qr.res.headers.get('content-type'),/image\/png/);
   event=(await request('/api/events',{user:account})).data.events[0];assert.equal(event.qr_downloaded,1);
 });

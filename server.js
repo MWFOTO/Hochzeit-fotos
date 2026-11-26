@@ -148,6 +148,7 @@ function createApp(options = {}) {
       theme:['afterglow','midnight','garden'].includes(design.theme)?design.theme:'afterglow',
       accent:/^#[0-9a-f]{6}$/i.test(design.accent||'')?design.accent:'#e99a69',
       font:['classic','palatino','modern','verdana','relaxed','typewriter'].includes(design.font)?design.font:'classic',
+      customArtwork:design.customArtwork===true,
       hasCover:typeof design.coverFilename==='string'&&/^[a-z0-9-]+\.jpg$/.test(design.coverFilename)
     };
   };
@@ -708,7 +709,7 @@ function createApp(options = {}) {
     const accent=String(value.accent||'');
     const font=String(value.font||'');
     if(!title||title.length>80||!['wedding','birthday','party','summer','company','jubilee','graduation','other'].includes(occasion)||!['afterglow','midnight','garden'].includes(theme)||!/^#[0-9a-f]{6}$/i.test(accent)||!['classic','palatino','modern','verdana','relaxed','typewriter'].includes(font))return fail(res,400,'Bitte prüfe Titel, Anlass, Vorlage, Farbe und Schrift.');
-    const design={...readDesign(req.event),title,occasion,theme,accent,font};
+    const design={...readDesign(req.event),title,occasion,theme,accent,font,customArtwork:value.customArtwork===true};
     db.prepare('UPDATE events SET design_json=?,design_saved=1 WHERE id=?').run(JSON.stringify(design),req.event.id);
     res.json({success:true,design:publicDesign(lookup(req.event.id))});
   });
