@@ -55,3 +55,25 @@
 .partner-admin-card{align-items:start}
 .partner-admin-card .partner-logo{width:140px}
 .partner-admin-card h2{margin:6px 0 4px}
+.partner-fieldset{border:1px solid var(--line);border-radius:16px;padding:16px 18px 18px;margin:0}
+.partner-fieldset legend{font-weight:750;padding:0 8px;display:flex;gap:10px;align-items:center}
+.partner-fieldset p{margin:2px 0 12px}
+.partner-fieldset__grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.partner-chip.is-private{background:#ffffff14;color:var(--color-muted)}
+.partner-contact{gap:8px}
+.partner-contact .button{min-height:40px;padding:8px 14px;font-size:.9rem}
+.partner-done h2{margin:0 0 8px}
+.partner-done ol{margin:8px 0 0;padding-left:22px;color:var(--color-muted)}
+.partner-done li{margin:6px 0}
+@media(max-width:760px){.partner-fieldset__grid{grid-template-columns:1fr}}
+.partner-premium-date{display:flex;align-items:center;gap:8px;font-size:.85rem;font-weight:600}
+.partner-premium-date input{margin:0;width:auto;padding:8px 10px}
+.partner-settlement dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:10px 0;font-size:.95rem}
+.partner-settlement dt{color:var(--color-muted)}
+.partner-settlement dd{margin:0}
+.partner-settlement textarea{min-height:70px}
+.partner-payouts{border-top:1px solid var(--line);margin-top:16px;padding-top:12px}
+.partner-payouts h3{font-size:1rem;margin:0 0 8px}
+.partner-payout-line{display:flex;flex-wrap:wrap;gap:12px;align-items:center;padding:6px 0}
+.partner-payout-line .button,.partner-payout-line button{min-height:38px;padding:6px 14px;font-size:.88rem}
+.partner-settlement button:disabled{opacity:.45;cursor:not-allowed;box-shadow:none}

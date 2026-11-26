@@ -36,12 +36,18 @@ test('partner signup, approval, regional listing and referral discount',async()=
 
     const logo=await sharp({create:{width:900,height:600,channels:3,background:'#49d5e8'}}).png().toBuffer();
     const signup=fields=>{const form=new FormData();for(const [k,v] of Object.entries(fields))form.set(k,v);return form;};
-    const valid={company:'Studio Müller',category:'photographer',contactName:'Anna Müller',email:'anna@example.test',postcode:'33330',city:'Gütersloh',regions:'32, 59',website:'studio-mueller.example',description:'Hochzeitsfotografie in OWL.',consent:'true'};
+    const valid={company:'Studio Müller',category:'photographer',contactName:'Anna Müller',email:'anna@example.test',postcode:'33330',city:'Gütersloh',regions:'32, 59',website:'studio-mueller.example',description:'Hochzeitsfotografie in OWL.',publicEmail:'Anfrage@Studio-Mueller.example',publicPhone:'0521 123456',instagram:'https://www.instagram.com/studio.mueller/',consent:'true'};
     assert.equal((await call('/api/partners/signup',{method:'POST',form:signup({...valid,consent:'false'})})).status,400);
     assert.equal((await call('/api/partners/signup',{method:'POST',form:signup({...valid,postcode:'333'})})).status,400);
+    assert.equal((await call('/api/partners/signup',{method:'POST',form:signup({...valid,website:'',publicEmail:'',publicPhone:'',instagram:''})})).status,400);
+    assert.equal((await call('/api/partners/signup',{method:'POST',form:signup({...valid,instagram:'kein name mit leerzeichen'})})).status,400);
     const withLogo=signup(valid);withLogo.set('logo',new Blob([logo],{type:'image/png'}),'logo.png');
     const created=await call('/api/partners/signup',{method:'POST',form:withLogo});
     assert.equal(created.status,201);
+    // Logged-in visitors (e.g. the owner entering a partner after a phone call) can submit without a CSRF header.
+    const loggedIn=await fetch(base+'/api/partners/signup',{method:'POST',headers:{Cookie:`event_session=${users.admin.token}`,Origin:'http://localhost:3000'},body:signup({...valid,company:'Telefon Partner'})});
+    assert.equal(loggedIn.status,201);
+    db.prepare("DELETE FROM partners WHERE company='Telefon Partner'").run();assert.equal(created.data.steps.length,3);
     assert.ok(mails.some(m=>m.to==='admin@example.test'&&/Studio Müller/.test(m.subject)));
     assert.equal((await call('/api/partners/signup',{method:'POST',form:signup({...valid,company:'DJ Süd',category:'music',postcode:'80331',city:'München',regions:''})})).status,201);
     // Honeypot: accepted silently, nothing stored.
@@ -66,19 +72,36 @@ test('partner signup, approval, regional listing and referral discount',async()=
     // Regional search uses the first two postcode digits.
     const near=(await call('/api/partners?plz=33415')).data.partners;
     assert.deepEqual(near.map(p=>p.company),['Studio Müller']);
-    assert.equal(near[0].email,undefined);
+    assert.equal(near[0].email,undefined);assert.equal(near[0].publicEmail,'anfrage@studio-mueller.example');assert.equal(near[0].publicPhone,'0521 123456');assert.equal(near[0].instagram,'studio.mueller');
+    assert.equal((await call(`/api/partners/${near[0].id}/click`,{method:'POST',body:{kind:'email'}})).status,200);
+    assert.equal((await call(`/api/partners/${near[0].id}/click`,{method:'POST',body:{kind:'view'}})).status,400);
+    const counted=(await call('/api/admin/partners',{user:'admin'})).data.partners.find(p=>p.id===near[0].id).clicks30;
+    assert.equal(counted.email,1);assert.ok(counted.view>=1);
+    // Premium always has an end date and expires automatically.
+    assert.equal((await call(`/api/admin/partners/${mueller.id}`,{user:'admin',method:'PATCH',body:{premium:true,premiumUntil:'2001-01-01'}})).status,400);
+    assert.equal((await call(`/api/admin/partners/${mueller.id}`,{user:'admin',method:'PATCH',body:{premium:true}})).status,200);
+    const until=db.prepare('SELECT premium_until FROM partners WHERE id=?').get(mueller.id).premium_until;assert.ok(until>Date.now()+360*86400000);
+    assert.equal((await call('/api/partners?plz=33415')).data.partners[0].premium,true);
+    db.prepare('UPDATE partners SET premium_until=? WHERE id=?').run(Date.now()-1000,mueller.id);
+    assert.equal((await call('/api/partners?plz=33415')).data.partners[0].premium,false);
     assert.equal((await call('/api/partners?plz=59555')).data.partners.length,1);
     assert.equal((await call('/api/partners?plz=80331')).data.partners.length,0);
     assert.equal((await call('/api/partners?plz=33415&category=music')).data.partners.length,0);
     const logoRes=await call(near[0].logoUrl);assert.equal(logoRes.status,200);assert.match(logoRes.type,/webp/);
     const meta=await sharp(Buffer.from(logoRes.data)).metadata();assert.ok(meta.width<=480);
 
+    // A partner cannot redeem the own code.
+    db.prepare("UPDATE partners SET email='owner@example.test' WHERE id=?").run(mueller.id);
+    const own=await call('/api/events',{user:'owner',method:'POST',body:{eventId:'eigene-feier',title:'Eigene Feier',eventDate:new Date(Date.now()+60*86400000).toISOString().slice(0,10),referralCode:'MUELLER-10'}});
+    assert.equal(own.data.referralApplied,false);
+    assert.equal((await call('/api/event/eigene-feier/referral',{user:'owner',method:'POST',body:{code:'MUELLER-10'}})).status,409);
+    db.prepare("UPDATE partners SET email='anna@example.test' WHERE id=?").run(mueller.id);
     // Album with code and location postcode.
     const eventDate=new Date(Date.now()+60*86400000).toISOString().slice(0,10);
     const ev=await call('/api/events',{user:'owner',method:'POST',body:{eventId:'partner-hochzeit',title:'Hochzeit',eventDate,locationPostcode:'33378',referralCode:'mueller-10'}});
     assert.equal(ev.status,201);assert.equal(ev.data.referralApplied,true);
     const list=(await call('/api/events',{user:'owner'})).data.events;
-    assert.equal(list[0].priceCents,4490);
+    assert.equal(list.find(e=>e.id==='partner-hochzeit').priceCents,4490);
     const nearby=(await call('/api/event/partner-hochzeit/partners',{user:'owner'})).data;
     assert.equal(nearby.postcode,'33378');assert.equal(nearby.partners.length,1);assert.equal(nearby.referral.code,'MUELLER-10');
     assert.equal((await call('/api/event/partner-hochzeit/location',{user:'owner',method:'PATCH',body:{postcode:'12'}})).status,400);

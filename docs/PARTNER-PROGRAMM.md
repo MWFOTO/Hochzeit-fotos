@@ -23,6 +23,21 @@
 - Checkout nimmt den Preis aus `eventPriceCents(event)`; offene Stripe-Sitzungen mit altem Preis werden ersetzt.
 - Test: `test/partners.test.js`.
 
+## Onboarding (Stufe 1b)
+- Öffentliche Kontaktdaten (Anfrage-E-Mail, Telefon, Instagram) getrennt von internen Kontaktdaten; mindestens ein Kontaktweg Pflicht.
+- Kontakt-Knöpfe auf der Karte, Zähler je Tag (Anzeigen, Klicks) ohne Besucherbezug; Verwaltung zeigt die letzten 30 Tage.
+- Premium immer mit Enddatum (Standard 12 Monate), danach automatisch kostenlos.
+- Eigener Code für eigene Feiern gesperrt (gleiche E-Mail).
+- Öffentliche Formulare funktionieren auch, wenn man bei FinalSnap angemeldet ist.
+- Offene Geschäftsfragen: `App Entwickeln/Partner-Programm-Klaerung.md`.
+
+## Provisionsabrechnung
+- Entscheidung 26.11.2026: 5 € Rabatt, 10 € Provision netto; monatliche Gutschrift.
+- Fällig 14 Tage nach Zahlung; erstattete oder widerrufene Buchungen zählen nicht; Auszahlung ab 25 €.
+- `/ops/partners` → „Abrechnung“: Rechnungsdaten (Name, Anschrift, Steuernummer, Kleinunternehmer) eintragen → „Gutschrift erstellen“ → PDF senden → überweisen → „Als überwiesen markieren“.
+- Nummern `GS-JJJJ-NNNN`, jede Buchung nur einmal abgerechnet. Keine Bankdaten in FinalSnap. Code: `partner-payouts.js`, Test `test/partner-payouts.test.js`.
+- Gutschrift-Text von Steuerberatung prüfen lassen.
+
 ## Noch offen
 - Rechtlich prüfen lassen: Partner-Bedingungen (Provision, Auszahlung, Kündigung), Hinweis zum Rabatt in den Leistungsbedingungen,
   Kennzeichnung „Premium“.
