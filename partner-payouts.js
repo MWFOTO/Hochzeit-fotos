@@ -13,6 +13,8 @@ const ISSUER = {
   vatId: 'DE350648288',
   email: 'info@finalsnap.de'
 };
+// Anonyme Buchungsnummer: Partner erhalten keine Album-Namen oder Daten der Paare.
+const bookingRef = paymentId => `FS-${crypto.createHash('sha256').update(String(paymentId)).digest('hex').slice(0, 8).toUpperCase()}`;
 const euro = cents => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(cents / 100);
 const berlinDate = ms => new Intl.DateTimeFormat('de-DE', { timeZone: 'Europe/Berlin', dateStyle: 'medium' }).format(new Date(ms));
 const clean = (value, max) => String(value ?? '').replace(/[\u0000-\u0009\u000b-\u001f\u007f]/g, ' ').replace(/[ \t]+/g, ' ').trim().slice(0, max);
@@ -134,13 +136,13 @@ function creditNotePdf(payout, billing, items) {
   pdf.fillColor(muted).fontSize(9).text(`Steuernummer / USt-IdNr. des Leistenden: ${billing.taxId}`, left, 290, { width });
   let y = 320;
   pdf.font('Helvetica-Bold').fontSize(9).fillColor(muted);
-  pdf.text('Pos.', left, y, { width: 30 }); pdf.text('Album', left + 34, y, { width: 260 }); pdf.text('Bezahlt am', left + 300, y, { width: 90 }); pdf.text('Provision (netto)', left + 390, y, { width: 93, align: 'right' });
+  pdf.text('Pos.', left, y, { width: 30 }); pdf.text('Buchung', left + 34, y, { width: 260 }); pdf.text('Bezahlt am', left + 300, y, { width: 90 }); pdf.text('Provision (netto)', left + 390, y, { width: 93, align: 'right' });
   y += 16; pdf.moveTo(left, y).lineTo(left + width, y).strokeColor('#d6dde8').stroke(); y += 6;
   pdf.font('Helvetica').fontSize(9.5).fillColor(dark);
   items.forEach((item, index) => {
     if (y > 700) { pdf.addPage(); y = 60; }
     pdf.text(String(index + 1), left, y, { width: 30 });
-    pdf.text(item.event_id, left + 34, y, { width: 260, ellipsis: true, height: 12 });
+    pdf.text(bookingRef(item.payment_id), left + 34, y, { width: 260 });
     pdf.text(berlinDate(item.paid_at), left + 300, y, { width: 90 });
     pdf.text(euro(item.commission_cents), left + 390, y, { width: 93, align: 'right' });
     y += 18;
