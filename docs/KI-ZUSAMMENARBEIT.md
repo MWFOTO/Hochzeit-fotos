@@ -85,3 +85,8 @@ Braucht eine neue Funktion eine Oberfläche, baut ChatGPT die Technik und hinter
   Verwaltung `/ops/partners` (Freigabe, Premium, Code, Löschen, Provisionsübersicht).
 - Empfehlungs-Codes: 5 € Rabatt im Checkout, 10 € Provision je bezahlter Buchung; Code per `?ref=` oder im Dashboard.
 - Dashboard: optionale PLZ der Location, „Dienstleister in eurer Nähe“. Datenschutz ergänzt. Doku: `docs/PARTNER-PROGRAMM.md`.
+
+### 26.11.2026 · ChatGPT · Branch `codex/lasttest` · Commit `fbb2731`
+- Neues lokales Lasttest-Skript `scripts/load-test.js` und Bericht `docs/LASTTEST-2026-11.md` erstellt. Der Test startet eine eigene App mit SQLite-Testdatenbank und lokalem Fotospeicher; keine Render- oder finalsnap.de-Anfragen.
+- Klein (20/200), mittel (80/800) und groß (150/2.000) durchlaufen. Alle 3.000 Fotos und drei vollständigen ZIP-Downloads erfolgreich; keine HTTP-429/503-Fehler. Der größte ZIP-Download betrug rund 11,1 GB.
+- `npm test`: 55/55 bestanden. Kein Server-, Design- oder Public-Code geändert. Noch offen: Pull Request zur Prüfung; kein Merge und kein Deploy. Live-Render-/Hetzner-Leistung ist durch lokale Tests nicht nachgewiesen.
