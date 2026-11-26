@@ -15,15 +15,20 @@
     const body = el('div');
     const meta = el('div', undefined, 'partner-meta');
     meta.append(el('span', statusLabel[p.status] || p.status, 'partner-chip' + (p.status === 'approved' ? '' : ` is-${p.status}`)), el('span', p.categoryLabel, 'partner-chip'));
-    if (p.premium) meta.append(el('span', 'Premium', 'partner-chip is-premium'));
+    const dateLabel = ms => new Date(ms).toLocaleDateString('de-DE', { dateStyle: 'medium' });
+    if (p.premium) meta.append(el('span', p.premiumUntil ? `Premium bis ${dateLabel(p.premiumUntil)}` : 'Premium', 'partner-chip is-premium'));
+    else if (p.premiumFlag && p.premiumUntil) meta.append(el('span', `Premium abgelaufen am ${dateLabel(p.premiumUntil)}`, 'partner-chip is-rejected'));
     body.append(meta, el('h2', p.company));
     const dl = el('dl');
     const row = (k, v) => { if (!v && v !== 0) return; dl.append(el('dt', k)); const dd = el('dd'); if (v instanceof Node) dd.append(v); else dd.textContent = v; dl.append(dd); };
     row('Ort', `${p.postcode} ${p.city}`.trim()); row('Einsatzgebiete', p.regions.map(r => r + 'xxx').join(', '));
-    row('Kontakt', `${p.contactName} · ${p.email}${p.phone ? ' · ' + p.phone : ''}`);
+    row('Intern', `${p.contactName} · ${p.email}${p.phone ? ' · ' + p.phone : ''}`);
+    row('Öffentlich', [p.publicEmail, p.publicPhone, p.instagram ? '@' + p.instagram : ''].filter(Boolean).join(' · ') || '–');
     if (p.website) { const a = el('a', p.website); a.href = p.website; a.target = '_blank'; a.rel = 'noopener nofollow'; row('Webseite', a); }
     row('Angemeldet', new Date(p.createdAt).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' }));
     if (p.referralCode) row('Empfehlungs-Code', p.referralCode);
+    const c = p.clicks30 || {};
+    row('Letzte 30 Tage', `${c.view || 0}× angezeigt · ${(c.email || 0) + (c.phone || 0)} Anfragen (Mail/Anruf) · ${c.website || 0}× Webseite · ${c.instagram || 0}× Instagram`);
     row('Vermittelt', `${p.referred} Alben angelegt · ${p.paid} bezahlt · Provision ${euro(p.commissionCents)}`);
     body.append(dl);
     if (p.description) body.append(el('p', p.description));
@@ -31,15 +36,21 @@
     const form = el('form', undefined, 'partner-admin-edit');
     const field = (label, value, name) => { const l = el('label', label); const i = el('input'); i.name = name; i.value = value || ''; l.append(i); form.append(l); return i; };
     const code = field('Empfehlungs-Code', p.referralCode, 'code'); const regions = field('Einsatzgebiete (PLZ-Bereiche)', p.regions.join(', '), 'regions');
+    const website = field('Webseite', p.website, 'website'); const publicEmail = field('E-Mail für Anfragen', p.publicEmail, 'publicEmail');
+    const publicPhone = field('Telefon für Anfragen', p.publicPhone, 'publicPhone'); const instagram = field('Instagram', p.instagram, 'instagram');
     const desc = el('textarea'); desc.value = p.description || ''; desc.maxLength = 600; form.append(desc);
     const save = el('button', 'Speichern', 'primary'); save.type = 'submit'; form.append(save);
-    form.addEventListener('submit', e => { e.preventDefault(); change(p.id, { ...(code.value.trim() ? { referralCode: code.value } : {}), regions: regions.value, description: desc.value }); });
+    form.addEventListener('submit', e => { e.preventDefault(); change(p.id, { ...(code.value.trim() ? { referralCode: code.value } : {}), regions: regions.value, description: desc.value, website: website.value, publicEmail: publicEmail.value, publicPhone: publicPhone.value, instagram: instagram.value }); });
     edit.append(form); body.append(edit);
     const actions = el('div', undefined, 'actions');
     const button = (text, cls, fn) => { const b = el('button', text, cls); b.type = 'button'; b.addEventListener('click', fn); actions.append(b); };
     if (p.status !== 'approved') button('Freigeben', 'primary', () => change(p.id, { status: 'approved' }));
     if (p.status !== 'rejected') button(p.status === 'approved' ? 'Aus Verzeichnis nehmen' : 'Ablehnen', 'secondary', () => change(p.id, { status: 'rejected' }));
-    button(p.premium ? 'Premium entfernen' : 'Als Premium markieren', 'secondary', () => change(p.id, { premium: !p.premium }));
+    if (p.premium) button('Premium beenden', 'secondary', () => change(p.id, { premium: false }));
+    const premiumBox = el('label', 'Premium bis', 'partner-premium-date'); const until = el('input'); until.type = 'date';
+    const nextYear = new Date(); nextYear.setFullYear(nextYear.getFullYear() + 1);
+    until.value = new Date(p.premium && p.premiumUntil ? p.premiumUntil : nextYear.getTime()).toISOString().slice(0, 10); premiumBox.append(until); actions.append(premiumBox);
+    button(p.premium ? 'Premium verlängern' : 'Premium aktivieren', 'secondary', () => change(p.id, { premium: true, premiumUntil: until.value }));
     button('Löschen', 'danger', () => erase(p));
     body.append(actions); card.append(body); return card;
   }

@@ -358,7 +358,9 @@ function createApp(options = {}) {
   app.use((req,res,next)=>{
     if (!['POST','PATCH','DELETE','PUT'].includes(req.method)) return next();
     if(req.headers.origin !== baseUrl.origin) return fail(res,403,'Ungültige Herkunft der Anfrage.');
-    if(req.user && req.headers['x-csrf-token'] !== req.session.csrf) return fail(res,403,'Sicherheits-Token fehlt.');
+    // Öffentliche Partner-Formulare brauchen kein Konto; die Herkunftsprüfung oben genügt auch für angemeldete Besucher.
+    const publicForm=req.method==='POST'&&/^\/api\/partners\/(?:signup|[0-9a-f-]{36}\/click)$/.test(req.path);
+    if(req.user && !publicForm && req.headers['x-csrf-token'] !== req.session.csrf) return fail(res,403,'Sicherheits-Token fehlt.');
     next();
   });
   const authLimit=rateLimit({windowMs:15*60*1000,limit:20,standardHeaders:'draft-8',legacyHeaders:false});

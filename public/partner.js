@@ -10,7 +10,17 @@
     meta.append(el('span', [p.postcode, p.city].filter(Boolean).join(' ')));
     card.append(meta, el(headingTag || 'h2', p.company));
     if (p.description) card.append(el('p', p.description));
-    if (p.website) { const actions = el('div', undefined, 'actions'); const a = el('a', 'Webseite besuchen ↗', 'button secondary'); a.href = p.website; a.target = '_blank'; a.rel = 'noopener nofollow'; actions.append(a); card.append(actions); }
+    const actions = el('div', undefined, 'actions partner-contact');
+    const contact = (text, href, kind, cls, external) => {
+      const a = el('a', text, 'button ' + cls); a.href = href; if (external) { a.target = '_blank'; a.rel = 'noopener nofollow'; }
+      a.addEventListener('click', () => { try { fetch(`/api/partners/${encodeURIComponent(p.id)}/click`, { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind }) }); } catch {} });
+      actions.append(a);
+    };
+    if (p.publicEmail) contact('Anfrage senden', `mailto:${p.publicEmail}?subject=${encodeURIComponent('Anfrage über FinalSnap')}`, 'email', 'primary');
+    if (p.publicPhone) contact('Anrufen', `tel:${p.publicPhone.replace(/[^0-9+]/g, '')}`, 'phone', 'secondary');
+    if (p.website) contact('Webseite ↗', p.website, 'website', 'secondary', true);
+    if (p.instagram) contact('Instagram ↗', `https://www.instagram.com/${encodeURIComponent(p.instagram)}/`, 'instagram', 'secondary', true);
+    if (actions.childElementCount) card.append(actions);
     return card;
   };
   if (!form) return;

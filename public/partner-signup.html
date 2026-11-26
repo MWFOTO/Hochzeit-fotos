@@ -33,18 +33,33 @@
         <option value="planner">Hochzeits- &amp; Eventplanung</option><option value="officiant">Freie Trauung &amp; Redner:in</option>
         <option value="styling">Styling, Haare &amp; Make-up</option><option value="other">Weitere Dienstleister</option>
       </select></label>
-      <label for="website">Webseite<input id="website" name="website" maxlength="200" placeholder="www.euer-studio.de" autocomplete="url"></label>
       <label for="postcode">Postleitzahl *<input id="postcode" name="postcode" inputmode="numeric" pattern="\d{5}" maxlength="5" required autocomplete="postal-code"></label>
       <label for="city">Ort<input id="city" name="city" maxlength="60" autocomplete="address-level2"></label>
-      <label class="full" for="regions">Weitere Einsatzgebiete (PLZ-Bereiche)<input id="regions" name="regions" maxlength="80" placeholder="z. B. 32, 48, 59">
+      <label for="regions">Weitere Einsatzgebiete (PLZ-Bereiche)<input id="regions" name="regions" maxlength="80" placeholder="z. B. 32, 48, 59">
         <small>Die ersten zwei Ziffern der Postleitzahlen, in denen ihr auch arbeitet. Euer eigener Bereich ist automatisch dabei.</small></label>
       <label class="full" for="description">Kurzbeschreibung<textarea id="description" name="description" maxlength="600" placeholder="Was macht euch aus? Für welche Feiern seid ihr da?"></textarea><small><span id="description-count">0</span> / 600 Zeichen</small></label>
       <label class="full" for="logo">Logo (JPG, PNG oder WebP, max. 4 MB)<input id="logo" name="logo" type="file" accept="image/jpeg,image/png,image/webp"></label>
+      <fieldset class="full partner-fieldset">
+        <legend>So erreichen euch Paare <span class="partner-chip">öffentlich sichtbar</span></legend>
+        <p class="small">Mindestens eine Angabe. Daraus werden die Knöpfe auf eurer Karte: „Webseite“, „Anfrage senden“, „Anrufen“ und „Instagram“.</p>
+        <div class="partner-fieldset__grid">
+          <label for="website">Webseite<input id="website" name="website" maxlength="200" placeholder="www.euer-studio.de" autocomplete="url"></label>
+          <label for="publicEmail">E-Mail für Anfragen<input id="publicEmail" name="publicEmail" type="email" maxlength="120" placeholder="anfrage@euer-studio.de"></label>
+          <label for="publicPhone">Telefon für Anfragen<input id="publicPhone" name="publicPhone" type="tel" maxlength="40" placeholder="0521 123456"></label>
+          <label for="instagram">Instagram<input id="instagram" name="instagram" maxlength="60" placeholder="@euer.studio"></label>
+        </div>
+      </fieldset>
+      <fieldset class="full partner-fieldset">
+        <legend>Nur für FinalSnap <span class="partner-chip is-private">nicht öffentlich</span></legend>
+        <p class="small">Hierhin schicken wir die Freischaltung, euren Empfehlungs-Code und später die Provisionsabrechnung.</p>
+        <div class="partner-fieldset__grid">
       <label for="contactName">Ansprechperson *<input id="contactName" name="contactName" maxlength="80" required autocomplete="name"></label>
-      <label for="email">E-Mail *<input id="email" name="email" type="email" maxlength="120" required autocomplete="email"><small>Nicht öffentlich. Hierhin schicken wir die Freischaltung und euren Code.</small></label>
-      <label for="phone">Telefon (optional, nicht öffentlich)<input id="phone" name="phone" maxlength="40" autocomplete="tel"></label>
+      <label for="email">E-Mail *<input id="email" name="email" type="email" maxlength="120" required autocomplete="email"></label>
+      <label for="phone">Telefon für Rückfragen (optional)<input id="phone" name="phone" maxlength="40" autocomplete="tel"></label>
+        </div>
+      </fieldset>
       <label class="trap" aria-hidden="true">Bitte leer lassen<input name="website_confirm" tabindex="-1" autocomplete="off"></label>
-      <label class="check-label full"><input type="checkbox" id="consent" required><span>Ich bin berechtigt, dieses Unternehmen anzumelden. Name, Kategorie, Ort, Webseite, Beschreibung und Logo dürfen nach Prüfung im FinalSnap-Partnerverzeichnis veröffentlicht werden. Ich kann den Eintrag jederzeit per E-Mail an info@finalsnap.de löschen lassen. Hinweise in der <a href="/datenschutz" target="_blank" rel="noopener">Datenschutzerklärung</a>.</span></label>
+      <label class="check-label full"><input type="checkbox" id="consent" required><span>Ich bin berechtigt, dieses Unternehmen anzumelden. Name, Kategorie, Ort, Beschreibung, Logo und die oben als öffentlich markierten Kontaktdaten dürfen nach Prüfung im FinalSnap-Partnerverzeichnis veröffentlicht werden. Ich kann den Eintrag jederzeit per E-Mail an info@finalsnap.de löschen lassen. Hinweise in der <a href="/datenschutz" target="_blank" rel="noopener">Datenschutzerklärung</a>.</span></label>
       <div class="full actions"><button class="primary" type="submit" id="submit">Anmeldung absenden</button></div>
       <p class="full" id="status" role="status" aria-live="polite"></p>
     </form>
