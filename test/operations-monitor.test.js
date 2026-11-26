@@ -56,3 +56,27 @@ test('upload failure monitor warns on event-specific failures without guest or p
   assert.match(sent[1].text,/Warteschlange: 1/);
   db.close();
 });
+
+test('upload failure monitor alerts at five failures and sends only one mail per event per hour',async()=>{
+  const db=new Database(':memory:');db.exec('CREATE TABLE photos (bytes INTEGER NOT NULL);');
+  let time=5000;const sent=[];
+  const monitor=createOperationsMonitor({config:{UPLOAD_DIR:'/tmp',S3_MAX_STORAGE_BYTES:String(10*GiB),PAYMENT_ALERT_EMAIL:'owner@example.test'},db,mailer:async mail=>sent.push(mail),dependencies:{statfs:()=>({bavail:5*GiB,bsize:1,blocks:10*GiB}),now:()=>time}});
+  for(let index=0;index<5;index++)monitor.recordUploadAttempt('event-threshold','failure','timeout');
+
+  await monitor.check();
+  assert.equal(sent.length,1);
+  assert.match(sent[0].text,/5 fehlgeschlagene/);
+  assert.match(sent[0].text,/Zeitüberschreitung: 5/);
+  assert.doesNotMatch(sent[0].text,/guest@example|IMG_123|photo\.jpg|Lisa/);
+
+  monitor.recordUploadAttempt('event-threshold','failure','storage');
+  await monitor.check();
+  assert.equal(sent.length,1);
+
+  time+=60*60*1000+1;
+  for(let index=0;index<5;index++)monitor.recordUploadAttempt('event-threshold','failure','storage');
+  await monitor.check();
+  assert.equal(sent.length,2);
+  assert.match(sent[1].text,/Speicher: 5/);
+  db.close();
+});
