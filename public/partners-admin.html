@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Partner verwalten · FinalSnap</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/partner.css">
+</head>
+<body>
+  <header class="site-header"><a class="brand" href="/" aria-label="FinalSnap Startseite"><img src="/finalsnap-logo.webp" alt="FinalSnap" width="150" height="89"></a><nav class="actions"><a class="button secondary" href="/ops/reviews">Erfahrungen</a><a class="button secondary" href="/ops/payments">Zahlungen</a><a class="button secondary" href="/dashboard">Zum Konto</a></nav></header>
+  <main class="account-page">
+    <div class="page-heading"><div><span class="eyebrow">INTERNER BEREICH</span><h1>Partner verwalten</h1><p>Neue Anmeldungen prüfen und freigeben. Beim Freigeben bekommt der Partner automatisch einen Empfehlungs-Code per E-Mail.</p></div><div class="actions"><a class="button secondary" href="/partner/anmelden" target="_blank" rel="noopener">Partner anlegen ↗</a><button class="secondary" id="refresh">Aktualisieren</button></div></div>
+    <p class="small" id="summary"></p>
+    <nav class="partner-filter" aria-label="Filter">
+      <button class="secondary" type="button" data-filter="pending" aria-pressed="true">Warten auf Prüfung</button>
+      <button class="secondary" type="button" data-filter="approved" aria-pressed="false">Freigeschaltet</button>
+      <button class="secondary" type="button" data-filter="rejected" aria-pressed="false">Abgelehnt</button>
+      <button class="secondary" type="button" data-filter="all" aria-pressed="false">Alle</button>
+    </nav>
+    <p id="status" role="status" aria-live="polite"></p>
+    <section id="partners" aria-label="Partner"></section>
+  </main>
+  <footer class="legal-footer"><a href="/impressum">Impressum</a> · <a href="/datenschutz">Datenschutz</a></footer>
+  <script src="/partners-admin.js"></script>
+</body>
+</html>
