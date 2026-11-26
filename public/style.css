@@ -1862,3 +1862,34 @@ body:not(.landing-body):not(.fs-page) .site-header .brand img { width: auto !imp
   .landing-body .hero-demo-next { margin-top:30px; font-size:.88rem; }
 }
 @media (prefers-reduced-motion:reduce) { .landing-body .phone-photo-grid,.landing-body .phone-photo,.landing-body .phone-photo.demo-photo-added { animation:none; transition:none; } }
+
+/* === Claude 26.11.2026: Startseite am Handy – kompakter Kopf und lesbares Menü ===
+   Ältere Regeln machen .landing-body .site-header auf dem Handy zu einem einspaltigen
+   Raster; dadurch standen Logo, Button und Menü untereinander (ca. 190 px hoch). */
+@media (max-width: 760px) {
+  .landing-body .site-header {
+    display: flex !important; flex-direction: row !important; flex-wrap: nowrap !important;
+    justify-content: flex-start !important; justify-items: initial !important; align-items: center !important;
+    gap: 8px !important; padding: 8px 14px !important; min-height: 60px;
+  }
+  .landing-body .site-header .brand { justify-self: auto !important; margin-right: auto; }
+  .landing-body .site-header .brand img { width: auto !important; height: 40px !important; }
+  .landing-body .site-header .landing-nav:not([hidden]) {
+    position: absolute !important; top: calc(100% + 6px) !important; left: 12px !important; right: 12px !important;
+    width: auto !important; box-sizing: border-box !important; display: flex !important; flex-direction: column !important;
+    gap: 2px !important; padding: 6px !important; margin: 0 !important;
+    background: #1c1e23 !important; border: 1px solid #ffffff24 !important; border-radius: 16px !important;
+    box-shadow: 0 18px 40px #000a !important; backdrop-filter: none !important;
+  }
+  .landing-body .site-header .landing-nav:not([hidden]) > a {
+    display: flex !important; align-items: center !important; justify-content: flex-start !important;
+    width: auto !important; min-height: 48px !important; margin: 0 !important; padding: 0 14px !important;
+    border: 0 !important; border-radius: 10px !important; background: transparent !important; box-shadow: none !important;
+    color: #f4f5f7 !important; font-size: 16px !important; font-weight: 650 !important;
+  }
+  .landing-body .site-header .landing-nav:not([hidden]) > a:hover { background: #ffffff0f !important; }
+  .landing-body .site-header .landing-nav:not([hidden]) > a.button {
+    justify-content: center !important; margin-top: 6px !important;
+    background: #49d5e8 !important; color: #101a1d !important; font-weight: 800 !important;
+  }
+}
